@@ -7,3 +7,4 @@ Tools
    tools/command_line_tools
    tools/sound_server_modules
    tools/applications
+   tools/prometheus_metrics

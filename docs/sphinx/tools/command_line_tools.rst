@@ -14,6 +14,8 @@ The roc-send tool allows to grab an audio stream from a file or an audio device 
 
 The roc-recv tool allows to receive audio streams from a single or multiple senders, mix all streams into one, and play on an audio device or write to an audio file.
 
+Both tools can optionally expose internal metrics via a Prometheus HTTP endpoint for real-time monitoring. See :doc:`prometheus_metrics` for details.
+
 Building and installing
 =======================
 
