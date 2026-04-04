@@ -198,6 +198,55 @@ bool build_sender_config(const gengetopt_args_info& args,
         sender_config.fec_writer.n_repair_packets = (size_t)args.fec_block_rpr_arg;
     }
 
+    if (args.target_latency_given) {
+        if (!core::parse_duration(args.target_latency_arg,
+                                  sender_config.latency.target_latency)) {
+            roc_log(LogError, "invalid --target-latency: bad format");
+            return false;
+        }
+        if (sender_config.latency.target_latency <= 0) {
+            roc_log(LogError, "invalid --target-latency: should be > 0");
+            return false;
+        }
+    }
+
+    if (args.latency_tolerance_given) {
+        if (!core::parse_duration(args.latency_tolerance_arg,
+                                  sender_config.latency.latency_tolerance)) {
+            roc_log(LogError, "invalid --latency-tolerance: bad format");
+            return false;
+        }
+        if (sender_config.latency.latency_tolerance <= 0) {
+            roc_log(LogError, "invalid --latency-tolerance: should be > 0");
+            return false;
+        }
+    }
+
+    switch (args.latency_backend_arg) {
+    case latency_backend_arg_niq:
+        sender_config.latency.tuner_backend = audio::LatencyTunerBackend_Niq;
+        break;
+    case latency_backend_arg_e2e:
+        sender_config.latency.tuner_backend = audio::LatencyTunerBackend_E2e;
+        break;
+    default:
+        break;
+    }
+
+    switch (args.latency_profile_arg) {
+    case latency_profile_arg_responsive:
+        sender_config.latency.tuner_profile = audio::LatencyTunerProfile_Responsive;
+        break;
+    case latency_profile_arg_gradual:
+        sender_config.latency.tuner_profile = audio::LatencyTunerProfile_Gradual;
+        break;
+    case latency_profile_arg_intact:
+        sender_config.latency.tuner_profile = audio::LatencyTunerProfile_Intact;
+        break;
+    default:
+        break;
+    }
+
     switch (args.resampler_backend_arg) {
     case resampler_backend_arg_auto:
         sender_config.resampler.backend = audio::ResamplerBackend_Auto;
@@ -362,6 +411,7 @@ bool build_sender_config(const gengetopt_args_info& args,
     }
 
     sender_config.enable_cpu_clock = !input_source.has_clock();
+    sender_config.enable_auto_cts = args.auto_cts_flag;
     sender_config.input_sample_spec = input_source.sample_spec();
 
     if (!sender_config.input_sample_spec.is_complete()) {
