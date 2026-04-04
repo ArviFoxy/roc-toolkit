@@ -27,30 +27,38 @@ class Registry;
 namespace roc {
 namespace metrics {
 
+//! Configuration for a single Prometheus histogram.
+struct HistogramConfig {
+    //! Number of logarithmically spaced buckets.
+    int buckets;
+    //! Minimum bucket boundary, in nanoseconds.
+    core::nanoseconds_t min;
+    //! Maximum bucket boundary, in nanoseconds.
+    core::nanoseconds_t max;
+
+    HistogramConfig(int n_buckets,
+                    core::nanoseconds_t min_val,
+                    core::nanoseconds_t max_val)
+        : buckets(n_buckets)
+        , min(min_val)
+        , max(max_val) {
+    }
+};
+
 //! Prometheus metrics configuration.
 struct PrometheusConfig {
     int port;
-    int latency_buckets;
-    core::nanoseconds_t latency_min;
-    core::nanoseconds_t latency_max;
-    int jitter_buckets;
-    core::nanoseconds_t jitter_min;
-    core::nanoseconds_t jitter_max;
-    int rtt_buckets;
-    core::nanoseconds_t rtt_min;
-    core::nanoseconds_t rtt_max;
+    HistogramConfig niq_latency;
+    HistogramConfig e2e_latency;
+    HistogramConfig jitter;
+    HistogramConfig rtt;
 
     PrometheusConfig()
         : port(0)
-        , latency_buckets(32)
-        , latency_min(1 * core::Millisecond)
-        , latency_max(1000 * core::Millisecond)
-        , jitter_buckets(32)
-        , jitter_min(100 * core::Microsecond)
-        , jitter_max(200 * core::Millisecond)
-        , rtt_buckets(32)
-        , rtt_min(100 * core::Microsecond)
-        , rtt_max(200 * core::Millisecond) {
+        , niq_latency(100, 5 * core::Millisecond, 50 * core::Millisecond)
+        , e2e_latency(100, 20 * core::Millisecond, 200 * core::Millisecond)
+        , jitter(100, 100 * core::Microsecond, 200 * core::Millisecond)
+        , rtt(100, 1 * core::Millisecond, 100 * core::Millisecond) {
     }
 };
 
@@ -58,9 +66,9 @@ struct PrometheusConfig {
 //! Global registry for internal components to register their metrics.
 std::shared_ptr<prometheus::Registry> prometheus_registry();
 
-//! Generate logarithmically spaced histogram bucket boundaries.
-std::vector<double>
-generate_logspace_buckets(double min_val, double max_val, int num_buckets);
+//! Generate logarithmically spaced histogram bucket boundaries (in seconds)
+//! from a HistogramConfig whose min/max are in nanoseconds.
+std::vector<double> generate_logspace_buckets(const HistogramConfig& config);
 #endif // ROC_TARGET_PROMETHEUS
 
 //! Exposes native Prometheus metrics on an HTTP endpoint.

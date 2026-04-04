@@ -45,11 +45,8 @@ JitterMeter::JitterMeter(const JitterMeterConfig& config, core::IArena& arena)
                           .Name("roc_recv_jitter_seconds")
                           .Help("Current instantaneous jitter distribution in seconds")
                           .Register(*registry);
-    curr_jitter_histogram_ = &jh_family.Add(
-        { },
-        metrics::generate_logspace_buckets((double)config.prometheus.jitter_min / 1e9,
-                                           (double)config.prometheus.jitter_max / 1e9,
-                                           config.prometheus.jitter_buckets));
+    curr_jitter_histogram_ =
+        &jh_family.Add({ }, metrics::generate_logspace_buckets(config.prometheus.jitter));
 
     auto& env_family =
         prometheus::BuildGauge()

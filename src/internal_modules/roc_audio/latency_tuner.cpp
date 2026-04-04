@@ -180,12 +180,8 @@ LatencyTuner::LatencyTuner(const LatencyConfig& latency_config,
                            .Name("roc_recv_latency_seconds")
                            .Help("Current network input queue (NIQ) latency in seconds")
                            .Register(*registry);
-    niq_latency_histogram_ =
-        &niq_family.Add({ },
-                        metrics::generate_logspace_buckets(
-                            (double)latency_config.prometheus.latency_min / 1e9,
-                            (double)latency_config.prometheus.latency_max / 1e9,
-                            latency_config.prometheus.latency_buckets));
+    niq_latency_histogram_ = &niq_family.Add(
+        { }, metrics::generate_logspace_buckets(latency_config.prometheus.niq_latency));
 #endif
 
     init_status_ = status::StatusOK;

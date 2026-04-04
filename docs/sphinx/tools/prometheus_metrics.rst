@@ -32,17 +32,26 @@ The bucket boundaries can be tuned via CLI flags:
    * - Flag
      - Default
      - Description
-   * - ``--prometheus-latency-buckets``
-     - 32
-     - Number of histogram buckets for latency
-   * - ``--prometheus-latency-min``
-     - 1ms
-     - Minimum latency bucket boundary
-   * - ``--prometheus-latency-max``
-     - 1s
-     - Maximum latency bucket boundary
+   * - ``--prometheus-niq-latency-buckets``
+     - 100
+     - Number of histogram buckets for NIQ latency
+   * - ``--prometheus-niq-latency-min``
+     - 5ms
+     - Minimum NIQ latency bucket boundary
+   * - ``--prometheus-niq-latency-max``
+     - 50ms
+     - Maximum NIQ latency bucket boundary
+   * - ``--prometheus-e2e-latency-buckets``
+     - 100
+     - Number of histogram buckets for E2E latency
+   * - ``--prometheus-e2e-latency-min``
+     - 20ms
+     - Minimum E2E latency bucket boundary
+   * - ``--prometheus-e2e-latency-max``
+     - 200ms
+     - Maximum E2E latency bucket boundary
    * - ``--prometheus-jitter-buckets``
-     - 32
+     - 100
      - Number of histogram buckets for jitter
    * - ``--prometheus-jitter-min``
      - 100us
@@ -51,13 +60,13 @@ The bucket boundaries can be tuned via CLI flags:
      - 200ms
      - Maximum jitter bucket boundary
    * - ``--prometheus-rtt-buckets``
-     - 32
+     - 100
      - Number of histogram buckets for RTT
    * - ``--prometheus-rtt-min``
-     - 100us
+     - 1ms
      - Minimum RTT bucket boundary
    * - ``--prometheus-rtt-max``
-     - 200ms
+     - 100ms
      - Maximum RTT bucket boundary
 
 Receiver metrics

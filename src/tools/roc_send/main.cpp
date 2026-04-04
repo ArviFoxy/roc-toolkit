@@ -594,53 +594,70 @@ int main(int argc, char** argv) {
     if (args.prometheus_metrics_port_given) {
         prometheus_config.port = args.prometheus_metrics_port_arg;
     }
-    if (args.prometheus_latency_buckets_given) {
-        prometheus_config.latency_buckets = args.prometheus_latency_buckets_arg;
+    if (args.prometheus_niq_latency_buckets_given) {
+        prometheus_config.niq_latency.buckets = args.prometheus_niq_latency_buckets_arg;
     }
-    if (args.prometheus_latency_min_given) {
-        if (!core::parse_duration(args.prometheus_latency_min_arg,
-                                  prometheus_config.latency_min)) {
-            roc_log(LogError, "invalid --prometheus-latency-min: bad format");
+    if (args.prometheus_niq_latency_min_given) {
+        if (!core::parse_duration(args.prometheus_niq_latency_min_arg,
+                                  prometheus_config.niq_latency.min)) {
+            roc_log(LogError, "invalid --prometheus-niq-latency-min: bad format");
             return 1;
         }
     }
-    if (args.prometheus_latency_max_given) {
-        if (!core::parse_duration(args.prometheus_latency_max_arg,
-                                  prometheus_config.latency_max)) {
-            roc_log(LogError, "invalid --prometheus-latency-max: bad format");
+    if (args.prometheus_niq_latency_max_given) {
+        if (!core::parse_duration(args.prometheus_niq_latency_max_arg,
+                                  prometheus_config.niq_latency.max)) {
+            roc_log(LogError, "invalid --prometheus-niq-latency-max: bad format");
+            return 1;
+        }
+    }
+    if (args.prometheus_e2e_latency_buckets_given) {
+        prometheus_config.e2e_latency.buckets = args.prometheus_e2e_latency_buckets_arg;
+    }
+    if (args.prometheus_e2e_latency_min_given) {
+        if (!core::parse_duration(args.prometheus_e2e_latency_min_arg,
+                                  prometheus_config.e2e_latency.min)) {
+            roc_log(LogError, "invalid --prometheus-e2e-latency-min: bad format");
+            return 1;
+        }
+    }
+    if (args.prometheus_e2e_latency_max_given) {
+        if (!core::parse_duration(args.prometheus_e2e_latency_max_arg,
+                                  prometheus_config.e2e_latency.max)) {
+            roc_log(LogError, "invalid --prometheus-e2e-latency-max: bad format");
             return 1;
         }
     }
     if (args.prometheus_jitter_buckets_given) {
-        prometheus_config.jitter_buckets = args.prometheus_jitter_buckets_arg;
+        prometheus_config.jitter.buckets = args.prometheus_jitter_buckets_arg;
     }
     if (args.prometheus_jitter_min_given) {
         if (!core::parse_duration(args.prometheus_jitter_min_arg,
-                                  prometheus_config.jitter_min)) {
+                                  prometheus_config.jitter.min)) {
             roc_log(LogError, "invalid --prometheus-jitter-min: bad format");
             return 1;
         }
     }
     if (args.prometheus_jitter_max_given) {
         if (!core::parse_duration(args.prometheus_jitter_max_arg,
-                                  prometheus_config.jitter_max)) {
+                                  prometheus_config.jitter.max)) {
             roc_log(LogError, "invalid --prometheus-jitter-max: bad format");
             return 1;
         }
     }
     if (args.prometheus_rtt_buckets_given) {
-        prometheus_config.rtt_buckets = args.prometheus_rtt_buckets_arg;
+        prometheus_config.rtt.buckets = args.prometheus_rtt_buckets_arg;
     }
     if (args.prometheus_rtt_min_given) {
         if (!core::parse_duration(args.prometheus_rtt_min_arg,
-                                  prometheus_config.rtt_min)) {
+                                  prometheus_config.rtt.min)) {
             roc_log(LogError, "invalid --prometheus-rtt-min: bad format");
             return 1;
         }
     }
     if (args.prometheus_rtt_max_given) {
         if (!core::parse_duration(args.prometheus_rtt_max_arg,
-                                  prometheus_config.rtt_max)) {
+                                  prometheus_config.rtt.max)) {
             roc_log(LogError, "invalid --prometheus-rtt-max: bad format");
             return 1;
         }
@@ -666,8 +683,8 @@ int main(int argc, char** argv) {
 
     core::ScopedPtr<metrics::PrometheusExporter> exporter;
     if (prometheus_config.port > 0) {
-        exporter.reset(
-            new (context.arena()) metrics::PrometheusExporter(prometheus_config));
+        exporter.reset(new (context.arena())
+                           metrics::PrometheusExporter(prometheus_config));
     }
 
     sndio::IoPump pump(context.frame_pool(), context.frame_buffer_pool(), *input_source,

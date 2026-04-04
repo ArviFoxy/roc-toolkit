@@ -23,8 +23,11 @@ namespace metrics {
 
 #ifdef ROC_TARGET_PROMETHEUS
 
-std::vector<double>
-generate_logspace_buckets(double min_val, double max_val, int num_buckets) {
+std::vector<double> generate_logspace_buckets(const HistogramConfig& config) {
+    const double min_val = (double)config.min / 1e9;
+    const double max_val = (double)config.max / 1e9;
+    const int num_buckets = config.buckets;
+
     std::vector<double> buckets;
     if (num_buckets <= 0 || min_val <= 0 || max_val <= min_val) {
         return buckets;

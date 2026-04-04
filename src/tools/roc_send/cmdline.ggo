@@ -73,26 +73,33 @@ section "Metrics options"
     option "prometheus-metrics-port" - "Port for prometheus metrics HTTP exposer"
         int default="0" optional
 
-    option "prometheus-latency-buckets" - "Number of histogram buckets for latency metrics"
-        int default="32" optional
-    option "prometheus-latency-min" - "Minimum latency bucket boundary, TIME units"
-        typestr="TIME" string default="1ms" optional
-    option "prometheus-latency-max" - "Maximum latency bucket boundary, TIME units"
-        typestr="TIME" string default="1s" optional
+    option "prometheus-niq-latency-buckets" - "Number of histogram buckets for NIQ latency metrics"
+        int default="100" optional
+    option "prometheus-niq-latency-min" - "Minimum NIQ latency bucket boundary, TIME units"
+        typestr="TIME" string default="5ms" optional
+    option "prometheus-niq-latency-max" - "Maximum NIQ latency bucket boundary, TIME units"
+        typestr="TIME" string default="50ms" optional
+
+    option "prometheus-e2e-latency-buckets" - "Number of histogram buckets for E2E latency metrics"
+        int default="100" optional
+    option "prometheus-e2e-latency-min" - "Minimum E2E latency bucket boundary, TIME units"
+        typestr="TIME" string default="20ms" optional
+    option "prometheus-e2e-latency-max" - "Maximum E2E latency bucket boundary, TIME units"
+        typestr="TIME" string default="200ms" optional
 
     option "prometheus-jitter-buckets" - "Number of histogram buckets for jitter metrics"
-        int default="32" optional
+        int default="100" optional
     option "prometheus-jitter-min" - "Minimum jitter bucket boundary, TIME units"
         typestr="TIME" string default="100us" optional
     option "prometheus-jitter-max" - "Maximum jitter bucket boundary, TIME units"
         typestr="TIME" string default="200ms" optional
 
     option "prometheus-rtt-buckets" - "Number of histogram buckets for RTT metrics"
-        int default="32" optional
+        int default="100" optional
     option "prometheus-rtt-min" - "Minimum RTT bucket boundary, TIME units"
-        typestr="TIME" string default="100us" optional
+        typestr="TIME" string default="1ms" optional
     option "prometheus-rtt-max" - "Maximum RTT bucket boundary, TIME units"
-        typestr="TIME" string default="200ms" optional
+        typestr="TIME" string default="100ms" optional
 
 section "Memory options"
 
