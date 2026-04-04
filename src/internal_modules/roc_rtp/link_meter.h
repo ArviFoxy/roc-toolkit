@@ -24,6 +24,10 @@
 #include "roc_rtp/encoding.h"
 #include "roc_rtp/encoding_map.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include <prometheus/counter.h>
+#endif
+
 namespace roc {
 namespace rtp {
 
@@ -101,6 +105,16 @@ private:
     audio::JitterMeter jitter_meter_;
 
     dbgio::CsvDumper* dumper_;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    uint64_t prom_prev_expected_;
+    int64_t prom_prev_lost_;
+    int64_t prom_prev_processed_;
+
+    prometheus::Counter* expected_packets_counter_;
+    prometheus::Counter* lost_packets_counter_;
+    prometheus::Counter* received_packets_counter_;
+#endif
 };
 
 } // namespace rtp

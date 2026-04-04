@@ -10,6 +10,11 @@
 #include "roc_core/panic.h"
 #include "roc_packet/units.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include "roc_metrics/prometheus.h"
+#include <prometheus/family.h>
+#endif
+
 namespace roc {
 namespace rtp {
 
@@ -31,6 +36,34 @@ LinkMeter::LinkMeter(packet::IWriter& writer,
     , prev_stream_timestamp_(0)
     , jitter_meter_(jitter_config, arena)
     , dumper_(dumper) {
+#ifdef ROC_TARGET_PROMETHEUS
+    prom_prev_expected_ = 0;
+    prom_prev_lost_ = 0;
+    prom_prev_processed_ = 0;
+
+    auto registry = metrics::prometheus_registry();
+    expected_packets_counter_ =
+        &prometheus::BuildCounter()
+             .Name("roc_recv_packets_expected_total")
+             .Help("Total number of packets theoretically expected from the sender based "
+                   "on sequence numbers")
+             .Register(*registry)
+             .Add({ });
+
+    lost_packets_counter_ =
+        &prometheus::BuildCounter()
+             .Name("roc_recv_packets_lost_total")
+             .Help("Total number of packets determined to be lost on the wire")
+             .Register(*registry)
+             .Add({ });
+
+    received_packets_counter_ =
+        &prometheus::BuildCounter()
+             .Name("roc_recv_packets_received_total")
+             .Help("Total number of packets successfully received from the network")
+             .Register(*registry)
+             .Add({ });
+#endif
 }
 
 status::StatusCode LinkMeter::init_status() const {
@@ -106,6 +139,25 @@ void LinkMeter::update_metrics_(const packet::Packet& packet) {
     if (dumper_) {
         dump_(packet);
     }
+
+#ifdef ROC_TARGET_PROMETHEUS
+    const int64_t diff_expected =
+        (int64_t)metrics_.expected_packets - (int64_t)prom_prev_expected_;
+    if (diff_expected > 0)
+        expected_packets_counter_->Increment((double)diff_expected);
+
+    const int64_t diff_lost = (int64_t)metrics_.lost_packets - prom_prev_lost_;
+    if (diff_lost > 0)
+        lost_packets_counter_->Increment((double)diff_lost);
+
+    const int64_t diff_processed = (int64_t)processed_packets_ - prom_prev_processed_;
+    if (diff_processed > 0)
+        received_packets_counter_->Increment((double)diff_processed);
+
+    prom_prev_expected_ = metrics_.expected_packets;
+    prom_prev_lost_ = metrics_.lost_packets;
+    prom_prev_processed_ = processed_packets_;
+#endif
 }
 
 void LinkMeter::update_seqnums_(const packet::Packet& packet) {

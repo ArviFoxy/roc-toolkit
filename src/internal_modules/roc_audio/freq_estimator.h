@@ -21,6 +21,10 @@
 #include "roc_dbgio/csv_dumper.h"
 #include "roc_packet/units.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include <prometheus/gauge.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -133,6 +137,11 @@ private:
     packet::stream_timestamp_t current_stream_pos_;
 
     dbgio::CsvDumper* dumper_;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    prometheus::Gauge* coeff_gauge_;
+    prometheus::Gauge* stable_gauge_;
+#endif
 };
 
 } // namespace audio

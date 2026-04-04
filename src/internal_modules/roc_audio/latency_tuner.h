@@ -23,6 +23,12 @@
 #include "roc_packet/units.h"
 #include "roc_status/status_code.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include <prometheus/family.h>
+#include <prometheus/gauge.h>
+#include <prometheus/histogram.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -178,6 +184,11 @@ private:
     dbgio::CsvDumper* dumper_;
 
     status::StatusCode init_status_;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    prometheus::Gauge* target_latency_gauge_;
+    prometheus::Histogram* niq_latency_histogram_;
+#endif
 };
 
 } // namespace audio

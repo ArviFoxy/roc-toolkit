@@ -22,6 +22,10 @@
 #include "roc_packet/units.h"
 #include "roc_status/code_to_str.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include <prometheus/counter.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -147,6 +151,10 @@ private:
     bool show_status_;
 
     status::StatusCode init_status_;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    prometheus::Counter* session_restarts_counter_;
+#endif
 };
 
 } // namespace audio

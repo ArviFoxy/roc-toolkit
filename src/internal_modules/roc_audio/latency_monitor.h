@@ -27,6 +27,11 @@
 #include "roc_packet/sorted_queue.h"
 #include "roc_packet/units.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include <prometheus/gauge.h>
+#include <prometheus/histogram.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -123,6 +128,12 @@ private:
     const SampleSpec frame_sample_spec_;
 
     status::StatusCode init_status_;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    prometheus::Histogram* e2e_latency_histogram_;
+    prometheus::Gauge* niq_stalling_gauge_;
+    prometheus::Gauge* fec_block_duration_gauge_;
+#endif
 };
 
 } // namespace audio

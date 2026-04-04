@@ -16,9 +16,15 @@
 #include "roc_core/iarena.h"
 #include "roc_core/noncopyable.h"
 #include "roc_core/time.h"
+#include "roc_metrics/prometheus.h"
 #include "roc_stat/mov_avg_std.h"
 #include "roc_stat/mov_min_max.h"
 #include "roc_stat/mov_quantile.h"
+
+#ifdef ROC_TARGET_PROMETHEUS
+#include <prometheus/gauge.h>
+#include <prometheus/histogram.h>
+#endif
 
 namespace roc {
 namespace audio {
@@ -95,6 +101,9 @@ struct JitterMeterConfig {
     //!  of all envelope values across the quantile window.
     double peak_quantile_coeff;
 
+    //! Prometheus configuration for metrics bounds
+    metrics::PrometheusConfig prometheus;
+
     JitterMeterConfig()
         : jitter_window(50000)
         , envelope_smoothing_window_len(10)
@@ -161,6 +170,12 @@ private:
     core::nanoseconds_t capacitor_charge_;
     double capacitor_discharge_resistance_;
     double capacitor_discharge_iteration_;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    prometheus::Histogram* curr_jitter_histogram_;
+    prometheus::Gauge* curr_envelope_gauge_;
+    prometheus::Gauge* mean_jitter_gauge_;
+#endif
 };
 
 } // namespace audio

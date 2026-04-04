@@ -12,6 +12,11 @@
 #include "roc_core/panic.h"
 #include "roc_status/code_to_str.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include "roc_metrics/prometheus.h"
+#include <prometheus/family.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -57,6 +62,22 @@ Packetizer::Packetizer(packet::IWriter& writer,
         " packet_length=%.3fms samples_per_packet=%lu payload_size=%lu sample_spec=%s",
         (double)packet_length / core::Millisecond, (unsigned long)samples_per_packet_,
         (unsigned long)payload_size_, sample_spec_to_str(sample_spec_).c_str());
+
+#ifdef ROC_TARGET_PROMETHEUS
+    auto registry = metrics::prometheus_registry();
+
+    encoded_packets_counter_ = &prometheus::BuildCounter()
+                                    .Name("roc_send_packets_encoded_total")
+                                    .Help("Total number of packets encoded by the sender")
+                                    .Register(*registry)
+                                    .Add({ });
+
+    payload_bytes_counter_ = &prometheus::BuildCounter()
+                                  .Name("roc_send_payload_bytes_total")
+                                  .Help("Total payload bytes encoded by the sender")
+                                  .Register(*registry)
+                                  .Add({ });
+#endif
 
     init_status_ = status::StatusOK;
 }
@@ -188,6 +209,11 @@ status::StatusCode Packetizer::end_packet_() {
 
     metrics_.encoded_packets++;
     metrics_.payload_bytes += written_payload_size;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    encoded_packets_counter_->Increment();
+    payload_bytes_counter_->Increment((double)written_payload_size);
+#endif
 
     packet_ = NULL;
     packet_pos_ = 0;

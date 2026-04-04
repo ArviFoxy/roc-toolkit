@@ -10,6 +10,11 @@
 #include "roc_core/log.h"
 #include "roc_core/time.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include "roc_metrics/prometheus.h"
+#include <prometheus/family.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -106,6 +111,16 @@ Watchdog::Watchdog(IFrameReader& reader,
         }
     }
 
+#ifdef ROC_TARGET_PROMETHEUS
+    auto registry = metrics::prometheus_registry();
+    session_restarts_counter_ =
+        &prometheus::BuildCounter()
+             .Name("roc_recv_session_restarts_total")
+             .Help("Total number of times a session was terminated by the watchdog")
+             .Register(*registry)
+             .Add({ });
+#endif
+
     init_status_ = status::StatusOK;
 }
 
@@ -185,6 +200,9 @@ bool Watchdog::check_blank_timeout_() const {
             (unsigned long)warmup_duration_,
             sample_spec_.stream_timestamp_2_ms(warmup_duration_));
 
+#ifdef ROC_TARGET_PROMETHEUS
+    session_restarts_counter_->Increment();
+#endif
     return false;
 }
 
@@ -234,6 +252,9 @@ bool Watchdog::check_drops_timeout_() {
             (unsigned long)drops_detection_window_,
             sample_spec_.stream_timestamp_2_ms(drops_detection_window_));
 
+#ifdef ROC_TARGET_PROMETHEUS
+    session_restarts_counter_->Increment();
+#endif
     return false;
 }
 

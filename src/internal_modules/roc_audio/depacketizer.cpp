@@ -13,6 +13,11 @@
 #include "roc_core/stddefs.h"
 #include "roc_status/code_to_str.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include "roc_metrics/prometheus.h"
+#include <prometheus/family.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -49,6 +54,58 @@ Depacketizer::Depacketizer(packet::IReader& packet_reader,
     roc_log(LogDebug, "depacketizer: initializing: sample_rate=%lu n_channels=%lu",
             (unsigned long)sample_spec_.sample_rate(),
             (unsigned long)sample_spec_.num_channels());
+
+#ifdef ROC_TARGET_PROMETHEUS
+    auto registry = metrics::prometheus_registry();
+
+    decoded_samples_counter_ =
+        &prometheus::BuildCounter()
+             .Name("roc_recv_samples_decoded_total")
+             .Help("Total number of samples decoded from incoming network packets")
+             .Register(*registry)
+             .Add({ });
+
+    missing_samples_counter_ =
+        &prometheus::BuildCounter()
+             .Name("roc_recv_samples_missing_total")
+             .Help("Total number of samples missing due to packet loss or delays")
+             .Register(*registry)
+             .Add({ });
+
+    late_samples_counter_ =
+        &prometheus::BuildCounter()
+             .Name("roc_recv_samples_late_total")
+             .Help("Total number of samples dropped because they arrived too late")
+             .Register(*registry)
+             .Add({ });
+
+    decoded_packets_counter_ = &prometheus::BuildCounter()
+                                    .Name("roc_recv_packets_decoded_total")
+                                    .Help("Total number of packets successfully decoded")
+                                    .Register(*registry)
+                                    .Add({ });
+
+    late_packets_counter_ =
+        &prometheus::BuildCounter()
+             .Name("roc_recv_packets_late_total")
+             .Help("Total number of packets dropped because they arrived too late")
+             .Register(*registry)
+             .Add({ });
+
+    recovered_packets_counter_ = &prometheus::BuildCounter()
+                                      .Name("roc_recv_fec_recovered_packets_total")
+                                      .Help("Total number of packets seamlessly "
+                                            "recovered by Forward Error Correction")
+                                      .Register(*registry)
+                                      .Add({ });
+
+    recovered_samples_counter_ = &prometheus::BuildCounter()
+                                      .Name("roc_recv_fec_recovered_samples_total")
+                                      .Help("Total number of samples seamlessly "
+                                            "recovered by Forward Error Correction")
+                                      .Register(*registry)
+                                      .Add({ });
+#endif
 
     init_status_ = status::StatusOK;
 }
@@ -288,10 +345,16 @@ status::StatusCode Depacketizer::read_decoded_samples_(sample_t** buff_ptr,
     stream_ts_ += (packet::stream_timestamp_t)decoded_samples;
     decoded_samples_ += decoded_samples;
     metrics_.decoded_samples += decoded_samples;
+#ifdef ROC_TARGET_PROMETHEUS
+    decoded_samples_counter_->Increment((double)decoded_samples);
+#endif
 
     if (packet_->has_flags(packet::Packet::FlagRestored)) {
         recovered_samples_ += decoded_samples;
         metrics_.recovered_samples += decoded_samples;
+#ifdef ROC_TARGET_PROMETHEUS
+        recovered_samples_counter_->Increment((double)decoded_samples);
+#endif
     }
 
     if (decoded_samples < requested_samples) {
@@ -320,6 +383,9 @@ status::StatusCode Depacketizer::read_missing_samples_(sample_t** buff_ptr,
     missing_samples_ += missing_samples;
     if (is_started_) {
         metrics_.missing_samples += missing_samples;
+#ifdef ROC_TARGET_PROMETHEUS
+        missing_samples_counter_->Increment((double)missing_samples);
+#endif
     }
 
     *buff_ptr = (*buff_ptr + missing_samples * sample_spec_.num_channels());
@@ -451,6 +517,11 @@ status::StatusCode Depacketizer::start_packet_() {
         metrics_.late_samples += pkt_end - pkt_begin;
         metrics_.late_packets++;
 
+#ifdef ROC_TARGET_PROMETHEUS
+        late_samples_counter_->Increment((double)(pkt_end - pkt_begin));
+        late_packets_counter_->Increment();
+#endif
+
         status_code = payload_decoder_.end_frame();
         packet_ = NULL;
 
@@ -498,6 +569,11 @@ status::StatusCode Depacketizer::start_packet_() {
         metrics_.late_samples += diff_samples;
         metrics_.late_packets++;
 
+#ifdef ROC_TARGET_PROMETHEUS
+        late_samples_counter_->Increment((double)diff_samples);
+        late_packets_counter_->Increment();
+#endif
+
         if (valid_capture_ts_) {
             next_capture_ts_ += sample_spec_.samples_per_chan_2_ns(diff_samples);
         }
@@ -508,8 +584,14 @@ status::StatusCode Depacketizer::start_packet_() {
     }
 
     metrics_.decoded_packets++;
+#ifdef ROC_TARGET_PROMETHEUS
+    decoded_packets_counter_->Increment();
+#endif
     if (packet_->has_flags(packet::Packet::FlagRestored)) {
         metrics_.recovered_packets++;
+#ifdef ROC_TARGET_PROMETHEUS
+        recovered_packets_counter_->Increment();
+#endif
     }
 
     return status::StatusOK;

@@ -235,6 +235,11 @@ AddOption('--disable-pulseaudio',
           action='store_true',
           help='disable PulseAudio support in tools')
 
+AddOption('--enable-prometheus',
+          dest='enable_prometheus',
+          action='store_true',
+          help='enable Prometheus metrics in tools')
+
 AddOption('--with-openfec-includes',
           dest='with_openfec_includes',
           action='store',
@@ -729,6 +734,7 @@ env['ROC_MODULES'] = [
     'roc_packet',
     'roc_fec',
     'roc_dbgio',
+    'roc_metrics',
     'roc_audio',
     'roc_rtp',
     'roc_rtcp',
@@ -868,6 +874,10 @@ else:
         if not GetOption('disable_pulseaudio') and meta.platform in ['linux']:
             env.Append(ROC_TARGETS=[
                 'target_pulseaudio',
+            ])
+        if GetOption('enable_prometheus'):
+            env.Append(ROC_TARGETS=[
+                'target_prometheus',
             ])
 
     if 'target_gnu' not in env['ROC_TARGETS']:

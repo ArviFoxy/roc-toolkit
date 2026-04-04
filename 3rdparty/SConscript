@@ -36,6 +36,9 @@ thirdparty_versions = {
     # tests
     'cpputest':         '4.0',
     'google-benchmark': '1.6.1',
+
+    # prometheus
+    'prometheus':       '1.0.0',
 }
 
 # collect enabled external dependencies
@@ -60,6 +63,10 @@ if meta.platform in ['macos']:
 # tools dependencies
 if not GetOption('disable_tools'):
     external_dependencies.add('gengetopt')
+
+# prometheus needs to be dynamically added based on target
+if 'target_prometheus' in env['ROC_TARGETS']:
+    external_dependencies.add('prometheus')
 
 # tests dependencies
 if GetOption('enable_tests'):
@@ -456,6 +463,29 @@ elif 'google-benchmark' in system_dependencies:
         subenvs.tests.AppendUnique(CPPDEFINES=['ROC_BENCHMARK_USE_ACCESSORS'])
 
     subenvs.tests = conf.Finish()
+
+# dep: prometheus-cpp
+if 'prometheus' in system_dependencies:
+    # Prometheus is used by roc_metrics module which is an internal module, so add to env
+    conf = Configure(env, custom_tests=env.CustomTests)
+
+    if not conf.AddPkgConfigDependency('prometheus-cpp-pull', '--cflags --libs'):
+        conf.env.AddManualDependency(libs=['prometheus-cpp-pull'])
+    if not conf.AddPkgConfigDependency('prometheus-cpp-core', '--cflags --libs'):
+        conf.env.AddManualDependency(libs=['prometheus-cpp-core'])
+
+    if not conf.CheckLibWithHeaderExt(
+            'prometheus-cpp-pull', 'prometheus/exposer.h', 'CXX', run=False):
+        env.Die("Prometheus C++ not found (see 'config.log' for details). "
+                "Disable with --disable-prometheus.")
+
+    env = conf.Finish()
+    
+    # Propagate to sub-environments so internal_modules and tools can compile and link
+    for senv in [subenvs.internal_modules, subenvs.tools, subenvs.public_libs, subenvs.tests, subenvs.examples]:
+        senv.AppendUnique(LIBS=env.get('LIBS', []))
+        senv.AppendUnique(CPPPATH=env.get('CPPPATH', []))
+        senv.AppendUnique(CPPFLAGS=env.get('CPPFLAGS', []))
 
 # end of deps
 

@@ -9,6 +9,11 @@
 #include "roc_audio/jitter_meter.h"
 #include "roc_core/panic.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include "roc_metrics/prometheus.h"
+#include <prometheus/family.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -33,6 +38,32 @@ JitterMeter::JitterMeter(const JitterMeterConfig& config, core::IArena& arena)
     , capacitor_charge_(0)
     , capacitor_discharge_resistance_(0)
     , capacitor_discharge_iteration_(0) {
+#ifdef ROC_TARGET_PROMETHEUS
+    auto registry = metrics::prometheus_registry();
+
+    auto& jh_family = prometheus::BuildHistogram()
+                          .Name("roc_recv_jitter_seconds")
+                          .Help("Current instantaneous jitter distribution in seconds")
+                          .Register(*registry);
+    curr_jitter_histogram_ = &jh_family.Add(
+        { },
+        metrics::generate_logspace_buckets((double)config.prometheus.jitter_min / 1e9,
+                                           (double)config.prometheus.jitter_max / 1e9,
+                                           config.prometheus.jitter_buckets));
+
+    auto& env_family =
+        prometheus::BuildGauge()
+            .Name("roc_recv_jitter_envelope_seconds")
+            .Help("Current active jitter envelope (smoothed spike trajectory) in seconds")
+            .Register(*registry);
+    curr_envelope_gauge_ = &env_family.Add({ });
+
+    auto& mean_family = prometheus::BuildGauge()
+                            .Name("roc_recv_jitter_mean_seconds")
+                            .Help("Mean moving average of recent jitter in seconds")
+                            .Register(*registry);
+    mean_jitter_gauge_ = &mean_family.Add({ });
+#endif
 }
 
 const JitterMetrics& JitterMeter::metrics() const {
@@ -58,6 +89,12 @@ void JitterMeter::update_jitter(const core::nanoseconds_t jitter) {
     metrics_.peak_jitter = peak_window_.mov_max();
     metrics_.curr_jitter = jitter;
     metrics_.curr_envelope = jitter_envelope;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    curr_jitter_histogram_->Observe((double)metrics_.curr_jitter / 1e9);
+    curr_envelope_gauge_->Set((double)metrics_.curr_envelope / 1e9);
+    mean_jitter_gauge_->Set((double)metrics_.mean_jitter / 1e9);
+#endif
 }
 
 // This function calculates jitter envelope using a model of a leaky peak detector.

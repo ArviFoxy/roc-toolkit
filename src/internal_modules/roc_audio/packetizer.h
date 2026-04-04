@@ -24,6 +24,10 @@
 #include "roc_packet/packet_factory.h"
 #include "roc_packet/units.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include <prometheus/counter.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -102,6 +106,11 @@ private:
     PacketizerMetrics metrics_;
 
     status::StatusCode init_status_;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    prometheus::Counter* encoded_packets_counter_;
+    prometheus::Counter* payload_bytes_counter_;
+#endif
 };
 
 } // namespace audio

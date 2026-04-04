@@ -11,6 +11,11 @@
 #include "roc_core/panic.h"
 #include "roc_core/time.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include "roc_metrics/prometheus.h"
+#include <prometheus/family.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -123,6 +128,25 @@ FreqEstimator::FreqEstimator(const FreqEstimatorConfig& config,
         dec1_casc_buff_[i] = target_;
         dec2_casc_buff_[i] = target_;
     }
+
+#ifdef ROC_TARGET_PROMETHEUS
+    auto registry = metrics::prometheus_registry();
+    coeff_gauge_ = &prometheus::BuildGauge()
+                        .Name("roc_recv_freq_estimator_coeff")
+                        .Help("Frequency estimator compensation coefficient")
+                        .Register(*registry)
+                        .Add({ });
+
+    stable_gauge_ =
+        &prometheus::BuildGauge()
+             .Name("roc_recv_freq_estimator_stable")
+             .Help("Frequency estimator stability status (1 if stable, 0 otherwise)")
+             .Register(*registry)
+             .Add({ });
+
+    stable_gauge_->Set(stable_ ? 1.0 : 0.0);
+    coeff_gauge_->Set(coeff_);
+#endif
 }
 
 float FreqEstimator::freq_coeff() const {
@@ -141,6 +165,11 @@ void FreqEstimator::update_current_latency(packet::stream_timestamp_t current_la
             dump_(filtered);
         }
         coeff_ = run_controller_(filtered);
+
+#ifdef ROC_TARGET_PROMETHEUS
+        coeff_gauge_->Set(coeff_);
+        stable_gauge_->Set(stable_ ? 1.0 : 0.0);
+#endif
     }
 }
 

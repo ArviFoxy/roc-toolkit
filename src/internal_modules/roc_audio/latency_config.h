@@ -14,6 +14,7 @@
 
 #include "roc_core/attributes.h"
 #include "roc_core/time.h"
+#include "roc_metrics/prometheus.h"
 #include "roc_packet/units.h"
 
 namespace roc {
@@ -164,6 +165,9 @@ struct LatencyConfig {
     //! estimation = MAX(max_jitter * max_jitter_overhead,
     //!                  mean_jitter * mean_jitter_overhead);
     float mean_jitter_overhead;
+
+    //! Prometheus configuration for metrics bounds
+    metrics::PrometheusConfig prometheus;
 
     //! Initialize.
     LatencyConfig()

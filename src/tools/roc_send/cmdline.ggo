@@ -68,6 +68,32 @@ section "Latency options (for sender-side latency tuning)"
     option "latency-profile" - "Latency tuning profile"
         values="responsive","gradual","intact" default="intact" enum optional
 
+section "Metrics options"
+
+    option "prometheus-metrics-port" - "Port for prometheus metrics HTTP exposer"
+        int default="0" optional
+
+    option "prometheus-latency-buckets" - "Number of histogram buckets for latency metrics"
+        int default="32" optional
+    option "prometheus-latency-min" - "Minimum latency bucket boundary, TIME units"
+        typestr="TIME" string default="1ms" optional
+    option "prometheus-latency-max" - "Maximum latency bucket boundary, TIME units"
+        typestr="TIME" string default="1s" optional
+
+    option "prometheus-jitter-buckets" - "Number of histogram buckets for jitter metrics"
+        int default="32" optional
+    option "prometheus-jitter-min" - "Minimum jitter bucket boundary, TIME units"
+        typestr="TIME" string default="100us" optional
+    option "prometheus-jitter-max" - "Maximum jitter bucket boundary, TIME units"
+        typestr="TIME" string default="200ms" optional
+
+    option "prometheus-rtt-buckets" - "Number of histogram buckets for RTT metrics"
+        int default="32" optional
+    option "prometheus-rtt-min" - "Minimum RTT bucket boundary, TIME units"
+        typestr="TIME" string default="100us" optional
+    option "prometheus-rtt-max" - "Maximum RTT bucket boundary, TIME units"
+        typestr="TIME" string default="200ms" optional
+
 section "Memory options"
 
     option "max-packet-size" - "Maximum network packet size, SIZE units"

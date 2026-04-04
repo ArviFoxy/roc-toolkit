@@ -23,6 +23,12 @@
 #include "roc_dbgio/csv_dumper.h"
 #include "roc_packet/ilink_meter.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include <prometheus/counter.h>
+#include <prometheus/gauge.h>
+#include <prometheus/histogram.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -133,6 +139,15 @@ private:
     bool started_;
 
     status::StatusCode init_status_;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    prometheus::Histogram* send_e2e_latency_histogram_;
+    prometheus::Histogram* send_niq_latency_histogram_;
+    prometheus::Gauge* send_jitter_gauge_;
+    prometheus::Histogram* send_rtt_histogram_;
+    int64_t prev_lost_packets_ = 0;
+    prometheus::Counter* send_lost_packets_counter_;
+#endif
 };
 
 } // namespace audio

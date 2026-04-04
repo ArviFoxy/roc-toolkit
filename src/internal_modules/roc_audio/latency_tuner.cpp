@@ -11,6 +11,11 @@
 #include "roc_core/panic.h"
 #include "roc_core/time.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include "roc_metrics/prometheus.h"
+#include <prometheus/family.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -162,6 +167,27 @@ LatencyTuner::LatencyTuner(const LatencyConfig& latency_config,
         }
     }
 
+#ifdef ROC_TARGET_PROMETHEUS
+    auto registry = metrics::prometheus_registry();
+
+    target_latency_gauge_ = &prometheus::BuildGauge()
+                                 .Name("roc_recv_latency_target_seconds")
+                                 .Help("Current target latency in seconds")
+                                 .Register(*registry)
+                                 .Add({ });
+
+    auto& niq_family = prometheus::BuildHistogram()
+                           .Name("roc_recv_latency_seconds")
+                           .Help("Current network input queue (NIQ) latency in seconds")
+                           .Register(*registry);
+    niq_latency_histogram_ =
+        &niq_family.Add({ },
+                        metrics::generate_logspace_buckets(
+                            (double)latency_config.prometheus.latency_min / 1e9,
+                            (double)latency_config.prometheus.latency_max / 1e9,
+                            latency_config.prometheus.latency_buckets));
+#endif
+
     init_status_ = status::StatusOK;
 }
 
@@ -192,6 +218,15 @@ void LatencyTuner::write_metrics(const LatencyMetrics& latency_metrics,
     link_metrics_ = link_metrics;
 
     has_metrics_ = true;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    if (has_niq_latency_) {
+        niq_latency_histogram_->Observe(
+            (double)sample_spec_.stream_timestamp_delta_2_ns(niq_latency_) / 1e9);
+    }
+    target_latency_gauge_->Set(
+        (double)sample_spec_.stream_timestamp_delta_2_ns(cur_target_latency_) / 1e9);
+#endif
 }
 
 bool LatencyTuner::update_stream() {

@@ -22,6 +22,10 @@
 #include "roc_dbgio/csv_dumper.h"
 #include "roc_packet/ireader.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include <prometheus/counter.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -188,6 +192,16 @@ private:
     dbgio::CsvDumper* dumper_;
 
     status::StatusCode init_status_;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    prometheus::Counter* decoded_samples_counter_;
+    prometheus::Counter* missing_samples_counter_;
+    prometheus::Counter* late_samples_counter_;
+    prometheus::Counter* decoded_packets_counter_;
+    prometheus::Counter* late_packets_counter_;
+    prometheus::Counter* recovered_packets_counter_;
+    prometheus::Counter* recovered_samples_counter_;
+#endif
 };
 
 } // namespace audio

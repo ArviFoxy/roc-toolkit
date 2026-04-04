@@ -12,6 +12,11 @@
 #include "roc_core/panic.h"
 #include "roc_core/time.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include "roc_metrics/prometheus.h"
+#include <prometheus/family.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -48,6 +53,33 @@ LatencyMonitor::LatencyMonitor(IFrameReader& frame_reader,
             return;
         }
     }
+
+#ifdef ROC_TARGET_PROMETHEUS
+    auto registry = metrics::prometheus_registry();
+
+    auto& e2e_family = prometheus::BuildHistogram()
+                           .Name("roc_recv_e2e_latency_seconds")
+                           .Help("End-to-end latency distribution in seconds")
+                           .Register(*registry);
+    e2e_latency_histogram_ =
+        &e2e_family.Add({ },
+                        metrics::generate_logspace_buckets(
+                            (double)latency_config.prometheus.latency_min / 1e9,
+                            (double)latency_config.prometheus.latency_max / 1e9,
+                            latency_config.prometheus.latency_buckets));
+
+    niq_stalling_gauge_ = &prometheus::BuildGauge()
+                               .Name("roc_recv_niq_stalling_seconds")
+                               .Help("Time since last received packet in seconds")
+                               .Register(*registry)
+                               .Add({ });
+
+    fec_block_duration_gauge_ = &prometheus::BuildGauge()
+                                     .Name("roc_recv_fec_block_duration_seconds")
+                                     .Help("Duration of one FEC block in seconds")
+                                     .Register(*registry)
+                                     .Add({ });
+#endif
 
     init_status_ = status::StatusOK;
 }
@@ -151,6 +183,10 @@ void LatencyMonitor::compute_niq_latency_() {
     if (rts > 0 && rts < now) {
         latency_metrics_.niq_stalling = now - rts;
     }
+
+#ifdef ROC_TARGET_PROMETHEUS
+    niq_stalling_gauge_->Set((double)latency_metrics_.niq_stalling / 1e9);
+#endif
 }
 
 void LatencyMonitor::compute_e2e_latency_(const core::nanoseconds_t playback_timestamp) {
@@ -166,6 +202,12 @@ void LatencyMonitor::compute_e2e_latency_(const core::nanoseconds_t playback_tim
     // time when first sample of that frame was captured on sender
     // (both timestamps are in receiver clock domain)
     latency_metrics_.e2e_latency = playback_timestamp - capture_ts_;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    if (latency_metrics_.e2e_latency > 0) {
+        e2e_latency_histogram_->Observe((double)latency_metrics_.e2e_latency / 1e9);
+    }
+#endif
 }
 
 void LatencyMonitor::query_metrics_() {
@@ -176,6 +218,9 @@ void LatencyMonitor::query_metrics_() {
     if (fec_reader_) {
         latency_metrics_.fec_block_duration =
             packet_sample_spec_.stream_timestamp_2_ns(fec_reader_->max_block_duration());
+#ifdef ROC_TARGET_PROMETHEUS
+        fec_block_duration_gauge_->Set((double)latency_metrics_.fec_block_duration / 1e9);
+#endif
     }
 }
 

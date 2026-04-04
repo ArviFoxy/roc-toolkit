@@ -12,6 +12,11 @@
 #include "roc_core/panic.h"
 #include "roc_core/time.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include "roc_metrics/prometheus.h"
+#include <prometheus/family.h>
+#endif
+
 namespace roc {
 namespace audio {
 
@@ -47,6 +52,55 @@ FeedbackMonitor::FeedbackMonitor(IFrameWriter& writer,
             return;
         }
     }
+
+#ifdef ROC_TARGET_PROMETHEUS
+    auto registry = metrics::prometheus_registry();
+
+    auto& e2e_fam = prometheus::BuildHistogram()
+                        .Name("roc_send_e2e_latency_seconds")
+                        .Help("End-to-end latency reported by receiver, in seconds")
+                        .Register(*registry);
+    send_e2e_latency_histogram_ =
+        &e2e_fam.Add({ },
+                     metrics::generate_logspace_buckets(
+                         (double)latency_config.prometheus.latency_min / 1e9,
+                         (double)latency_config.prometheus.latency_max / 1e9,
+                         latency_config.prometheus.latency_buckets));
+
+    auto& niq_fam = prometheus::BuildHistogram()
+                        .Name("roc_send_niq_latency_seconds")
+                        .Help("NIQ latency reported by receiver, in seconds")
+                        .Register(*registry);
+    send_niq_latency_histogram_ =
+        &niq_fam.Add({ },
+                     metrics::generate_logspace_buckets(
+                         (double)latency_config.prometheus.latency_min / 1e9,
+                         (double)latency_config.prometheus.latency_max / 1e9,
+                         latency_config.prometheus.latency_buckets));
+
+    send_jitter_gauge_ = &prometheus::BuildGauge()
+                              .Name("roc_send_jitter_mean_seconds")
+                              .Help("Mean jitter reported by receiver, in seconds")
+                              .Register(*registry)
+                              .Add({ });
+
+    auto& rtt_fam = prometheus::BuildHistogram()
+                        .Name("roc_send_rtt_seconds")
+                        .Help("Round-trip time distribution in seconds")
+                        .Register(*registry);
+    send_rtt_histogram_ =
+        &rtt_fam.Add({ },
+                     metrics::generate_logspace_buckets(
+                         (double)latency_config.prometheus.rtt_min / 1e9,
+                         (double)latency_config.prometheus.rtt_max / 1e9,
+                         latency_config.prometheus.rtt_buckets));
+
+    send_lost_packets_counter_ = &prometheus::BuildCounter()
+                                      .Name("roc_send_packets_lost_total")
+                                      .Help("Total packets lost as reported by receiver")
+                                      .Register(*registry)
+                                      .Add({ });
+#endif
 
     init_status_ = status::StatusOK;
 }
@@ -115,6 +169,26 @@ void FeedbackMonitor::process_feedback(packet::stream_source_t source_id,
 
     has_feedback_ = true;
     last_feedback_ts_ = core::timestamp(core::ClockMonotonic);
+
+#ifdef ROC_TARGET_PROMETHEUS
+    if (latency_metrics_.e2e_latency > 0) {
+        send_e2e_latency_histogram_->Observe((double)latency_metrics_.e2e_latency / 1e9);
+    }
+    if (latency_metrics_.niq_latency > 0) {
+        send_niq_latency_histogram_->Observe((double)latency_metrics_.niq_latency / 1e9);
+    }
+    if (link_metrics_.mean_jitter > 0) {
+        send_jitter_gauge_->Set((double)link_metrics_.mean_jitter / 1e9);
+    }
+    if (link_metrics_.rtt > 0) {
+        send_rtt_histogram_->Observe((double)link_metrics_.rtt / 1e9);
+    }
+    if (link_metrics_.lost_packets > prev_lost_packets_) {
+        send_lost_packets_counter_->Increment(
+            (double)(link_metrics_.lost_packets - prev_lost_packets_));
+        prev_lost_packets_ = link_metrics_.lost_packets;
+    }
+#endif
 }
 
 status::StatusCode FeedbackMonitor::write(Frame& frame) {
