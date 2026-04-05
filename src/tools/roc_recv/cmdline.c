@@ -56,6 +56,8 @@ const char *gengetopt_args_info_help[] = {
   "\nDecoding options:",
   "      --packet-encoding=PKT_ENCODING\n                                Custom network packet encoding(s) (may be used\n                                  multiple times)",
   "      --plc=ENUM                Algorithm to mask unrecoverable packet losses\n                                  (possible values=\"none\", \"beep\"\n                                  default=`none')",
+  "      --latency-backend=ENUM    Which latency to use in latency tuner\n                                  (possible values=\"niq\", \"e2e\"\n                                  default=`niq')",
+  "      --latency-profile=ENUM    Latency tuning profile  (possible\n                                  values=\"auto\", \"responsive\", \"gradual\",\n                                  \"intact\" default=`auto')",
   "      --resampler-backend=ENUM  Resampler backend  (possible values=\"auto\",\n                                  \"builtin\", \"speex\", \"speexdec\"\n                                  default=`auto')",
   "      --resampler-profile=ENUM  Resampler profile  (possible values=\"low\",\n                                  \"medium\", \"high\" default=`medium')",
   "\nLatency options:",
@@ -64,8 +66,6 @@ const char *gengetopt_args_info_help[] = {
   "      --start-latency=TIME      Starting target latency in adaptive mode, TIME\n                                  units",
   "      --min-latency=TIME        Minimum target latency in adaptive mode, TIME\n                                  units",
   "      --max-latency=TIME        Maximum target latency in adaptive mode, TIME\n                                  units",
-  "      --latency-backend=ENUM    Which latency to measure and tune  (possible\n                                  values=\"niq\" default=`niq')",
-  "      --latency-profile=ENUM    Latency tuning profile  (possible\n                                  values=\"auto\", \"responsive\", \"gradual\",\n                                  \"intact\" default=`auto')",
   "\nTimeout options:",
   "      --no-play-timeout=TIME    No-playback timeout, TIME units",
   "      --choppy-play-timeout=TIME\n                                Choppy playback timeout, TIME units",
@@ -118,10 +118,10 @@ cmdline_parser_required2 (struct gengetopt_args_info *args_info, const char *pro
 
 const char *cmdline_parser_color_values[] = {"auto", "always", "never", 0}; /*< Possible values for color. */
 const char *cmdline_parser_plc_values[] = {"none", "beep", 0}; /*< Possible values for plc. */
+const char *cmdline_parser_latency_backend_values[] = {"niq", "e2e", 0}; /*< Possible values for latency-backend. */
+const char *cmdline_parser_latency_profile_values[] = {"auto", "responsive", "gradual", "intact", 0}; /*< Possible values for latency-profile. */
 const char *cmdline_parser_resampler_backend_values[] = {"auto", "builtin", "speex", "speexdec", 0}; /*< Possible values for resampler-backend. */
 const char *cmdline_parser_resampler_profile_values[] = {"low", "medium", "high", 0}; /*< Possible values for resampler-profile. */
-const char *cmdline_parser_latency_backend_values[] = {"niq", 0}; /*< Possible values for latency-backend. */
-const char *cmdline_parser_latency_profile_values[] = {"auto", "responsive", "gradual", "intact", 0}; /*< Possible values for latency-profile. */
 const char *cmdline_parser_prometheus_niq_latency_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-niq-latency-scale. */
 const char *cmdline_parser_prometheus_e2e_latency_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-e2e-latency-scale. */
 const char *cmdline_parser_prometheus_jitter_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-jitter-scale. */
@@ -151,6 +151,8 @@ void clear_given (struct gengetopt_args_info *args_info)
   args_info->reuseaddr_given = 0 ;
   args_info->packet_encoding_given = 0 ;
   args_info->plc_given = 0 ;
+  args_info->latency_backend_given = 0 ;
+  args_info->latency_profile_given = 0 ;
   args_info->resampler_backend_given = 0 ;
   args_info->resampler_profile_given = 0 ;
   args_info->target_latency_given = 0 ;
@@ -158,8 +160,6 @@ void clear_given (struct gengetopt_args_info *args_info)
   args_info->start_latency_given = 0 ;
   args_info->min_latency_given = 0 ;
   args_info->max_latency_given = 0 ;
-  args_info->latency_backend_given = 0 ;
-  args_info->latency_profile_given = 0 ;
   args_info->no_play_timeout_given = 0 ;
   args_info->choppy_play_timeout_given = 0 ;
   args_info->prometheus_metrics_port_given = 0 ;
@@ -214,6 +214,10 @@ void clear_args (struct gengetopt_args_info *args_info)
   args_info->packet_encoding_orig = NULL;
   args_info->plc_arg = plc_arg_none;
   args_info->plc_orig = NULL;
+  args_info->latency_backend_arg = latency_backend_arg_niq;
+  args_info->latency_backend_orig = NULL;
+  args_info->latency_profile_arg = latency_profile_arg_auto;
+  args_info->latency_profile_orig = NULL;
   args_info->resampler_backend_arg = resampler_backend_arg_auto;
   args_info->resampler_backend_orig = NULL;
   args_info->resampler_profile_arg = resampler_profile_arg_medium;
@@ -228,10 +232,6 @@ void clear_args (struct gengetopt_args_info *args_info)
   args_info->min_latency_orig = NULL;
   args_info->max_latency_arg = NULL;
   args_info->max_latency_orig = NULL;
-  args_info->latency_backend_arg = latency_backend_arg_niq;
-  args_info->latency_backend_orig = NULL;
-  args_info->latency_profile_arg = latency_profile_arg_auto;
-  args_info->latency_profile_orig = NULL;
   args_info->no_play_timeout_arg = NULL;
   args_info->no_play_timeout_orig = NULL;
   args_info->choppy_play_timeout_arg = NULL;
@@ -315,15 +315,15 @@ void init_args_info(struct gengetopt_args_info *args_info)
   args_info->packet_encoding_min = 0;
   args_info->packet_encoding_max = 0;
   args_info->plc_help = gengetopt_args_info_help[22] ;
-  args_info->resampler_backend_help = gengetopt_args_info_help[23] ;
-  args_info->resampler_profile_help = gengetopt_args_info_help[24] ;
-  args_info->target_latency_help = gengetopt_args_info_help[26] ;
-  args_info->latency_tolerance_help = gengetopt_args_info_help[27] ;
-  args_info->start_latency_help = gengetopt_args_info_help[28] ;
-  args_info->min_latency_help = gengetopt_args_info_help[29] ;
-  args_info->max_latency_help = gengetopt_args_info_help[30] ;
-  args_info->latency_backend_help = gengetopt_args_info_help[31] ;
-  args_info->latency_profile_help = gengetopt_args_info_help[32] ;
+  args_info->latency_backend_help = gengetopt_args_info_help[23] ;
+  args_info->latency_profile_help = gengetopt_args_info_help[24] ;
+  args_info->resampler_backend_help = gengetopt_args_info_help[25] ;
+  args_info->resampler_profile_help = gengetopt_args_info_help[26] ;
+  args_info->target_latency_help = gengetopt_args_info_help[28] ;
+  args_info->latency_tolerance_help = gengetopt_args_info_help[29] ;
+  args_info->start_latency_help = gengetopt_args_info_help[30] ;
+  args_info->min_latency_help = gengetopt_args_info_help[31] ;
+  args_info->max_latency_help = gengetopt_args_info_help[32] ;
   args_info->no_play_timeout_help = gengetopt_args_info_help[34] ;
   args_info->choppy_play_timeout_help = gengetopt_args_info_help[35] ;
   args_info->prometheus_metrics_port_help = gengetopt_args_info_help[37] ;
@@ -498,6 +498,8 @@ cmdline_parser_release (struct gengetopt_args_info *args_info)
   free_multiple_string_field (args_info->miface_given, &(args_info->miface_arg), &(args_info->miface_orig));
   free_multiple_string_field (args_info->packet_encoding_given, &(args_info->packet_encoding_arg), &(args_info->packet_encoding_orig));
   free_string_field (&(args_info->plc_orig));
+  free_string_field (&(args_info->latency_backend_orig));
+  free_string_field (&(args_info->latency_profile_orig));
   free_string_field (&(args_info->resampler_backend_orig));
   free_string_field (&(args_info->resampler_profile_orig));
   free_string_field (&(args_info->target_latency_arg));
@@ -510,8 +512,6 @@ cmdline_parser_release (struct gengetopt_args_info *args_info)
   free_string_field (&(args_info->min_latency_orig));
   free_string_field (&(args_info->max_latency_arg));
   free_string_field (&(args_info->max_latency_orig));
-  free_string_field (&(args_info->latency_backend_orig));
-  free_string_field (&(args_info->latency_profile_orig));
   free_string_field (&(args_info->no_play_timeout_arg));
   free_string_field (&(args_info->no_play_timeout_orig));
   free_string_field (&(args_info->choppy_play_timeout_arg));
@@ -656,6 +656,10 @@ cmdline_parser_dump(FILE *outfile, struct gengetopt_args_info *args_info)
   write_multiple_into_file(outfile, args_info->packet_encoding_given, "packet-encoding", args_info->packet_encoding_orig, 0);
   if (args_info->plc_given)
     write_into_file(outfile, "plc", args_info->plc_orig, cmdline_parser_plc_values);
+  if (args_info->latency_backend_given)
+    write_into_file(outfile, "latency-backend", args_info->latency_backend_orig, cmdline_parser_latency_backend_values);
+  if (args_info->latency_profile_given)
+    write_into_file(outfile, "latency-profile", args_info->latency_profile_orig, cmdline_parser_latency_profile_values);
   if (args_info->resampler_backend_given)
     write_into_file(outfile, "resampler-backend", args_info->resampler_backend_orig, cmdline_parser_resampler_backend_values);
   if (args_info->resampler_profile_given)
@@ -670,10 +674,6 @@ cmdline_parser_dump(FILE *outfile, struct gengetopt_args_info *args_info)
     write_into_file(outfile, "min-latency", args_info->min_latency_orig, 0);
   if (args_info->max_latency_given)
     write_into_file(outfile, "max-latency", args_info->max_latency_orig, 0);
-  if (args_info->latency_backend_given)
-    write_into_file(outfile, "latency-backend", args_info->latency_backend_orig, cmdline_parser_latency_backend_values);
-  if (args_info->latency_profile_given)
-    write_into_file(outfile, "latency-profile", args_info->latency_profile_orig, cmdline_parser_latency_profile_values);
   if (args_info->no_play_timeout_given)
     write_into_file(outfile, "no-play-timeout", args_info->no_play_timeout_orig, 0);
   if (args_info->choppy_play_timeout_given)
@@ -1924,6 +1924,8 @@ cmdline_parser_internal (
         { "reuseaddr",	0, NULL, 0 },
         { "packet-encoding",	1, NULL, 0 },
         { "plc",	1, NULL, 0 },
+        { "latency-backend",	1, NULL, 0 },
+        { "latency-profile",	1, NULL, 0 },
         { "resampler-backend",	1, NULL, 0 },
         { "resampler-profile",	1, NULL, 0 },
         { "target-latency",	1, NULL, 0 },
@@ -1931,8 +1933,6 @@ cmdline_parser_internal (
         { "start-latency",	1, NULL, 0 },
         { "min-latency",	1, NULL, 0 },
         { "max-latency",	1, NULL, 0 },
-        { "latency-backend",	1, NULL, 0 },
-        { "latency-profile",	1, NULL, 0 },
         { "no-play-timeout",	1, NULL, 0 },
         { "choppy-play-timeout",	1, NULL, 0 },
         { "prometheus-metrics-port",	1, NULL, 0 },
@@ -2173,6 +2173,34 @@ cmdline_parser_internal (
               goto failure;
           
           }
+          /* Which latency to use in latency tuner.  */
+          else if (strcmp (long_options[option_index].name, "latency-backend") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->latency_backend_arg), 
+                 &(args_info->latency_backend_orig), &(args_info->latency_backend_given),
+                &(local_args_info.latency_backend_given), optarg, cmdline_parser_latency_backend_values, "niq", ARG_ENUM,
+                check_ambiguity, override, 0, 0,
+                "latency-backend", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Latency tuning profile.  */
+          else if (strcmp (long_options[option_index].name, "latency-profile") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->latency_profile_arg), 
+                 &(args_info->latency_profile_orig), &(args_info->latency_profile_given),
+                &(local_args_info.latency_profile_given), optarg, cmdline_parser_latency_profile_values, "auto", ARG_ENUM,
+                check_ambiguity, override, 0, 0,
+                "latency-profile", '-',
+                additional_error))
+              goto failure;
+          
+          }
           /* Resampler backend.  */
           else if (strcmp (long_options[option_index].name, "resampler-backend") == 0)
           {
@@ -2267,34 +2295,6 @@ cmdline_parser_internal (
                 &(local_args_info.max_latency_given), optarg, 0, 0, ARG_STRING,
                 check_ambiguity, override, 0, 0,
                 "max-latency", '-',
-                additional_error))
-              goto failure;
-          
-          }
-          /* Which latency to measure and tune.  */
-          else if (strcmp (long_options[option_index].name, "latency-backend") == 0)
-          {
-          
-          
-            if (update_arg( (void *)&(args_info->latency_backend_arg), 
-                 &(args_info->latency_backend_orig), &(args_info->latency_backend_given),
-                &(local_args_info.latency_backend_given), optarg, cmdline_parser_latency_backend_values, "niq", ARG_ENUM,
-                check_ambiguity, override, 0, 0,
-                "latency-backend", '-',
-                additional_error))
-              goto failure;
-          
-          }
-          /* Latency tuning profile.  */
-          else if (strcmp (long_options[option_index].name, "latency-profile") == 0)
-          {
-          
-          
-            if (update_arg( (void *)&(args_info->latency_profile_arg), 
-                 &(args_info->latency_profile_orig), &(args_info->latency_profile_given),
-                &(local_args_info.latency_profile_given), optarg, cmdline_parser_latency_profile_values, "auto", ARG_ENUM,
-                check_ambiguity, override, 0, 0,
-                "latency-profile", '-',
                 additional_error))
               goto failure;
           

@@ -49,6 +49,12 @@ section "Decoding options"
     option "plc" - "Algorithm to mask unrecoverable packet losses"
         values="none","beep" default="none" enum optional
 
+    option "latency-backend" - "Which latency to use in latency tuner"
+        values="niq","e2e" default="niq" enum optional
+
+    option "latency-profile" - "Latency tuning profile"
+        values="auto","responsive","gradual","intact" default="auto" enum optional
+
     option "resampler-backend" - "Resampler backend"
         values="auto","builtin","speex","speexdec" default="auto" enum optional
     option "resampler-profile" - "Resampler profile"
@@ -67,10 +73,6 @@ section "Latency options"
     option "max-latency" - "Maximum target latency in adaptive mode, TIME units"
         typestr="TIME" string optional
 
-    option "latency-backend" - "Which latency to measure and tune"
-        values="niq" default="niq" enum optional
-    option "latency-profile" - "Latency tuning profile"
-        values="auto","responsive","gradual","intact" default="auto" enum optional
 
 section "Timeout options"
 

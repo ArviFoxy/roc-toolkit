@@ -45,6 +45,12 @@ section "Encoding options"
     option "fec-block-rpr" - "Number of repair packets in FEC block"
         int optional
 
+    option "latency-backend" - "Which latency to use in latency tuner"
+        values="niq","e2e" default="niq" enum optional
+
+    option "latency-profile" - "Latency tuning profile"
+        values="responsive","gradual","intact" default="intact" enum optional
+
     option "resampler-backend" - "Resampler backend"
         values="auto","builtin","speex","speexdec" default="auto" enum optional
     option "resampler-profile" - "Resampler profile"
@@ -63,10 +69,10 @@ section "Latency options (for sender-side latency tuning)"
     option "max-latency" - "Maximum target latency in adaptive mode, TIME units"
         typestr="TIME" string optional
 
-    option "latency-backend" - "Which latency to measure and tune"
-        values="niq" default="niq" enum optional
-    option "latency-profile" - "Latency tuning profile"
-        values="responsive","gradual","intact" default="intact" enum optional
+section "Timestamp options"
+
+    option "auto-cts" - "Automatically stamp frames with capture timestamps (required for E2E latency)"
+        flag off
 
 section "Metrics options"
 

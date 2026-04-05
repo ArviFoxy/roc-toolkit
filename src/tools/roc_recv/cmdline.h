@@ -36,10 +36,10 @@ extern "C" {
 
 enum enum_color { color__NULL = -1, color_arg_auto = 0, color_arg_always, color_arg_never };
 enum enum_plc { plc__NULL = -1, plc_arg_none = 0, plc_arg_beep };
+enum enum_latency_backend { latency_backend__NULL = -1, latency_backend_arg_niq = 0, latency_backend_arg_e2e };
+enum enum_latency_profile { latency_profile__NULL = -1, latency_profile_arg_auto = 0, latency_profile_arg_responsive, latency_profile_arg_gradual, latency_profile_arg_intact };
 enum enum_resampler_backend { resampler_backend__NULL = -1, resampler_backend_arg_auto = 0, resampler_backend_arg_builtin, resampler_backend_arg_speex, resampler_backend_arg_speexdec };
 enum enum_resampler_profile { resampler_profile__NULL = -1, resampler_profile_arg_low = 0, resampler_profile_arg_medium, resampler_profile_arg_high };
-enum enum_latency_backend { latency_backend__NULL = -1, latency_backend_arg_niq = 0 };
-enum enum_latency_profile { latency_profile__NULL = -1, latency_profile_arg_auto = 0, latency_profile_arg_responsive, latency_profile_arg_gradual, latency_profile_arg_intact };
 enum enum_prometheus_niq_latency_scale { prometheus_niq_latency_scale__NULL = -1, prometheus_niq_latency_scale_arg_log = 0, prometheus_niq_latency_scale_arg_linear };
 enum enum_prometheus_e2e_latency_scale { prometheus_e2e_latency_scale__NULL = -1, prometheus_e2e_latency_scale_arg_log = 0, prometheus_e2e_latency_scale_arg_linear };
 enum enum_prometheus_jitter_scale { prometheus_jitter_scale__NULL = -1, prometheus_jitter_scale_arg_log = 0, prometheus_jitter_scale_arg_linear };
@@ -103,6 +103,12 @@ struct gengetopt_args_info
   enum enum_plc plc_arg;	/**< @brief Algorithm to mask unrecoverable packet losses (default='none').  */
   char * plc_orig;	/**< @brief Algorithm to mask unrecoverable packet losses original value given at command line.  */
   const char *plc_help; /**< @brief Algorithm to mask unrecoverable packet losses help description.  */
+  enum enum_latency_backend latency_backend_arg;	/**< @brief Which latency to use in latency tuner (default='niq').  */
+  char * latency_backend_orig;	/**< @brief Which latency to use in latency tuner original value given at command line.  */
+  const char *latency_backend_help; /**< @brief Which latency to use in latency tuner help description.  */
+  enum enum_latency_profile latency_profile_arg;	/**< @brief Latency tuning profile (default='auto').  */
+  char * latency_profile_orig;	/**< @brief Latency tuning profile original value given at command line.  */
+  const char *latency_profile_help; /**< @brief Latency tuning profile help description.  */
   enum enum_resampler_backend resampler_backend_arg;	/**< @brief Resampler backend (default='auto').  */
   char * resampler_backend_orig;	/**< @brief Resampler backend original value given at command line.  */
   const char *resampler_backend_help; /**< @brief Resampler backend help description.  */
@@ -124,12 +130,6 @@ struct gengetopt_args_info
   char * max_latency_arg;	/**< @brief Maximum target latency in adaptive mode, TIME units.  */
   char * max_latency_orig;	/**< @brief Maximum target latency in adaptive mode, TIME units original value given at command line.  */
   const char *max_latency_help; /**< @brief Maximum target latency in adaptive mode, TIME units help description.  */
-  enum enum_latency_backend latency_backend_arg;	/**< @brief Which latency to measure and tune (default='niq').  */
-  char * latency_backend_orig;	/**< @brief Which latency to measure and tune original value given at command line.  */
-  const char *latency_backend_help; /**< @brief Which latency to measure and tune help description.  */
-  enum enum_latency_profile latency_profile_arg;	/**< @brief Latency tuning profile (default='auto').  */
-  char * latency_profile_orig;	/**< @brief Latency tuning profile original value given at command line.  */
-  const char *latency_profile_help; /**< @brief Latency tuning profile help description.  */
   char * no_play_timeout_arg;	/**< @brief No-playback timeout, TIME units.  */
   char * no_play_timeout_orig;	/**< @brief No-playback timeout, TIME units original value given at command line.  */
   const char *no_play_timeout_help; /**< @brief No-playback timeout, TIME units help description.  */
@@ -217,6 +217,8 @@ struct gengetopt_args_info
   unsigned int reuseaddr_given ;	/**< @brief Whether reuseaddr was given.  */
   unsigned int packet_encoding_given ;	/**< @brief Whether packet-encoding was given.  */
   unsigned int plc_given ;	/**< @brief Whether plc was given.  */
+  unsigned int latency_backend_given ;	/**< @brief Whether latency-backend was given.  */
+  unsigned int latency_profile_given ;	/**< @brief Whether latency-profile was given.  */
   unsigned int resampler_backend_given ;	/**< @brief Whether resampler-backend was given.  */
   unsigned int resampler_profile_given ;	/**< @brief Whether resampler-profile was given.  */
   unsigned int target_latency_given ;	/**< @brief Whether target-latency was given.  */
@@ -224,8 +226,6 @@ struct gengetopt_args_info
   unsigned int start_latency_given ;	/**< @brief Whether start-latency was given.  */
   unsigned int min_latency_given ;	/**< @brief Whether min-latency was given.  */
   unsigned int max_latency_given ;	/**< @brief Whether max-latency was given.  */
-  unsigned int latency_backend_given ;	/**< @brief Whether latency-backend was given.  */
-  unsigned int latency_profile_given ;	/**< @brief Whether latency-profile was given.  */
   unsigned int no_play_timeout_given ;	/**< @brief Whether no-play-timeout was given.  */
   unsigned int choppy_play_timeout_given ;	/**< @brief Whether choppy-play-timeout was given.  */
   unsigned int prometheus_metrics_port_given ;	/**< @brief Whether prometheus-metrics-port was given.  */
@@ -375,10 +375,10 @@ int cmdline_parser_required (struct gengetopt_args_info *args_info,
 
 extern const char *cmdline_parser_color_values[];  /**< @brief Possible values for color. */
 extern const char *cmdline_parser_plc_values[];  /**< @brief Possible values for plc. */
-extern const char *cmdline_parser_resampler_backend_values[];  /**< @brief Possible values for resampler-backend. */
-extern const char *cmdline_parser_resampler_profile_values[];  /**< @brief Possible values for resampler-profile. */
 extern const char *cmdline_parser_latency_backend_values[];  /**< @brief Possible values for latency-backend. */
 extern const char *cmdline_parser_latency_profile_values[];  /**< @brief Possible values for latency-profile. */
+extern const char *cmdline_parser_resampler_backend_values[];  /**< @brief Possible values for resampler-backend. */
+extern const char *cmdline_parser_resampler_profile_values[];  /**< @brief Possible values for resampler-profile. */
 extern const char *cmdline_parser_prometheus_niq_latency_scale_values[];  /**< @brief Possible values for prometheus-niq-latency-scale. */
 extern const char *cmdline_parser_prometheus_e2e_latency_scale_values[];  /**< @brief Possible values for prometheus-e2e-latency-scale. */
 extern const char *cmdline_parser_prometheus_jitter_scale_values[];  /**< @brief Possible values for prometheus-jitter-scale. */

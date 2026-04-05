@@ -151,6 +151,40 @@ bool build_receiver_config(const gengetopt_args_info& args,
         break;
     }
 
+    switch (args.latency_backend_arg) {
+    case latency_backend_arg_niq:
+        receiver_config.session_defaults.latency.tuner_backend =
+            audio::LatencyTunerBackend_Niq;
+        break;
+    case latency_backend_arg_e2e:
+        receiver_config.session_defaults.latency.tuner_backend =
+            audio::LatencyTunerBackend_E2e;
+        break;
+    default:
+        break;
+    }
+
+    switch (args.latency_profile_arg) {
+    case latency_profile_arg_auto:
+        receiver_config.session_defaults.latency.tuner_profile =
+            audio::LatencyTunerProfile_Auto;
+        break;
+    case latency_profile_arg_responsive:
+        receiver_config.session_defaults.latency.tuner_profile =
+            audio::LatencyTunerProfile_Responsive;
+        break;
+    case latency_profile_arg_gradual:
+        receiver_config.session_defaults.latency.tuner_profile =
+            audio::LatencyTunerProfile_Gradual;
+        break;
+    case latency_profile_arg_intact:
+        receiver_config.session_defaults.latency.tuner_profile =
+            audio::LatencyTunerProfile_Intact;
+        break;
+    default:
+        break;
+    }
+
     switch (args.resampler_backend_arg) {
     case resampler_backend_arg_auto:
         receiver_config.session_defaults.resampler.backend = audio::ResamplerBackend_Auto;
