@@ -27,21 +27,33 @@ class Registry;
 namespace roc {
 namespace metrics {
 
+//! Histogram bucket spacing mode.
+enum HistogramScale {
+    //! Logarithmically spaced buckets.
+    HistogramScale_Log,
+    //! Linearly spaced buckets.
+    HistogramScale_Linear
+};
+
 //! Configuration for a single Prometheus histogram.
 struct HistogramConfig {
-    //! Number of logarithmically spaced buckets.
+    //! Number of buckets.
     int buckets;
     //! Minimum bucket boundary, in nanoseconds.
     core::nanoseconds_t min;
     //! Maximum bucket boundary, in nanoseconds.
     core::nanoseconds_t max;
+    //! Bucket spacing mode.
+    HistogramScale scale;
 
     HistogramConfig(int n_buckets,
                     core::nanoseconds_t min_val,
-                    core::nanoseconds_t max_val)
+                    core::nanoseconds_t max_val,
+                    HistogramScale scale_val = HistogramScale_Log)
         : buckets(n_buckets)
         , min(min_val)
-        , max(max_val) {
+        , max(max_val)
+        , scale(scale_val) {
     }
 };
 
@@ -66,9 +78,10 @@ struct PrometheusConfig {
 //! Global registry for internal components to register their metrics.
 std::shared_ptr<prometheus::Registry> prometheus_registry();
 
-//! Generate logarithmically spaced histogram bucket boundaries (in seconds)
+//! Generate histogram bucket boundaries (in seconds)
 //! from a HistogramConfig whose min/max are in nanoseconds.
-std::vector<double> generate_logspace_buckets(const HistogramConfig& config);
+//! Uses logarithmic or linear spacing based on config.scale.
+std::vector<double> generate_histogram_buckets(const HistogramConfig& config);
 #endif // ROC_TARGET_PROMETHEUS
 
 //! Exposes native Prometheus metrics on an HTTP endpoint.

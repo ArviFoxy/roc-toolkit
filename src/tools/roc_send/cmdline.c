@@ -70,15 +70,19 @@ const char *gengetopt_args_info_help[] = {
   "      --prometheus-niq-latency-buckets=INT\n                                Number of histogram buckets for NIQ latency\n                                  metrics  (default=`100')",
   "      --prometheus-niq-latency-min=TIME\n                                Minimum NIQ latency bucket boundary, TIME units\n                                  (default=`5ms')",
   "      --prometheus-niq-latency-max=TIME\n                                Maximum NIQ latency bucket boundary, TIME units\n                                  (default=`50ms')",
+  "      --prometheus-niq-latency-scale=ENUM\n                                Bucket spacing for NIQ latency histogram\n                                  (possible values=\"log\", \"linear\"\n                                  default=`log')",
   "      --prometheus-e2e-latency-buckets=INT\n                                Number of histogram buckets for E2E latency\n                                  metrics  (default=`100')",
   "      --prometheus-e2e-latency-min=TIME\n                                Minimum E2E latency bucket boundary, TIME units\n                                  (default=`20ms')",
   "      --prometheus-e2e-latency-max=TIME\n                                Maximum E2E latency bucket boundary, TIME units\n                                  (default=`200ms')",
+  "      --prometheus-e2e-latency-scale=ENUM\n                                Bucket spacing for E2E latency histogram\n                                  (possible values=\"log\", \"linear\"\n                                  default=`log')",
   "      --prometheus-jitter-buckets=INT\n                                Number of histogram buckets for jitter metrics\n                                  (default=`100')",
   "      --prometheus-jitter-min=TIME\n                                Minimum jitter bucket boundary, TIME units\n                                  (default=`100us')",
   "      --prometheus-jitter-max=TIME\n                                Maximum jitter bucket boundary, TIME units\n                                  (default=`200ms')",
+  "      --prometheus-jitter-scale=ENUM\n                                Bucket spacing for jitter histogram  (possible\n                                  values=\"log\", \"linear\" default=`log')",
   "      --prometheus-rtt-buckets=INT\n                                Number of histogram buckets for RTT metrics\n                                  (default=`100')",
   "      --prometheus-rtt-min=TIME Minimum RTT bucket boundary, TIME units\n                                  (default=`1ms')",
   "      --prometheus-rtt-max=TIME Maximum RTT bucket boundary, TIME units\n                                  (default=`100ms')",
+  "      --prometheus-rtt-scale=ENUM\n                                Bucket spacing for RTT histogram  (possible\n                                  values=\"log\", \"linear\" default=`log')",
   "\nMemory options:",
   "      --max-packet-size=SIZE    Maximum network packet size, SIZE units",
   "      --max-frame-size=SIZE     Maximum I/O and processing frame size, SIZE\n                                  units",
@@ -113,6 +117,10 @@ const char *cmdline_parser_resampler_backend_values[] = {"auto", "builtin", "spe
 const char *cmdline_parser_resampler_profile_values[] = {"low", "medium", "high", 0}; /*< Possible values for resampler-profile. */
 const char *cmdline_parser_latency_backend_values[] = {"niq", 0}; /*< Possible values for latency-backend. */
 const char *cmdline_parser_latency_profile_values[] = {"responsive", "gradual", "intact", 0}; /*< Possible values for latency-profile. */
+const char *cmdline_parser_prometheus_niq_latency_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-niq-latency-scale. */
+const char *cmdline_parser_prometheus_e2e_latency_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-e2e-latency-scale. */
+const char *cmdline_parser_prometheus_jitter_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-jitter-scale. */
+const char *cmdline_parser_prometheus_rtt_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-rtt-scale. */
 
 static char *
 gengetopt_strdup (const char *s);
@@ -152,15 +160,19 @@ void clear_given (struct gengetopt_args_info *args_info)
   args_info->prometheus_niq_latency_buckets_given = 0 ;
   args_info->prometheus_niq_latency_min_given = 0 ;
   args_info->prometheus_niq_latency_max_given = 0 ;
+  args_info->prometheus_niq_latency_scale_given = 0 ;
   args_info->prometheus_e2e_latency_buckets_given = 0 ;
   args_info->prometheus_e2e_latency_min_given = 0 ;
   args_info->prometheus_e2e_latency_max_given = 0 ;
+  args_info->prometheus_e2e_latency_scale_given = 0 ;
   args_info->prometheus_jitter_buckets_given = 0 ;
   args_info->prometheus_jitter_min_given = 0 ;
   args_info->prometheus_jitter_max_given = 0 ;
+  args_info->prometheus_jitter_scale_given = 0 ;
   args_info->prometheus_rtt_buckets_given = 0 ;
   args_info->prometheus_rtt_min_given = 0 ;
   args_info->prometheus_rtt_max_given = 0 ;
+  args_info->prometheus_rtt_scale_given = 0 ;
   args_info->max_packet_size_given = 0 ;
   args_info->max_frame_size_given = 0 ;
   args_info->prof_given = 0 ;
@@ -223,24 +235,32 @@ void clear_args (struct gengetopt_args_info *args_info)
   args_info->prometheus_niq_latency_min_orig = NULL;
   args_info->prometheus_niq_latency_max_arg = gengetopt_strdup ("50ms");
   args_info->prometheus_niq_latency_max_orig = NULL;
+  args_info->prometheus_niq_latency_scale_arg = prometheus_niq_latency_scale_arg_log;
+  args_info->prometheus_niq_latency_scale_orig = NULL;
   args_info->prometheus_e2e_latency_buckets_arg = 100;
   args_info->prometheus_e2e_latency_buckets_orig = NULL;
   args_info->prometheus_e2e_latency_min_arg = gengetopt_strdup ("20ms");
   args_info->prometheus_e2e_latency_min_orig = NULL;
   args_info->prometheus_e2e_latency_max_arg = gengetopt_strdup ("200ms");
   args_info->prometheus_e2e_latency_max_orig = NULL;
+  args_info->prometheus_e2e_latency_scale_arg = prometheus_e2e_latency_scale_arg_log;
+  args_info->prometheus_e2e_latency_scale_orig = NULL;
   args_info->prometheus_jitter_buckets_arg = 100;
   args_info->prometheus_jitter_buckets_orig = NULL;
   args_info->prometheus_jitter_min_arg = gengetopt_strdup ("100us");
   args_info->prometheus_jitter_min_orig = NULL;
   args_info->prometheus_jitter_max_arg = gengetopt_strdup ("200ms");
   args_info->prometheus_jitter_max_orig = NULL;
+  args_info->prometheus_jitter_scale_arg = prometheus_jitter_scale_arg_log;
+  args_info->prometheus_jitter_scale_orig = NULL;
   args_info->prometheus_rtt_buckets_arg = 100;
   args_info->prometheus_rtt_buckets_orig = NULL;
   args_info->prometheus_rtt_min_arg = gengetopt_strdup ("1ms");
   args_info->prometheus_rtt_min_orig = NULL;
   args_info->prometheus_rtt_max_arg = gengetopt_strdup ("100ms");
   args_info->prometheus_rtt_max_orig = NULL;
+  args_info->prometheus_rtt_scale_arg = prometheus_rtt_scale_arg_log;
+  args_info->prometheus_rtt_scale_orig = NULL;
   args_info->max_packet_size_arg = NULL;
   args_info->max_packet_size_orig = NULL;
   args_info->max_frame_size_arg = NULL;
@@ -298,19 +318,23 @@ void init_args_info(struct gengetopt_args_info *args_info)
   args_info->prometheus_niq_latency_buckets_help = gengetopt_args_info_help[34] ;
   args_info->prometheus_niq_latency_min_help = gengetopt_args_info_help[35] ;
   args_info->prometheus_niq_latency_max_help = gengetopt_args_info_help[36] ;
-  args_info->prometheus_e2e_latency_buckets_help = gengetopt_args_info_help[37] ;
-  args_info->prometheus_e2e_latency_min_help = gengetopt_args_info_help[38] ;
-  args_info->prometheus_e2e_latency_max_help = gengetopt_args_info_help[39] ;
-  args_info->prometheus_jitter_buckets_help = gengetopt_args_info_help[40] ;
-  args_info->prometheus_jitter_min_help = gengetopt_args_info_help[41] ;
-  args_info->prometheus_jitter_max_help = gengetopt_args_info_help[42] ;
-  args_info->prometheus_rtt_buckets_help = gengetopt_args_info_help[43] ;
-  args_info->prometheus_rtt_min_help = gengetopt_args_info_help[44] ;
-  args_info->prometheus_rtt_max_help = gengetopt_args_info_help[45] ;
-  args_info->max_packet_size_help = gengetopt_args_info_help[47] ;
-  args_info->max_frame_size_help = gengetopt_args_info_help[48] ;
-  args_info->prof_help = gengetopt_args_info_help[50] ;
-  args_info->dump_help = gengetopt_args_info_help[51] ;
+  args_info->prometheus_niq_latency_scale_help = gengetopt_args_info_help[37] ;
+  args_info->prometheus_e2e_latency_buckets_help = gengetopt_args_info_help[38] ;
+  args_info->prometheus_e2e_latency_min_help = gengetopt_args_info_help[39] ;
+  args_info->prometheus_e2e_latency_max_help = gengetopt_args_info_help[40] ;
+  args_info->prometheus_e2e_latency_scale_help = gengetopt_args_info_help[41] ;
+  args_info->prometheus_jitter_buckets_help = gengetopt_args_info_help[42] ;
+  args_info->prometheus_jitter_min_help = gengetopt_args_info_help[43] ;
+  args_info->prometheus_jitter_max_help = gengetopt_args_info_help[44] ;
+  args_info->prometheus_jitter_scale_help = gengetopt_args_info_help[45] ;
+  args_info->prometheus_rtt_buckets_help = gengetopt_args_info_help[46] ;
+  args_info->prometheus_rtt_min_help = gengetopt_args_info_help[47] ;
+  args_info->prometheus_rtt_max_help = gengetopt_args_info_help[48] ;
+  args_info->prometheus_rtt_scale_help = gengetopt_args_info_help[49] ;
+  args_info->max_packet_size_help = gengetopt_args_info_help[51] ;
+  args_info->max_frame_size_help = gengetopt_args_info_help[52] ;
+  args_info->prof_help = gengetopt_args_info_help[54] ;
+  args_info->dump_help = gengetopt_args_info_help[55] ;
   
 }
 
@@ -486,21 +510,25 @@ cmdline_parser_release (struct gengetopt_args_info *args_info)
   free_string_field (&(args_info->prometheus_niq_latency_min_orig));
   free_string_field (&(args_info->prometheus_niq_latency_max_arg));
   free_string_field (&(args_info->prometheus_niq_latency_max_orig));
+  free_string_field (&(args_info->prometheus_niq_latency_scale_orig));
   free_string_field (&(args_info->prometheus_e2e_latency_buckets_orig));
   free_string_field (&(args_info->prometheus_e2e_latency_min_arg));
   free_string_field (&(args_info->prometheus_e2e_latency_min_orig));
   free_string_field (&(args_info->prometheus_e2e_latency_max_arg));
   free_string_field (&(args_info->prometheus_e2e_latency_max_orig));
+  free_string_field (&(args_info->prometheus_e2e_latency_scale_orig));
   free_string_field (&(args_info->prometheus_jitter_buckets_orig));
   free_string_field (&(args_info->prometheus_jitter_min_arg));
   free_string_field (&(args_info->prometheus_jitter_min_orig));
   free_string_field (&(args_info->prometheus_jitter_max_arg));
   free_string_field (&(args_info->prometheus_jitter_max_orig));
+  free_string_field (&(args_info->prometheus_jitter_scale_orig));
   free_string_field (&(args_info->prometheus_rtt_buckets_orig));
   free_string_field (&(args_info->prometheus_rtt_min_arg));
   free_string_field (&(args_info->prometheus_rtt_min_orig));
   free_string_field (&(args_info->prometheus_rtt_max_arg));
   free_string_field (&(args_info->prometheus_rtt_max_orig));
+  free_string_field (&(args_info->prometheus_rtt_scale_orig));
   free_string_field (&(args_info->max_packet_size_arg));
   free_string_field (&(args_info->max_packet_size_orig));
   free_string_field (&(args_info->max_frame_size_arg));
@@ -645,24 +673,32 @@ cmdline_parser_dump(FILE *outfile, struct gengetopt_args_info *args_info)
     write_into_file(outfile, "prometheus-niq-latency-min", args_info->prometheus_niq_latency_min_orig, 0);
   if (args_info->prometheus_niq_latency_max_given)
     write_into_file(outfile, "prometheus-niq-latency-max", args_info->prometheus_niq_latency_max_orig, 0);
+  if (args_info->prometheus_niq_latency_scale_given)
+    write_into_file(outfile, "prometheus-niq-latency-scale", args_info->prometheus_niq_latency_scale_orig, cmdline_parser_prometheus_niq_latency_scale_values);
   if (args_info->prometheus_e2e_latency_buckets_given)
     write_into_file(outfile, "prometheus-e2e-latency-buckets", args_info->prometheus_e2e_latency_buckets_orig, 0);
   if (args_info->prometheus_e2e_latency_min_given)
     write_into_file(outfile, "prometheus-e2e-latency-min", args_info->prometheus_e2e_latency_min_orig, 0);
   if (args_info->prometheus_e2e_latency_max_given)
     write_into_file(outfile, "prometheus-e2e-latency-max", args_info->prometheus_e2e_latency_max_orig, 0);
+  if (args_info->prometheus_e2e_latency_scale_given)
+    write_into_file(outfile, "prometheus-e2e-latency-scale", args_info->prometheus_e2e_latency_scale_orig, cmdline_parser_prometheus_e2e_latency_scale_values);
   if (args_info->prometheus_jitter_buckets_given)
     write_into_file(outfile, "prometheus-jitter-buckets", args_info->prometheus_jitter_buckets_orig, 0);
   if (args_info->prometheus_jitter_min_given)
     write_into_file(outfile, "prometheus-jitter-min", args_info->prometheus_jitter_min_orig, 0);
   if (args_info->prometheus_jitter_max_given)
     write_into_file(outfile, "prometheus-jitter-max", args_info->prometheus_jitter_max_orig, 0);
+  if (args_info->prometheus_jitter_scale_given)
+    write_into_file(outfile, "prometheus-jitter-scale", args_info->prometheus_jitter_scale_orig, cmdline_parser_prometheus_jitter_scale_values);
   if (args_info->prometheus_rtt_buckets_given)
     write_into_file(outfile, "prometheus-rtt-buckets", args_info->prometheus_rtt_buckets_orig, 0);
   if (args_info->prometheus_rtt_min_given)
     write_into_file(outfile, "prometheus-rtt-min", args_info->prometheus_rtt_min_orig, 0);
   if (args_info->prometheus_rtt_max_given)
     write_into_file(outfile, "prometheus-rtt-max", args_info->prometheus_rtt_max_orig, 0);
+  if (args_info->prometheus_rtt_scale_given)
+    write_into_file(outfile, "prometheus-rtt-scale", args_info->prometheus_rtt_scale_orig, cmdline_parser_prometheus_rtt_scale_values);
   if (args_info->max_packet_size_given)
     write_into_file(outfile, "max-packet-size", args_info->max_packet_size_orig, 0);
   if (args_info->max_frame_size_given)
@@ -1885,15 +1921,19 @@ cmdline_parser_internal (
         { "prometheus-niq-latency-buckets",	1, NULL, 0 },
         { "prometheus-niq-latency-min",	1, NULL, 0 },
         { "prometheus-niq-latency-max",	1, NULL, 0 },
+        { "prometheus-niq-latency-scale",	1, NULL, 0 },
         { "prometheus-e2e-latency-buckets",	1, NULL, 0 },
         { "prometheus-e2e-latency-min",	1, NULL, 0 },
         { "prometheus-e2e-latency-max",	1, NULL, 0 },
+        { "prometheus-e2e-latency-scale",	1, NULL, 0 },
         { "prometheus-jitter-buckets",	1, NULL, 0 },
         { "prometheus-jitter-min",	1, NULL, 0 },
         { "prometheus-jitter-max",	1, NULL, 0 },
+        { "prometheus-jitter-scale",	1, NULL, 0 },
         { "prometheus-rtt-buckets",	1, NULL, 0 },
         { "prometheus-rtt-min",	1, NULL, 0 },
         { "prometheus-rtt-max",	1, NULL, 0 },
+        { "prometheus-rtt-scale",	1, NULL, 0 },
         { "max-packet-size",	1, NULL, 0 },
         { "max-frame-size",	1, NULL, 0 },
         { "prof",	0, NULL, 0 },
@@ -2318,6 +2358,20 @@ cmdline_parser_internal (
               goto failure;
           
           }
+          /* Bucket spacing for NIQ latency histogram.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-niq-latency-scale") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_niq_latency_scale_arg), 
+                 &(args_info->prometheus_niq_latency_scale_orig), &(args_info->prometheus_niq_latency_scale_given),
+                &(local_args_info.prometheus_niq_latency_scale_given), optarg, cmdline_parser_prometheus_niq_latency_scale_values, "log", ARG_ENUM,
+                check_ambiguity, override, 0, 0,
+                "prometheus-niq-latency-scale", '-',
+                additional_error))
+              goto failure;
+          
+          }
           /* Number of histogram buckets for E2E latency metrics.  */
           else if (strcmp (long_options[option_index].name, "prometheus-e2e-latency-buckets") == 0)
           {
@@ -2356,6 +2410,20 @@ cmdline_parser_internal (
                 &(local_args_info.prometheus_e2e_latency_max_given), optarg, 0, "200ms", ARG_STRING,
                 check_ambiguity, override, 0, 0,
                 "prometheus-e2e-latency-max", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Bucket spacing for E2E latency histogram.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-e2e-latency-scale") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_e2e_latency_scale_arg), 
+                 &(args_info->prometheus_e2e_latency_scale_orig), &(args_info->prometheus_e2e_latency_scale_given),
+                &(local_args_info.prometheus_e2e_latency_scale_given), optarg, cmdline_parser_prometheus_e2e_latency_scale_values, "log", ARG_ENUM,
+                check_ambiguity, override, 0, 0,
+                "prometheus-e2e-latency-scale", '-',
                 additional_error))
               goto failure;
           
@@ -2402,6 +2470,20 @@ cmdline_parser_internal (
               goto failure;
           
           }
+          /* Bucket spacing for jitter histogram.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-jitter-scale") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_jitter_scale_arg), 
+                 &(args_info->prometheus_jitter_scale_orig), &(args_info->prometheus_jitter_scale_given),
+                &(local_args_info.prometheus_jitter_scale_given), optarg, cmdline_parser_prometheus_jitter_scale_values, "log", ARG_ENUM,
+                check_ambiguity, override, 0, 0,
+                "prometheus-jitter-scale", '-',
+                additional_error))
+              goto failure;
+          
+          }
           /* Number of histogram buckets for RTT metrics.  */
           else if (strcmp (long_options[option_index].name, "prometheus-rtt-buckets") == 0)
           {
@@ -2440,6 +2522,20 @@ cmdline_parser_internal (
                 &(local_args_info.prometheus_rtt_max_given), optarg, 0, "100ms", ARG_STRING,
                 check_ambiguity, override, 0, 0,
                 "prometheus-rtt-max", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Bucket spacing for RTT histogram.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-rtt-scale") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_rtt_scale_arg), 
+                 &(args_info->prometheus_rtt_scale_orig), &(args_info->prometheus_rtt_scale_given),
+                &(local_args_info.prometheus_rtt_scale_given), optarg, cmdline_parser_prometheus_rtt_scale_values, "log", ARG_ENUM,
+                check_ambiguity, override, 0, 0,
+                "prometheus-rtt-scale", '-',
                 additional_error))
               goto failure;
           

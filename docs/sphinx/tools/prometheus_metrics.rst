@@ -41,6 +41,9 @@ The bucket boundaries can be tuned via CLI flags:
    * - ``--prometheus-niq-latency-max``
      - 50ms
      - Maximum NIQ latency bucket boundary
+   * - ``--prometheus-niq-latency-scale``
+     - log
+     - Bucket spacing: ``log`` or ``linear``
    * - ``--prometheus-e2e-latency-buckets``
      - 100
      - Number of histogram buckets for E2E latency
@@ -50,6 +53,9 @@ The bucket boundaries can be tuned via CLI flags:
    * - ``--prometheus-e2e-latency-max``
      - 200ms
      - Maximum E2E latency bucket boundary
+   * - ``--prometheus-e2e-latency-scale``
+     - log
+     - Bucket spacing: ``log`` or ``linear``
    * - ``--prometheus-jitter-buckets``
      - 100
      - Number of histogram buckets for jitter
@@ -59,6 +65,9 @@ The bucket boundaries can be tuned via CLI flags:
    * - ``--prometheus-jitter-max``
      - 200ms
      - Maximum jitter bucket boundary
+   * - ``--prometheus-jitter-scale``
+     - log
+     - Bucket spacing: ``log`` or ``linear``
    * - ``--prometheus-rtt-buckets``
      - 100
      - Number of histogram buckets for RTT
@@ -68,6 +77,9 @@ The bucket boundaries can be tuned via CLI flags:
    * - ``--prometheus-rtt-max``
      - 100ms
      - Maximum RTT bucket boundary
+   * - ``--prometheus-rtt-scale``
+     - log
+     - Bucket spacing: ``log`` or ``linear``
 
 Receiver metrics
 ================

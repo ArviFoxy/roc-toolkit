@@ -62,7 +62,7 @@ LatencyMonitor::LatencyMonitor(IFrameReader& frame_reader,
                            .Help("End-to-end latency distribution in seconds")
                            .Register(*registry);
     e2e_latency_histogram_ = &e2e_family.Add(
-        { }, metrics::generate_logspace_buckets(latency_config.prometheus.e2e_latency));
+        { }, metrics::generate_histogram_buckets(latency_config.prometheus.e2e_latency));
 
     niq_stalling_gauge_ = &prometheus::BuildGauge()
                                .Name("roc_recv_niq_stalling_seconds")

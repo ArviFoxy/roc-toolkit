@@ -61,14 +61,14 @@ FeedbackMonitor::FeedbackMonitor(IFrameWriter& writer,
                         .Help("End-to-end latency reported by receiver, in seconds")
                         .Register(*registry);
     send_e2e_latency_histogram_ = &e2e_fam.Add(
-        { }, metrics::generate_logspace_buckets(latency_config.prometheus.e2e_latency));
+        { }, metrics::generate_histogram_buckets(latency_config.prometheus.e2e_latency));
 
     auto& niq_fam = prometheus::BuildHistogram()
                         .Name("roc_send_niq_latency_seconds")
                         .Help("NIQ latency reported by receiver, in seconds")
                         .Register(*registry);
     send_niq_latency_histogram_ = &niq_fam.Add(
-        { }, metrics::generate_logspace_buckets(latency_config.prometheus.niq_latency));
+        { }, metrics::generate_histogram_buckets(latency_config.prometheus.niq_latency));
 
     send_jitter_gauge_ = &prometheus::BuildGauge()
                               .Name("roc_send_jitter_mean_seconds")
@@ -81,7 +81,7 @@ FeedbackMonitor::FeedbackMonitor(IFrameWriter& writer,
                         .Help("Round-trip time distribution in seconds")
                         .Register(*registry);
     send_rtt_histogram_ = &rtt_fam.Add(
-        { }, metrics::generate_logspace_buckets(latency_config.prometheus.rtt));
+        { }, metrics::generate_histogram_buckets(latency_config.prometheus.rtt));
 
     send_lost_packets_counter_ = &prometheus::BuildCounter()
                                       .Name("roc_send_packets_lost_total")

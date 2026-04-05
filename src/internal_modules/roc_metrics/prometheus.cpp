@@ -23,7 +23,7 @@ namespace metrics {
 
 #ifdef ROC_TARGET_PROMETHEUS
 
-std::vector<double> generate_logspace_buckets(const HistogramConfig& config) {
+std::vector<double> generate_histogram_buckets(const HistogramConfig& config) {
     const double min_val = (double)config.min / 1e9;
     const double max_val = (double)config.max / 1e9;
     const int num_buckets = config.buckets;
@@ -33,8 +33,14 @@ std::vector<double> generate_logspace_buckets(const HistogramConfig& config) {
         return buckets;
     }
     for (int i = 0; i < num_buckets; ++i) {
-        double power = static_cast<double>(i) / (num_buckets - 1);
-        double val = min_val * std::pow(max_val / min_val, power);
+        double val;
+        if (config.scale == HistogramScale_Linear) {
+            val = min_val
+                + (max_val - min_val) * static_cast<double>(i) / (num_buckets - 1);
+        } else {
+            double power = static_cast<double>(i) / (num_buckets - 1);
+            val = min_val * std::pow(max_val / min_val, power);
+        }
         buckets.push_back(val);
     }
     return buckets;

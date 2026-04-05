@@ -677,6 +677,14 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+    if (args.prometheus_niq_latency_scale_given) {
+        if (args.prometheus_niq_latency_scale_arg
+            == prometheus_niq_latency_scale_arg_linear) {
+            prometheus_config.niq_latency.scale = metrics::HistogramScale_Linear;
+        } else {
+            prometheus_config.niq_latency.scale = metrics::HistogramScale_Log;
+        }
+    }
     if (args.prometheus_e2e_latency_buckets_given) {
         prometheus_config.e2e_latency.buckets = args.prometheus_e2e_latency_buckets_arg;
     }
@@ -692,6 +700,14 @@ int main(int argc, char** argv) {
                                   prometheus_config.e2e_latency.max)) {
             roc_log(LogError, "invalid --prometheus-e2e-latency-max: bad format");
             return 1;
+        }
+    }
+    if (args.prometheus_e2e_latency_scale_given) {
+        if (args.prometheus_e2e_latency_scale_arg
+            == prometheus_e2e_latency_scale_arg_linear) {
+            prometheus_config.e2e_latency.scale = metrics::HistogramScale_Linear;
+        } else {
+            prometheus_config.e2e_latency.scale = metrics::HistogramScale_Log;
         }
     }
     if (args.prometheus_jitter_buckets_given) {
@@ -711,6 +727,13 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+    if (args.prometheus_jitter_scale_given) {
+        if (args.prometheus_jitter_scale_arg == prometheus_jitter_scale_arg_linear) {
+            prometheus_config.jitter.scale = metrics::HistogramScale_Linear;
+        } else {
+            prometheus_config.jitter.scale = metrics::HistogramScale_Log;
+        }
+    }
     if (args.prometheus_rtt_buckets_given) {
         prometheus_config.rtt.buckets = args.prometheus_rtt_buckets_arg;
     }
@@ -726,6 +749,13 @@ int main(int argc, char** argv) {
                                   prometheus_config.rtt.max)) {
             roc_log(LogError, "invalid --prometheus-rtt-max: bad format");
             return 1;
+        }
+    }
+    if (args.prometheus_rtt_scale_given) {
+        if (args.prometheus_rtt_scale_arg == prometheus_rtt_scale_arg_linear) {
+            prometheus_config.rtt.scale = metrics::HistogramScale_Linear;
+        } else {
+            prometheus_config.rtt.scale = metrics::HistogramScale_Log;
         }
     }
 

@@ -181,7 +181,7 @@ LatencyTuner::LatencyTuner(const LatencyConfig& latency_config,
                            .Help("Current network input queue (NIQ) latency in seconds")
                            .Register(*registry);
     niq_latency_histogram_ = &niq_family.Add(
-        { }, metrics::generate_logspace_buckets(latency_config.prometheus.niq_latency));
+        { }, metrics::generate_histogram_buckets(latency_config.prometheus.niq_latency));
 #endif
 
     init_status_ = status::StatusOK;

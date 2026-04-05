@@ -39,6 +39,10 @@ enum enum_resampler_backend { resampler_backend__NULL = -1, resampler_backend_ar
 enum enum_resampler_profile { resampler_profile__NULL = -1, resampler_profile_arg_low = 0, resampler_profile_arg_medium, resampler_profile_arg_high };
 enum enum_latency_backend { latency_backend__NULL = -1, latency_backend_arg_niq = 0 };
 enum enum_latency_profile { latency_profile__NULL = -1, latency_profile_arg_responsive = 0, latency_profile_arg_gradual, latency_profile_arg_intact };
+enum enum_prometheus_niq_latency_scale { prometheus_niq_latency_scale__NULL = -1, prometheus_niq_latency_scale_arg_log = 0, prometheus_niq_latency_scale_arg_linear };
+enum enum_prometheus_e2e_latency_scale { prometheus_e2e_latency_scale__NULL = -1, prometheus_e2e_latency_scale_arg_log = 0, prometheus_e2e_latency_scale_arg_linear };
+enum enum_prometheus_jitter_scale { prometheus_jitter_scale__NULL = -1, prometheus_jitter_scale_arg_log = 0, prometheus_jitter_scale_arg_linear };
+enum enum_prometheus_rtt_scale { prometheus_rtt_scale__NULL = -1, prometheus_rtt_scale_arg_log = 0, prometheus_rtt_scale_arg_linear };
 
 /** @brief Where the command line options are stored */
 struct gengetopt_args_info
@@ -139,6 +143,9 @@ struct gengetopt_args_info
   char * prometheus_niq_latency_max_arg;	/**< @brief Maximum NIQ latency bucket boundary, TIME units (default='50ms').  */
   char * prometheus_niq_latency_max_orig;	/**< @brief Maximum NIQ latency bucket boundary, TIME units original value given at command line.  */
   const char *prometheus_niq_latency_max_help; /**< @brief Maximum NIQ latency bucket boundary, TIME units help description.  */
+  enum enum_prometheus_niq_latency_scale prometheus_niq_latency_scale_arg;	/**< @brief Bucket spacing for NIQ latency histogram (default='log').  */
+  char * prometheus_niq_latency_scale_orig;	/**< @brief Bucket spacing for NIQ latency histogram original value given at command line.  */
+  const char *prometheus_niq_latency_scale_help; /**< @brief Bucket spacing for NIQ latency histogram help description.  */
   int prometheus_e2e_latency_buckets_arg;	/**< @brief Number of histogram buckets for E2E latency metrics (default='100').  */
   char * prometheus_e2e_latency_buckets_orig;	/**< @brief Number of histogram buckets for E2E latency metrics original value given at command line.  */
   const char *prometheus_e2e_latency_buckets_help; /**< @brief Number of histogram buckets for E2E latency metrics help description.  */
@@ -148,6 +155,9 @@ struct gengetopt_args_info
   char * prometheus_e2e_latency_max_arg;	/**< @brief Maximum E2E latency bucket boundary, TIME units (default='200ms').  */
   char * prometheus_e2e_latency_max_orig;	/**< @brief Maximum E2E latency bucket boundary, TIME units original value given at command line.  */
   const char *prometheus_e2e_latency_max_help; /**< @brief Maximum E2E latency bucket boundary, TIME units help description.  */
+  enum enum_prometheus_e2e_latency_scale prometheus_e2e_latency_scale_arg;	/**< @brief Bucket spacing for E2E latency histogram (default='log').  */
+  char * prometheus_e2e_latency_scale_orig;	/**< @brief Bucket spacing for E2E latency histogram original value given at command line.  */
+  const char *prometheus_e2e_latency_scale_help; /**< @brief Bucket spacing for E2E latency histogram help description.  */
   int prometheus_jitter_buckets_arg;	/**< @brief Number of histogram buckets for jitter metrics (default='100').  */
   char * prometheus_jitter_buckets_orig;	/**< @brief Number of histogram buckets for jitter metrics original value given at command line.  */
   const char *prometheus_jitter_buckets_help; /**< @brief Number of histogram buckets for jitter metrics help description.  */
@@ -157,6 +167,9 @@ struct gengetopt_args_info
   char * prometheus_jitter_max_arg;	/**< @brief Maximum jitter bucket boundary, TIME units (default='200ms').  */
   char * prometheus_jitter_max_orig;	/**< @brief Maximum jitter bucket boundary, TIME units original value given at command line.  */
   const char *prometheus_jitter_max_help; /**< @brief Maximum jitter bucket boundary, TIME units help description.  */
+  enum enum_prometheus_jitter_scale prometheus_jitter_scale_arg;	/**< @brief Bucket spacing for jitter histogram (default='log').  */
+  char * prometheus_jitter_scale_orig;	/**< @brief Bucket spacing for jitter histogram original value given at command line.  */
+  const char *prometheus_jitter_scale_help; /**< @brief Bucket spacing for jitter histogram help description.  */
   int prometheus_rtt_buckets_arg;	/**< @brief Number of histogram buckets for RTT metrics (default='100').  */
   char * prometheus_rtt_buckets_orig;	/**< @brief Number of histogram buckets for RTT metrics original value given at command line.  */
   const char *prometheus_rtt_buckets_help; /**< @brief Number of histogram buckets for RTT metrics help description.  */
@@ -166,6 +179,9 @@ struct gengetopt_args_info
   char * prometheus_rtt_max_arg;	/**< @brief Maximum RTT bucket boundary, TIME units (default='100ms').  */
   char * prometheus_rtt_max_orig;	/**< @brief Maximum RTT bucket boundary, TIME units original value given at command line.  */
   const char *prometheus_rtt_max_help; /**< @brief Maximum RTT bucket boundary, TIME units help description.  */
+  enum enum_prometheus_rtt_scale prometheus_rtt_scale_arg;	/**< @brief Bucket spacing for RTT histogram (default='log').  */
+  char * prometheus_rtt_scale_orig;	/**< @brief Bucket spacing for RTT histogram original value given at command line.  */
+  const char *prometheus_rtt_scale_help; /**< @brief Bucket spacing for RTT histogram help description.  */
   char * max_packet_size_arg;	/**< @brief Maximum network packet size, SIZE units.  */
   char * max_packet_size_orig;	/**< @brief Maximum network packet size, SIZE units original value given at command line.  */
   const char *max_packet_size_help; /**< @brief Maximum network packet size, SIZE units help description.  */
@@ -210,15 +226,19 @@ struct gengetopt_args_info
   unsigned int prometheus_niq_latency_buckets_given ;	/**< @brief Whether prometheus-niq-latency-buckets was given.  */
   unsigned int prometheus_niq_latency_min_given ;	/**< @brief Whether prometheus-niq-latency-min was given.  */
   unsigned int prometheus_niq_latency_max_given ;	/**< @brief Whether prometheus-niq-latency-max was given.  */
+  unsigned int prometheus_niq_latency_scale_given ;	/**< @brief Whether prometheus-niq-latency-scale was given.  */
   unsigned int prometheus_e2e_latency_buckets_given ;	/**< @brief Whether prometheus-e2e-latency-buckets was given.  */
   unsigned int prometheus_e2e_latency_min_given ;	/**< @brief Whether prometheus-e2e-latency-min was given.  */
   unsigned int prometheus_e2e_latency_max_given ;	/**< @brief Whether prometheus-e2e-latency-max was given.  */
+  unsigned int prometheus_e2e_latency_scale_given ;	/**< @brief Whether prometheus-e2e-latency-scale was given.  */
   unsigned int prometheus_jitter_buckets_given ;	/**< @brief Whether prometheus-jitter-buckets was given.  */
   unsigned int prometheus_jitter_min_given ;	/**< @brief Whether prometheus-jitter-min was given.  */
   unsigned int prometheus_jitter_max_given ;	/**< @brief Whether prometheus-jitter-max was given.  */
+  unsigned int prometheus_jitter_scale_given ;	/**< @brief Whether prometheus-jitter-scale was given.  */
   unsigned int prometheus_rtt_buckets_given ;	/**< @brief Whether prometheus-rtt-buckets was given.  */
   unsigned int prometheus_rtt_min_given ;	/**< @brief Whether prometheus-rtt-min was given.  */
   unsigned int prometheus_rtt_max_given ;	/**< @brief Whether prometheus-rtt-max was given.  */
+  unsigned int prometheus_rtt_scale_given ;	/**< @brief Whether prometheus-rtt-scale was given.  */
   unsigned int max_packet_size_given ;	/**< @brief Whether max-packet-size was given.  */
   unsigned int max_frame_size_given ;	/**< @brief Whether max-frame-size was given.  */
   unsigned int prof_given ;	/**< @brief Whether prof was given.  */
@@ -352,6 +372,10 @@ extern const char *cmdline_parser_resampler_backend_values[];  /**< @brief Possi
 extern const char *cmdline_parser_resampler_profile_values[];  /**< @brief Possible values for resampler-profile. */
 extern const char *cmdline_parser_latency_backend_values[];  /**< @brief Possible values for latency-backend. */
 extern const char *cmdline_parser_latency_profile_values[];  /**< @brief Possible values for latency-profile. */
+extern const char *cmdline_parser_prometheus_niq_latency_scale_values[];  /**< @brief Possible values for prometheus-niq-latency-scale. */
+extern const char *cmdline_parser_prometheus_e2e_latency_scale_values[];  /**< @brief Possible values for prometheus-e2e-latency-scale. */
+extern const char *cmdline_parser_prometheus_jitter_scale_values[];  /**< @brief Possible values for prometheus-jitter-scale. */
+extern const char *cmdline_parser_prometheus_rtt_scale_values[];  /**< @brief Possible values for prometheus-rtt-scale. */
 
 
 #ifdef __cplusplus
