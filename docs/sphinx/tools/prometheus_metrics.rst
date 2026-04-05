@@ -115,6 +115,26 @@ Watchdog
      - Counter
      - Number of times a session was restarted due to timeout
 
+FEC BlockReader
+---------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 12 43
+
+   * - Metric
+     - Type
+     - Description
+   * - ``roc_recv_fec_block_missing``
+     - Histogram
+     - Distribution of missing source packets per FEC block (before + after repair)
+   * - ``roc_recv_fec_block_recovered``
+     - Histogram
+     - Distribution of FEC-recovered source packets per FEC block
+
+Buckets are auto-sized to the FEC block length (one bucket per integer: 0, 1, 2, ..., N).
+No CLI configuration needed.
+
 LinkMeter
 ---------
 

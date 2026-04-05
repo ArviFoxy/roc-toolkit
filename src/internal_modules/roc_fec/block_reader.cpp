@@ -12,6 +12,13 @@
 #include "roc_packet/fec_scheme.h"
 #include "roc_status/code_to_str.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include "roc_metrics/prometheus.h"
+#include <prometheus/counter.h>
+#include <prometheus/histogram.h>
+#include <prometheus/registry.h>
+#endif
+
 namespace roc {
 namespace fec {
 
@@ -45,10 +52,35 @@ BlockReader::BlockReader(const BlockReaderConfig& config,
     , block_max_duration_(0)
     , max_sbn_jump_(config.max_sbn_jump)
     , fec_scheme_(fec_scheme)
-    , init_status_(status::NoStatus) {
+    , init_status_(status::NoStatus)
+#ifdef ROC_TARGET_PROMETHEUS
+    , fec_histogram_block_size_(0)
+    , fec_missing_family_(NULL)
+    , fec_recovered_family_(NULL)
+    , fec_missing_histogram_(NULL)
+    , fec_recovered_histogram_(NULL)
+#endif
+{
     if ((init_status_ = block_decoder_.init_status()) != status::StatusOK) {
         return;
     }
+
+#ifdef ROC_TARGET_PROMETHEUS
+    auto registry = metrics::prometheus_registry();
+
+    fec_missing_family_ =
+        &prometheus::BuildHistogram()
+             .Name("roc_recv_fec_block_missing")
+             .Help("Distribution of missing source packets per FEC block")
+             .Register(*registry);
+
+    fec_recovered_family_ =
+        &prometheus::BuildHistogram()
+             .Name("roc_recv_fec_block_recovered")
+             .Help("Distribution of FEC-recovered source packets per FEC block")
+             .Register(*registry);
+#endif
+
     init_status_ = status::StatusOK;
 }
 
@@ -221,6 +253,23 @@ status::StatusCode BlockReader::next_block_() {
     } else {
         prev_block_timestamp_valid_ = false;
     }
+
+#ifdef ROC_TARGET_PROMETHEUS
+    if (fec_missing_histogram_ && fec_recovered_histogram_) {
+        size_t n_missing = 0;
+        size_t n_recovered = 0;
+        for (size_t n = 0; n < source_block_.size(); n++) {
+            if (!source_block_[n]) {
+                n_missing++;
+            } else if (source_block_[n]->has_flags(packet::Packet::FlagRestored)) {
+                n_missing++;
+                n_recovered++;
+            }
+        }
+        fec_missing_histogram_->Observe(static_cast<double>(n_missing));
+        fec_recovered_histogram_->Observe(static_cast<double>(n_recovered));
+    }
+#endif
 
     for (size_t n = 0; n < source_block_.size(); n++) {
         source_block_[n] = NULL;
@@ -786,6 +835,10 @@ status::StatusCode BlockReader::update_source_block_size_(size_t new_sblen) {
 
     source_block_resized_ = true;
 
+#ifdef ROC_TARGET_PROMETHEUS
+    update_fec_histograms_(new_sblen);
+#endif
+
     return status::StatusOK;
 }
 
@@ -908,6 +961,35 @@ void BlockReader::update_block_duration_(const packet::PacketPtr& curr_block_pkt
         prev_block_timestamp_valid_ = true;
     }
 }
+
+#ifdef ROC_TARGET_PROMETHEUS
+void BlockReader::update_fec_histograms_(size_t block_size) {
+    if (block_size == fec_histogram_block_size_) {
+        return;
+    }
+
+    // One bucket per integer: {0, 1, 2, ..., block_size}
+    std::vector<double> buckets(block_size + 1);
+    for (size_t i = 0; i <= block_size; ++i) {
+        buckets[i] = static_cast<double>(i);
+    }
+
+    if (fec_missing_histogram_) {
+        fec_missing_family_->Remove(fec_missing_histogram_);
+    }
+    fec_missing_histogram_ = &fec_missing_family_->Add({ }, buckets);
+
+    if (fec_recovered_histogram_) {
+        fec_recovered_family_->Remove(fec_recovered_histogram_);
+    }
+    fec_recovered_histogram_ = &fec_recovered_family_->Add({ }, buckets);
+
+    fec_histogram_block_size_ = block_size;
+
+    roc_log(LogDebug, "fec block reader: updated FEC histograms: block_size=%lu",
+            (unsigned long)block_size);
+}
+#endif
 
 } // namespace fec
 } // namespace roc

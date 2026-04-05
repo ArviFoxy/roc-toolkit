@@ -23,6 +23,13 @@
 #include "roc_packet/packet_factory.h"
 #include "roc_packet/sorted_queue.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+namespace prometheus {
+template <typename T> class Family;
+class Histogram;
+} // namespace prometheus
+#endif
+
 namespace roc {
 namespace fec {
 
@@ -147,6 +154,16 @@ private:
     const packet::FecScheme fec_scheme_;
 
     status::StatusCode init_status_;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    void update_fec_histograms_(size_t block_size);
+
+    size_t fec_histogram_block_size_;
+    prometheus::Family<prometheus::Histogram>* fec_missing_family_;
+    prometheus::Family<prometheus::Histogram>* fec_recovered_family_;
+    prometheus::Histogram* fec_missing_histogram_;
+    prometheus::Histogram* fec_recovered_histogram_;
+#endif
 };
 
 } // namespace fec
