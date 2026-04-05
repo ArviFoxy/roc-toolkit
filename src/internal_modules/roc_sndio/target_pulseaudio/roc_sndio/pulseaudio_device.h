@@ -26,6 +26,15 @@
 #include "roc_sndio/isink.h"
 #include "roc_sndio/isource.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include "roc_metrics/prometheus.h"
+
+namespace prometheus {
+class Counter;
+class Gauge;
+} // namespace prometheus
+#endif // ROC_TARGET_PROMETHEUS
+
 namespace roc {
 namespace sndio {
 
@@ -188,6 +197,12 @@ private:
     core::RateLimiter rate_limiter_;
 
     status::StatusCode init_status_;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    prometheus::Gauge* io_latency_gauge_;
+    prometheus::Gauge* io_target_latency_gauge_;
+    prometheus::Counter* io_stream_restarts_counter_;
+#endif // ROC_TARGET_PROMETHEUS
 };
 
 } // namespace sndio

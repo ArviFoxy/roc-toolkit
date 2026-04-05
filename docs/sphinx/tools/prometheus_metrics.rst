@@ -289,3 +289,30 @@ FeedbackMonitor
    * - ``roc_send_rtt_seconds``
      - Histogram
      - Round-trip time distribution from RTCP timestamp exchange
+
+IO metrics
+==========
+
+These metrics are exported by the PulseAudio/PipeWire audio backend
+and apply to both sender and receiver. The ``device`` label distinguishes
+playback (``sink``) from capture (``source``).
+
+PulseaudioDevice
+----------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 12 43
+
+   * - Metric
+     - Type
+     - Description
+   * - ``roc_io_latency_seconds{device="sink|source"}``
+     - Gauge
+     - Actual IO buffer latency reported by the audio backend
+   * - ``roc_io_target_latency_seconds{device="sink|source"}``
+     - Gauge
+     - Requested IO buffer latency (set at startup)
+   * - ``roc_io_stream_restarts_total{device="sink|source"}``
+     - Counter
+     - Number of times the audio backend stream was restarted due to errors

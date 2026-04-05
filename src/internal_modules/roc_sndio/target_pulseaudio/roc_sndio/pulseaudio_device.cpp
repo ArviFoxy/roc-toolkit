@@ -15,6 +15,12 @@
 #include "roc_core/panic.h"
 #include "roc_status/code_to_str.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include <prometheus/counter.h>
+#include <prometheus/gauge.h>
+#include <prometheus/registry.h>
+#endif // ROC_TARGET_PROMETHEUS
+
 namespace roc {
 namespace sndio {
 
@@ -205,6 +211,35 @@ PulseaudioDevice::PulseaudioDevice(audio::FrameFactory& frame_factory,
     if ((init_status_ = open_()) != status::StatusOK) {
         return;
     }
+
+#ifdef ROC_TARGET_PROMETHEUS
+    {
+        const char* device_label =
+            device_type_ == DeviceType_Sink ? "sink" : "source";
+
+        io_latency_gauge_ =
+            &prometheus::BuildGauge()
+                 .Name("roc_io_latency_seconds")
+                 .Help("Actual IO buffer latency reported by audio backend")
+                 .Register(*metrics::prometheus_registry())
+                 .Add({{"device", device_label}});
+
+        io_target_latency_gauge_ =
+            &prometheus::BuildGauge()
+                 .Name("roc_io_target_latency_seconds")
+                 .Help("Requested IO buffer latency")
+                 .Register(*metrics::prometheus_registry())
+                 .Add({{"device", device_label}});
+        io_target_latency_gauge_->Set((double)target_latency_ns_ / 1e9);
+
+        io_stream_restarts_counter_ =
+            &prometheus::BuildCounter()
+                 .Name("roc_io_stream_restarts_total")
+                 .Help("Number of times the audio stream was restarted")
+                 .Register(*metrics::prometheus_registry())
+                 .Add({{"device", device_label}});
+    }
+#endif // ROC_TARGET_PROMETHEUS
 
     init_status_ = status::StatusOK;
 }
@@ -405,6 +440,10 @@ status::StatusCode PulseaudioDevice::handle_request_(uint8_t* data, size_t size)
         if (ret < 0) {
             roc_log(LogInfo, "pulseaudio %s: restarting stream",
                     device_type_to_str(device_type_));
+
+#ifdef ROC_TARGET_PROMETHEUS
+            io_stream_restarts_counter_->Increment();
+#endif // ROC_TARGET_PROMETHEUS
 
             close_();
 
@@ -1047,13 +1086,17 @@ bool PulseaudioDevice::get_latency_(core::nanoseconds_t& result) const {
 }
 
 void PulseaudioDevice::report_latency_() {
-    if (!rate_limiter_.allow()) {
-        return;
-    }
-
     core::nanoseconds_t latency = 0;
 
     if (!get_latency_(latency)) {
+        return;
+    }
+
+#ifdef ROC_TARGET_PROMETHEUS
+    io_latency_gauge_->Set((double)latency / 1e9);
+#endif // ROC_TARGET_PROMETHEUS
+
+    if (!rate_limiter_.allow()) {
         return;
     }
 
