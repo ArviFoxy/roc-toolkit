@@ -75,6 +75,7 @@ bool FreqEstimatorConfig::deduce_defaults(LatencyTunerProfile latency_profile) {
         break;
 
     case LatencyTunerProfile_Intact:
+    case LatencyTunerProfile_SecondOrder:
         break;
 
     default:

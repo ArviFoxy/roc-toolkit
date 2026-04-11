@@ -767,6 +767,10 @@ bool latency_tuner_profile_from_user(audio::LatencyTunerProfile& out,
     case ROC_LATENCY_TUNER_PROFILE_GRADUAL:
         out = audio::LatencyTunerProfile_Gradual;
         return true;
+
+    case ROC_LATENCY_TUNER_PROFILE_SECOND_ORDER:
+        out = audio::LatencyTunerProfile_SecondOrder;
+        return true;
     }
 
     return false;

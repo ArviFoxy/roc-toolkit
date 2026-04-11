@@ -288,6 +288,9 @@ const char* latency_tuner_profile_to_str(LatencyTunerProfile profile) {
 
     case LatencyTunerProfile_Gradual:
         return "gradual";
+
+    case LatencyTunerProfile_SecondOrder:
+        return "second-order";
     }
 
     return "<invalid>";

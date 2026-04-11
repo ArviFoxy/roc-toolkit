@@ -31,13 +31,13 @@ extern "C" {
 
 #ifndef CMDLINE_PARSER_VERSION
 /** @brief the program version */
-#define CMDLINE_PARSER_VERSION VERSION
+#define CMDLINE_PARSER_VERSION "0.4.0 (205ff68d52)"
 #endif
 
 enum enum_color { color__NULL = -1, color_arg_auto = 0, color_arg_always, color_arg_never };
 enum enum_plc { plc__NULL = -1, plc_arg_none = 0, plc_arg_beep };
 enum enum_latency_backend { latency_backend__NULL = -1, latency_backend_arg_niq = 0, latency_backend_arg_e2e };
-enum enum_latency_profile { latency_profile__NULL = -1, latency_profile_arg_auto = 0, latency_profile_arg_responsive, latency_profile_arg_gradual, latency_profile_arg_intact };
+enum enum_latency_profile { latency_profile__NULL = -1, latency_profile_arg_auto = 0, latency_profile_arg_responsive, latency_profile_arg_gradual, latency_profile_arg_secondMINUS_order, latency_profile_arg_intact };
 enum enum_resampler_backend { resampler_backend__NULL = -1, resampler_backend_arg_auto = 0, resampler_backend_arg_builtin, resampler_backend_arg_speex, resampler_backend_arg_speexdec };
 enum enum_resampler_profile { resampler_profile__NULL = -1, resampler_profile_arg_low = 0, resampler_profile_arg_medium, resampler_profile_arg_high };
 enum enum_prometheus_niq_latency_scale { prometheus_niq_latency_scale__NULL = -1, prometheus_niq_latency_scale_arg_log = 0, prometheus_niq_latency_scale_arg_linear };
@@ -115,6 +115,9 @@ struct gengetopt_args_info
   enum enum_resampler_profile resampler_profile_arg;	/**< @brief Resampler profile (default='medium').  */
   char * resampler_profile_orig;	/**< @brief Resampler profile original value given at command line.  */
   const char *resampler_profile_help; /**< @brief Resampler profile help description.  */
+  double latency_aggressiveness_arg;	/**< @brief Latency controller aggressiveness (K1 spring gain) (default='1e-5').  */
+  char * latency_aggressiveness_orig;	/**< @brief Latency controller aggressiveness (K1 spring gain) original value given at command line.  */
+  const char *latency_aggressiveness_help; /**< @brief Latency controller aggressiveness (K1 spring gain) help description.  */
   char * target_latency_arg;	/**< @brief Target latency, TIME units or 'auto' for adaptive mode (default='auto').  */
   char * target_latency_orig;	/**< @brief Target latency, TIME units or 'auto' for adaptive mode original value given at command line.  */
   const char *target_latency_help; /**< @brief Target latency, TIME units or 'auto' for adaptive mode help description.  */
@@ -221,6 +224,7 @@ struct gengetopt_args_info
   unsigned int latency_profile_given ;	/**< @brief Whether latency-profile was given.  */
   unsigned int resampler_backend_given ;	/**< @brief Whether resampler-backend was given.  */
   unsigned int resampler_profile_given ;	/**< @brief Whether resampler-profile was given.  */
+  unsigned int latency_aggressiveness_given ;	/**< @brief Whether latency-aggressiveness was given.  */
   unsigned int target_latency_given ;	/**< @brief Whether target-latency was given.  */
   unsigned int latency_tolerance_given ;	/**< @brief Whether latency-tolerance was given.  */
   unsigned int start_latency_given ;	/**< @brief Whether start-latency was given.  */

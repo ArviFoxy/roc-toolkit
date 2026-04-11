@@ -53,7 +53,13 @@ enum LatencyTunerProfile {
 
     //! Slow and smooth adjustment.
     //! Good for higher network latency and jitter.
-    LatencyTunerProfile_Gradual
+    LatencyTunerProfile_Gradual,
+
+    //! Second-order profile.
+    //! Uses a feedforward drift estimator from RTP timestamps plus
+    //! an H2-optimal damped-oscillator feedback controller.
+    //! Recommended for all use cases.
+    LatencyTunerProfile_SecondOrder
 };
 
 //! Latency settings.
@@ -137,6 +143,16 @@ struct LatencyConfig {
     //!  For example, 0.01 allows freq_coeff values in range [0.99; 1.01].
     float scaling_tolerance;
 
+    //! Controller aggressiveness (K1 spring gain) for the second-order profile.
+    //! @remarks
+    //!  Higher values give tighter latency control (lower Var[e]) at the
+    //!  expense of warp smoothness (higher Var[du/dt]).
+    //!  For multi-speaker sync, increase this value.
+    //! @note
+    //!  Only used when tuner_profile is SecondOrder.
+    //!  If zero, default value is used.
+    double latency_aggressiveness;
+
     //! Latency tuner decides to adjust target latency if
     //! the current value >= estimated optimal latency *
     //! latency_decrease_relative_threshold_.
@@ -181,6 +197,7 @@ struct LatencyConfig {
         , stale_tolerance(0)
         , scaling_interval(5 * core::Millisecond)
         , scaling_tolerance(0.005f)
+        , latency_aggressiveness(0)
         , latency_decrease_relative_threshold(1.7f)
         , starting_timeout(5 * core::Second)
         , cooldown_dec_timeout(5 * core::Second)

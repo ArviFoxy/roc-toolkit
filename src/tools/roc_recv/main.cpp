@@ -181,6 +181,10 @@ bool build_receiver_config(const gengetopt_args_info& args,
         receiver_config.session_defaults.latency.tuner_profile =
             audio::LatencyTunerProfile_Intact;
         break;
+    case latency_profile_arg_secondMINUS_order:
+        receiver_config.session_defaults.latency.tuner_profile =
+            audio::LatencyTunerProfile_SecondOrder;
+        break;
     default:
         break;
     }
@@ -220,6 +224,11 @@ bool build_receiver_config(const gengetopt_args_info& args,
         break;
     }
 
+    if (args.latency_aggressiveness_given) {
+        receiver_config.session_defaults.latency.latency_aggressiveness =
+            args.latency_aggressiveness_arg;
+    }
+
     switch (args.latency_backend_arg) {
     case latency_backend_arg_niq:
         receiver_config.session_defaults.latency.tuner_backend =
@@ -245,6 +254,10 @@ bool build_receiver_config(const gengetopt_args_info& args,
     case latency_profile_arg_intact:
         receiver_config.session_defaults.latency.tuner_profile =
             audio::LatencyTunerProfile_Intact;
+        break;
+    case latency_profile_arg_secondMINUS_order:
+        receiver_config.session_defaults.latency.tuner_profile =
+            audio::LatencyTunerProfile_SecondOrder;
         break;
     default:
         break;

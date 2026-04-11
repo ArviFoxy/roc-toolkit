@@ -89,7 +89,16 @@ LatencyTuner::LatencyTuner(const LatencyConfig& latency_config,
           latency_config.latency_decrease_relative_threshold))
     , last_lat_limiter_(LogInterval, 1)
     , dumper_(dumper)
-    , init_status_(status::NoStatus) {
+    , init_status_(status::NoStatus)
+    , obj_ema_alpha_((double)latency_config.scaling_interval / (30.0 * 1e9))
+    , obj_ema_w_(1.0)
+    , obj_error_mean_(0)
+    , obj_error_sq_(0)
+    , obj_error_cube_(0)
+    , obj_warp_deriv_sq_(0)
+    , prev_freq_coeff_(0)
+    , sample_rate_((double)sample_spec.sample_rate())
+    , scale_interval_sec_((double)latency_config.scaling_interval / 1e9) {
     roc_log(
         LogDebug,
         "latency tuner: initializing:"
@@ -161,9 +170,23 @@ LatencyTuner::LatencyTuner(const LatencyConfig& latency_config,
         }
 
         if (enable_latency_adjustment_) {
-            fe_.reset(new (fe_) FreqEstimator(
-                fe_config, (packet::stream_timestamp_t)cur_target_latency_, sample_spec,
-                dumper_));
+            if (profile_ == LatencyTunerProfile_SecondOrder) {
+                PreciseFreqEstimatorConfig pfe_config;
+                if (latency_config.latency_aggressiveness > 0) {
+                    pfe_config.spring_gain = latency_config.latency_aggressiveness;
+                }
+                pfe_.reset(new (pfe_) PreciseFreqEstimator(
+                    pfe_config,
+                    (packet::stream_timestamp_t)cur_target_latency_,
+                    latency_config.scaling_interval,
+                    sample_spec,
+                    dumper_));
+            } else {
+                fe_.reset(new (fe_) FreqEstimator(
+                    fe_config,
+                    (packet::stream_timestamp_t)cur_target_latency_, sample_spec,
+                    dumper_));
+            }
         }
     }
 
@@ -182,6 +205,34 @@ LatencyTuner::LatencyTuner(const LatencyConfig& latency_config,
                            .Register(*registry);
     niq_latency_histogram_ = &niq_family.Add(
         { }, metrics::generate_histogram_buckets(latency_config.prometheus.niq_latency));
+
+    obj_error_mean_gauge_ =
+        &prometheus::BuildGauge()
+             .Name("roc_recv_controller_error_mean_seconds")
+             .Help("Smoothed mean queue error in seconds (bias indicator)")
+             .Register(*registry)
+             .Add({ });
+
+    obj_error_stddev_gauge_ =
+        &prometheus::BuildGauge()
+             .Name("roc_recv_controller_error_stddev_seconds")
+             .Help("Smoothed standard deviation of queue error in seconds")
+             .Register(*registry)
+             .Add({ });
+
+    obj_warp_deriv_rms_gauge_ =
+        &prometheus::BuildGauge()
+             .Name("roc_recv_controller_warp_derivative_rms")
+             .Help("RMS of the rate of change of freq_coeff (warp smoothness)")
+             .Register(*registry)
+             .Add({ });
+
+    obj_error_skewness_gauge_ =
+        &prometheus::BuildGauge()
+             .Name("roc_recv_controller_error_skewness_coeff")
+             .Help("Standardized skewness of queue error E[(e-mu)^3]/sigma^3 (dimensionless)")
+             .Register(*registry)
+             .Add({ });
 #endif
 
     init_status_ = status::StatusOK;
@@ -354,17 +405,82 @@ void LatencyTuner::compute_scaling_(packet::stream_timestamp_diff_t actual_laten
         return;
     }
 
-    while (packet::stream_timestamp_ge(stream_pos_, scale_pos_)) {
-        fe_->update_stream_position(stream_pos_);
-        fe_->update_current_latency((packet::stream_timestamp_t)actual_latency);
-        scale_pos_ += scale_interval_;
+    if (pfe_) {
+        while (packet::stream_timestamp_ge(stream_pos_, scale_pos_)) {
+            pfe_->update_stream_position(stream_pos_);
+            pfe_->update((packet::stream_timestamp_t)actual_latency);
+            scale_pos_ += scale_interval_;
+        }
+
+        has_new_freq_coeff_ = true;
+        freq_coeff_ = pfe_->freq_coeff();
+    } else {
+        while (packet::stream_timestamp_ge(stream_pos_, scale_pos_)) {
+            fe_->update_stream_position(stream_pos_);
+            fe_->update_current_latency((packet::stream_timestamp_t)actual_latency);
+            scale_pos_ += scale_interval_;
+        }
+
+        has_new_freq_coeff_ = true;
+        freq_coeff_ = fe_->freq_coeff();
     }
 
-    has_new_freq_coeff_ = true;
-
-    freq_coeff_ = fe_->freq_coeff();
     freq_coeff_ = std::min(freq_coeff_, 1.0f + freq_coeff_max_delta_);
     freq_coeff_ = std::max(freq_coeff_, 1.0f - freq_coeff_max_delta_);
+
+    // --- Controller-independent objective metrics ---
+    // Computed after the controller has produced freq_coeff_, so they
+    // measure closed-loop performance regardless of controller type.
+
+    // Update bias correction weight: w_{n+1} = (1-alpha) * w_n.
+    // Starts at 1.0, decays to 0. Corrected EMA = raw / (1 - w).
+    obj_ema_w_ *= (1.0 - obj_ema_alpha_);
+    const double bias_corr = 1.0 - obj_ema_w_;
+
+    // J1/J2/J3: Queue error statistics (bias, variance, skewness).
+    const double error = (double)actual_latency - (double)cur_target_latency_;
+    obj_error_mean_ = (1.0 - obj_ema_alpha_) * obj_error_mean_
+                    + obj_ema_alpha_ * error;
+    obj_error_sq_   = (1.0 - obj_ema_alpha_) * obj_error_sq_
+                    + obj_ema_alpha_ * error * error;
+    obj_error_cube_ = (1.0 - obj_ema_alpha_) * obj_error_cube_
+                    + obj_ema_alpha_ * error * error * error;
+
+    // J4: Warp derivative (rate of change of freq_coeff).
+    if (prev_freq_coeff_ > 0 && scale_interval_sec_ > 0) {
+        const double du_dt =
+            ((double)freq_coeff_ - (double)prev_freq_coeff_) / scale_interval_sec_;
+        obj_warp_deriv_sq_ = (1.0 - obj_ema_alpha_) * obj_warp_deriv_sq_
+                           + obj_ema_alpha_ * du_dt * du_dt;
+    }
+    prev_freq_coeff_ = freq_coeff_;
+
+    // Apply bias correction and convert to physical units.
+    if (bias_corr > 0) {
+        const double mean_corr = obj_error_mean_ / bias_corr;
+        const double sq_corr   = obj_error_sq_ / bias_corr;
+        const double cube_corr = obj_error_cube_ / bias_corr;
+        const double variance  = sq_corr - mean_corr * mean_corr;
+        const double stddev    = variance > 0 ? std::sqrt(variance) : 0;
+        const double warp_rms  = std::sqrt(obj_warp_deriv_sq_ / bias_corr);
+
+        // Skewness = E[(e - mu)^3] / sigma^3
+        // E[(e-mu)^3] = E[e^3] - 3*mu*E[e^2] + 2*mu^3
+        double skewness = 0;
+        if (stddev > 0) {
+            const double mu3 = cube_corr
+                             - 3.0 * mean_corr * sq_corr
+                             + 2.0 * mean_corr * mean_corr * mean_corr;
+            skewness = mu3 / (stddev * stddev * stddev);
+        }
+
+#ifdef ROC_TARGET_PROMETHEUS
+        obj_error_mean_gauge_->Set(mean_corr / sample_rate_);
+        obj_error_stddev_gauge_->Set(stddev / sample_rate_);
+        obj_warp_deriv_rms_gauge_->Set(warp_rms);
+        obj_error_skewness_gauge_->Set(skewness);
+#endif
+    }
 }
 
 // Decides if the latency should be adjusted and orders fe_ to do so if needed.

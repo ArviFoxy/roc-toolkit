@@ -1,0 +1,86 @@
+\contentsline {section}{\numberline {1}Introduction}{3}{section.1}%
+\contentsline {section}{\numberline {2}System Model}{3}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Clocks and Drift}{3}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}Packet Emission}{3}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Network Transit and Arrival Times}{4}{subsection.2.3}%
+\contentsline {paragraph}{Arrival time in receiver clock.}{4}{section*.2}%
+\contentsline {section}{\numberline {3}Controller Model}{4}{section.3}%
+\contentsline {subsection}{\numberline {3.1}Arrival Process}{5}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}Warp Rate}{5}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Queue Dynamics}{5}{subsection.3.3}%
+\contentsline {subsection}{\numberline {3.4}Observable Information}{6}{subsection.3.4}%
+\contentsline {subsection}{\numberline {3.5}Definition of a Controller}{6}{subsection.3.5}%
+\contentsline {section}{\numberline {4}Objectives}{7}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Warp Smoothness}{7}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}Latency Regulation}{7}{subsection.4.2}%
+\contentsline {paragraph}{Bias (mean error).}{7}{section*.3}%
+\contentsline {paragraph}{Variance (error fluctuation).}{7}{section*.4}%
+\contentsline {subsection}{\numberline {4.3}Underrun and Overrun Avoidance}{8}{subsection.4.3}%
+\contentsline {subsubsection}{\numberline {4.3.1}Overruns}{8}{subsubsection.4.3.1}%
+\contentsline {subsubsection}{\numberline {4.3.2}Underruns}{8}{subsubsection.4.3.2}%
+\contentsline {section}{\numberline {5}Fluid Approximation}{8}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Discrete Queue Recurrence}{9}{subsection.5.1}%
+\contentsline {paragraph}{Expanding.}{9}{section*.5}%
+\contentsline {subsection}{\numberline {5.2}Summing Over a Control Epoch}{9}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}Central Limit Passage}{10}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}The Fluid SDE}{10}{subsection.5.4}%
+\contentsline {paragraph}{Derivation of $\sigma _w$.}{10}{section*.6}%
+\contentsline {paragraph}{Simplified form.}{11}{section*.7}%
+\contentsline {subsection}{\numberline {5.5}Queue Error SDE}{11}{subsection.5.5}%
+\contentsline {subsection}{\numberline {5.6}Validity and Limitations}{11}{subsection.5.6}%
+\contentsline {section}{\numberline {6}Analysis of the Proportional Controller}{11}{section.6}%
+\contentsline {subsection}{\numberline {6.1}Pure Feedforward is Insufficient}{11}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Feedforward Plus Proportional Feedback}{12}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Stationary Distribution}{12}{subsection.6.3}%
+\contentsline {subsection}{\numberline {6.4}The Fundamental Tradeoff}{12}{subsection.6.4}%
+\contentsline {subsection}{\numberline {6.5}Underrun Probability}{13}{subsection.6.5}%
+\contentsline {section}{\numberline {7}Spectral Analysis}{13}{section.7}%
+\contentsline {subsection}{\numberline {7.1}Plant Transfer Function}{13}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}PSD Propagation}{14}{subsection.7.2}%
+\contentsline {subsection}{\numberline {7.3}Closed-Loop Transfer Functions}{14}{subsection.7.3}%
+\contentsline {paragraph}{Noise to queue error.}{14}{section*.8}%
+\contentsline {paragraph}{Noise to warp rate.}{14}{section*.9}%
+\contentsline {paragraph}{Noise to warp rate derivative.}{14}{section*.10}%
+\contentsline {subsection}{\numberline {7.4}Output PSDs and Variances}{14}{subsection.7.4}%
+\contentsline {paragraph}{Queue error.}{15}{section*.11}%
+\contentsline {paragraph}{Warp rate.}{15}{section*.12}%
+\contentsline {paragraph}{Warp rate derivative.}{15}{section*.13}%
+\contentsline {section}{\numberline {8}Second-Order Controller}{16}{section.8}%
+\contentsline {subsection}{\numberline {8.1}Augmented State Space}{16}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}Control Law}{16}{subsection.8.2}%
+\contentsline {subsection}{\numberline {8.3}Closed-Loop Transfer Functions}{16}{subsection.8.3}%
+\contentsline {paragraph}{Noise to queue error.}{17}{section*.14}%
+\contentsline {paragraph}{Noise to warp rate.}{17}{section*.15}%
+\contentsline {paragraph}{Noise to warp rate derivative.}{17}{section*.16}%
+\contentsline {subsection}{\numberline {8.4}Stationary Variances}{17}{subsection.8.4}%
+\contentsline {subsection}{\numberline {8.5}In Terms of Oscillator Parameters}{18}{subsection.8.5}%
+\contentsline {subsection}{\numberline {8.6}Dropping the Warp Magnitude Objective}{18}{subsection.8.6}%
+\contentsline {subsection}{\numberline {8.7}Optimal Gains}{18}{subsection.8.7}%
+\contentsline {subsection}{\numberline {8.8}Optimal Variances}{19}{subsection.8.8}%
+\contentsline {subsection}{\numberline {8.9}Steady-State Bias}{19}{subsection.8.9}%
+\contentsline {subsubsection}{\numberline {8.9.1}Equilibrium Analysis}{19}{subsubsection.8.9.1}%
+\contentsline {paragraph}{Numerical magnitude.}{20}{section*.17}%
+\contentsline {subsubsection}{\numberline {8.9.2}Root Cause: System Type}{20}{subsubsection.8.9.2}%
+\contentsline {subsubsection}{\numberline {8.9.3}Why the H2 Cost Misses the Bias}{20}{subsubsection.8.9.3}%
+\contentsline {subsubsection}{\numberline {8.9.4}Towards Zero Bias: Type~2 Design}{20}{subsubsection.8.9.4}%
+\contentsline {paragraph}{Steady-state verification.}{20}{section*.18}%
+\contentsline {subsubsection}{\numberline {8.9.5}PID Interpretation}{21}{subsubsection.8.9.5}%
+\contentsline {subsubsection}{\numberline {8.9.6}Closed-Loop Transfer Functions}{21}{subsubsection.8.9.6}%
+\contentsline {subsubsection}{\numberline {8.9.7}Dominant-Pole Gain Design}{21}{subsubsection.8.9.7}%
+\contentsline {subsubsection}{\numberline {8.9.8}Effect on Variances}{22}{subsubsection.8.9.8}%
+\contentsline {paragraph}{Numerical overhead.}{22}{section*.19}%
+\contentsline {subsubsection}{\numberline {8.9.9}The Full Three-Objective Cost}{22}{subsubsection.8.9.9}%
+\contentsline {subsection}{\numberline {8.10}Discrete-Time Implementation}{23}{subsection.8.10}%
+\contentsline {section}{\numberline {9}Skewness and Asymmetric Control}{23}{section.9}%
+\contentsline {subsection}{\numberline {9.1}Physical Origin of Skewness}{24}{subsection.9.1}%
+\contentsline {subsection}{\numberline {9.2}Asymmetric Proportional Controller}{24}{subsection.9.2}%
+\contentsline {subsection}{\numberline {9.3}Fokker--Planck Equation}{24}{subsection.9.3}%
+\contentsline {paragraph}{Matching conditions.}{25}{section*.20}%
+\contentsline {paragraph}{Normalisation.}{25}{section*.21}%
+\contentsline {subsection}{\numberline {9.4}Moments of the Split Normal}{25}{subsection.9.4}%
+\contentsline {paragraph}{Mean.}{25}{section*.22}%
+\contentsline {paragraph}{Second moment and variance.}{25}{section*.23}%
+\contentsline {paragraph}{Skewness.}{25}{section*.24}%
+\contentsline {subsection}{\numberline {9.5}Underrun Probability}{26}{subsection.9.5}%
+\contentsline {subsection}{\numberline {9.6}The Variance--Skewness Tradeoff}{26}{subsection.9.6}%
+\contentsline {subsection}{\numberline {9.7}Extension to the PID Controller}{26}{subsection.9.7}%

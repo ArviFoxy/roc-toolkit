@@ -154,6 +154,12 @@ LinkMeter
    * - ``roc_recv_packets_received_total``
      - Counter
      - Total packets received
+   * - ``roc_recv_clock_drift_ppm``
+     - Gauge
+     - Estimated clock drift between sender and receiver in ppm, from RTP timestamps
+   * - ``roc_recv_clock_drift_stddev_ppm``
+     - Gauge
+     - Standard deviation of clock drift estimate in ppm
 
 JitterMeter
 -----------
@@ -223,6 +229,27 @@ LatencyTuner
    * - ``roc_recv_latency_seconds``
      - Histogram
      - Network input queue (NIQ) latency distribution
+
+PreciseFreqEstimator
+--------------------
+
+These metrics are only active when ``--latency-profile=precise`` is used.
+The ``roc_recv_freq_estimator_coeff`` and ``roc_recv_freq_estimator_stable``
+metrics above are also emitted by this estimator with the same semantics.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 12 43
+
+   * - Metric
+     - Type
+     - Description
+   * - ``roc_recv_freq_estimator_correction``
+     - Gauge
+     - Proportional buffer correction component (K × error)
+   * - ``roc_recv_freq_estimator_correction_rms``
+     - Gauge
+     - Smoothed RMS of proportional correction
 
 LatencyMonitor
 --------------

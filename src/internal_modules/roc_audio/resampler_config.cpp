@@ -19,7 +19,8 @@ bool ResamplerConfig::deduce_defaults(ProcessorMap& processor_map,
         // If responsive profile is set, use builtin backend instead of speex,
         // since it has higher scaling precision. Same applies to E2E backend.
         const bool prefer_builtin_resampler = latency_backend == LatencyTunerBackend_E2e
-            || latency_profile == LatencyTunerProfile_Responsive;
+            || latency_profile == LatencyTunerProfile_Responsive
+            || latency_profile == LatencyTunerProfile_SecondOrder;
 
         // Even if we don't require builtin resampler, if speex backend is not available,
         // we fallback to builtin just because it's always available.

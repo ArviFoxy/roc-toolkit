@@ -49,7 +49,7 @@ section "Encoding options"
         values="niq","e2e" default="niq" enum optional
 
     option "latency-profile" - "Latency tuning profile"
-        values="responsive","gradual","intact" default="intact" enum optional
+        values="responsive","gradual","second-order","intact" default="intact" enum optional
 
     option "resampler-backend" - "Resampler backend"
         values="auto","builtin","speex","speexdec" default="auto" enum optional

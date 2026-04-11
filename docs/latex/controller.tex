@@ -1,0 +1,2079 @@
+\documentclass[11pt, a4paper]{article}
+
+%% ── Packages ──────────────────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+% \usepackage{lmodern}  % disabled: font not fully installed
+
+% Mathematics
+\usepackage{amsmath, amssymb, amsthm, mathtools}
+\usepackage{bm}              % bold math symbols
+
+% Figures & graphics
+\usepackage{graphicx}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=newest}
+
+% Layout & formatting
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{parskip}         % paragraphs separated by vertical space
+\usepackage{enumitem}
+\usepackage{booktabs}        % professional tables
+% \usepackage{microtype}       % disabled: needs scalable fonts
+
+% References & links
+\usepackage[colorlinks=true, linkcolor=blue!60!black, citecolor=green!50!black,
+            urlcolor=blue!70!black]{hyperref}
+\usepackage{cleveref}        % smart cross-references (\cref)
+
+% Algorithms
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+
+% Code listings (for referencing C++ implementation)
+\usepackage{listings}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\bfseries\color{blue!70!black},
+  commentstyle=\itshape\color{gray},
+  frame=single,
+  breaklines=true,
+}
+
+%% ── Theorem environments ─────────────────────────────────────────────────────
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{assumption}{Assumption}[section]
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}[section]
+
+%% ── cleveref names ───────────────────────────────────────────────────────────
+\crefname{assumption}{Assumption}{Assumptions}
+\crefname{remark}{Remark}{Remarks}
+\crefname{definition}{Definition}{Definitions}
+
+%% ── Notation shortcuts ───────────────────────────────────────────────────────
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\dd}{\,\mathrm{d}}                   % differential
+\newcommand{\ts}[1]{t_{#1}}                       % timestamp shorthand
+\newcommand{\niq}{n_{\text{iq}}}                   % queue length (samples)
+\newcommand{\freq}{\hat{f}}                        % estimated frequency ratio
+\newcommand{\drift}{\hat{\delta}}                  % estimated clock drift
+
+%% ── Title block ──────────────────────────────────────────────────────────────
+\title{%
+ Latency Controllers\\
+  for Real-Time Audio Streaming over IP%
+}
+\author{%
+  % Add author names here
+}
+\date{\today}
+
+%% ═════════════════════════════════════════════════════════════════════════════
+\begin{document}
+\maketitle
+
+\begin{abstract}
+  % Brief summary:
+  % - Problem: maintaining bounded end-to-end latency between independent
+  %   audio clocks over a jittery network.
+  % - Approach: model-based controller that decouples clock-drift estimation
+  %   from jitter-buffer regulation.
+  % - Key results / guarantees.
+  Vibe-mathed mathematical setting for latency control: with optimality criteria
+  (latency bias, latency variance, warp factor smoothness), an SDE model of
+  jitter, packet arrivals and sample queue depth, and derived optimal controllers.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+%% ══════════════════════════════════════════════════════════════════════════════
+\section{Introduction}\label{sec:intro}
+
+% Context: real-time audio streaming (ROC toolkit), sender & receiver with
+% independent clocks, network jitter, need for low & stable latency.
+
+% Problem statement: the receiver must continuously adjust its playback
+% resampling ratio so that the jitter buffer stays close to a target level,
+% despite (a) clock drift, (b) network jitter, and (c) occasional
+% discontinuities (session restarts, NTP corrections).
+
+% Contributions of this document.
+
+TODO
+
+%% ══════════════════════════════════════════════════════════════════════════════
+\section{System Model}\label{sec:model}
+
+We consider a sender and a receiver, each equipped with an independent
+free-running clock.  Neither clock is assumed to be ``correct''; instead
+we introduce an absolute reference time~$t \in \R$ that is external to
+both devices (one may think of it as an ideal UTC clock that neither
+party has access to).
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Clocks and Drift}\label{sec:clocks}
+
+Let $\tau_A(t)$ denote the reading of the \emph{sender clock} (clock~A)
+at absolute time~$t$, and $\tau_B(t)$ the reading of the
+\emph{receiver clock} (clock~B).
+Each clock runs at a rate that deviates from the reference by a small,
+slowly-varying fractional offset:
+\begin{align}
+  \frac{\dd \tau_A}{\dd t} &= 1 + \alpha(t), \label{eq:clock-a} \\[4pt]
+  \frac{\dd \tau_B}{\dd t} &= 1 + \beta(t),  \label{eq:clock-b}
+\end{align}
+where $\alpha(t)$ and $\beta(t)$ are the instantaneous fractional
+frequency offsets of clocks~A and~B respectively (typically on the order
+of $10^{-6}$--$10^{-5}$, i.e.\ a few ppm for quartz oscillators).
+
+\begin{assumption}[Nearly-stationary drift]\label{as:drift}
+  The offsets $\alpha$ and~$\beta$ are approximately constant over the
+  controller's timescale (seconds to minutes) but may drift slowly over
+  longer horizons (tens of minutes to hours) due to temperature or
+  voltage changes.  Formally, we treat each as a piecewise-linear
+  function of~$t$ whose slope is small enough to be neglected within any
+  single control epoch.
+\end{assumption}
+
+Under \cref{as:drift}, integrating \eqref{eq:clock-a} gives
+\begin{equation}\label{eq:tau-a}
+  \tau_A(t) \;=\; t + \int_0^{t} \alpha(s)\,\dd s
+            \;=\; (1 + \alpha)\,t,
+\end{equation}
+where the equality holds when $\alpha$ is treated as constant.
+An analogous expression holds for $\tau_B$.
+
+The quantity that ultimately matters for clock synchronisation is the
+\emph{relative drift} between sender and receiver:
+\begin{equation}\label{eq:rel-drift}
+  \delta \;=\; \frac{(1+\alpha)-(1+\beta)}{1+\beta}
+         \;=\; \frac{\alpha - \beta}{1+\beta}.
+\end{equation}
+
+\begin{remark}
+  The receiver never observes $\alpha$ or $\beta$ individually---only
+  their difference~$\delta$ is identifiable from packet timing.  The
+  reference time~$t$ is a modelling convenience; all observable
+  quantities will be expressed in receiver-clock time~$\tau_B$.
+\end{remark}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Packet Emission}\label{sec:emission}
+
+The sender packetises audio into frames of $N$~samples at nominal sample
+rate $F_s$ (Hz).  Packet~$n$ ($n = 0, 1, 2, \dots$) is emitted when the
+sender clock reads
+\begin{equation}\label{eq:send-clock}
+  \tau_A^{(\text{send})}(n) \;=\; n\,\Delta, \qquad
+  \Delta \;=\; \frac{N}{F_s},
+\end{equation}
+where $\Delta$ is the \emph{packet period} (seconds of sender-clock time).
+
+The corresponding absolute time of emission is obtained by inverting
+\eqref{eq:tau-a}:
+\begin{equation}\label{eq:send-abs}
+  t^{(\text{send})}(n)
+    \;=\; \frac{n\,\Delta}{1 + \alpha}.
+\end{equation}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Network Transit and Arrival Times}\label{sec:arrival}
+
+Packet~$n$ traverses the network and arrives at the receiver at absolute
+time
+\begin{equation}\label{eq:arrive-abs}
+  t^{(\text{arr})}(n) \;=\; t^{(\text{send})}(n) + d(n),
+\end{equation}
+where $d(n)$ is the \emph{one-way network delay} for packet~$n$.
+
+We assume that FEC fully recovers all losses, so every emitted packet
+eventually arrives.  The delay is decomposed as
+\begin{equation}\label{eq:delay-decomp}
+  d(n) \;=\; d_0 + \eta(n),
+\end{equation}
+where $d_0 > 0$ is a baseline (minimum or mean) propagation delay
+and $\eta(n)$ is the \emph{jitter}---the stochastic, packet-varying
+component of delay.
+
+\begin{assumption}[Jitter model]\label{as:jitter}
+  The jitter process $\eta(n)$ may exhibit short-range correlations
+  (e.g.\ bursty congestion, queuing effects), but is
+  \emph{long-range uncorrelated} in the following sense:
+  there exists a mixing horizon $M$ such that for $|i - j| > M$,
+  $\eta(i)$ and $\eta(j)$ are approximately independent.
+
+  On a per-packet timescale we define the jitter increments
+  \begin{equation}\label{eq:jitter-inc}
+    \xi(n) \;=\; \eta(n) - \eta(n-1),
+  \end{equation}
+  and require only that they are zero-mean with finite variance:
+  \begin{equation}\label{eq:jitter-moments}
+    \E[\xi(n)] = 0, \qquad
+    \Var[\xi(n)] = \sigma_\xi^2 < \infty.
+  \end{equation}
+  No further distributional assumptions are imposed.
+\end{assumption}
+
+\begin{remark}[Packet reordering]
+  This model admits packet reordering: if $\xi(n) < -\Delta/(1+\alpha)$,
+  then $t^{(\text{arr})}(n) < t^{(\text{arr})}(n-1)$, i.e.\ packet~$n$
+  arrives before packet~$n{-}1$.  The jitter buffer at the receiver
+  is responsible for restoring packet order before playback.
+\end{remark}
+
+
+\paragraph{Arrival time in receiver clock.}
+The receiver observes arrivals in its own clock~$\tau_B$.
+Applying \eqref{eq:clock-b} to \eqref{eq:arrive-abs}:
+\begin{equation}\label{eq:arrive-recv}
+  \tau_B^{(\text{arr})}(n)
+    \;=\; (1+\beta)\,t^{(\text{arr})}(n)
+    \;=\; (1+\beta)\!\left[\frac{n\,\Delta}{1+\alpha} + d_0 + \eta(n)\right].
+\end{equation}
+
+For the \emph{inter-arrival time} observed by the receiver:
+\begin{equation}\label{eq:inter-arrival}
+  \tau_B^{(\text{arr})}(n) - \tau_B^{(\text{arr})}(n-1)
+    \;=\; (1+\beta)\!\left[\frac{\Delta}{1+\alpha} + \xi(n)\right]
+    \;=\; \frac{\Delta}{1+\delta} \;+\; (1+\beta)\,\xi(n),
+\end{equation}
+where the second equality uses $\frac{1+\beta}{1+\alpha} = \frac{1}{1+\delta}$
+from \eqref{eq:rel-drift}.
+
+This is the fundamental measurement equation: each inter-arrival
+interval reveals the packet period~$\Delta$ scaled by the relative drift
+$1/(1+\delta)$, plus a jitter noise term scaled by $(1+\beta)$.
+
+%% ══════════════════════════════════════════════════════════════════════════════
+\section{Controller Model}\label{sec:controller-model}
+
+All quantities in this section are expressed in receiver-clock
+time, which we denote~$\tau \equiv \tau_B$ for brevity.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Arrival Process}\label{sec:arrival-process}
+
+The \emph{cumulative arrival process} is
+\begin{equation}\label{eq:arrival-process}
+  A(\tau) \;=\; N \cdot \#\bigl\{\,n \ge 0 \;:\;
+    \tau_B^{(\text{arr})}(n) \le \tau\,\bigr\},
+\end{equation}
+the total number of audio samples deposited into the jitter buffer by
+receiver-clock time~$\tau$.  This is a right-continuous, non-decreasing,
+pure-jump process with jumps of size~$N$ at each packet arrival.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Warp Rate}\label{sec:warp-rate}
+
+\begin{definition}[Warp rate]\label{def:warp}
+  The \emph{warp rate} $u(\tau) \in \R$ is the fractional adjustment
+  to the nominal playback rate.  The receiver's \emph{desired
+  consumption rate} of audio samples is
+  \begin{equation}\label{eq:playback-rate}
+    r(\tau) \;=\; F_s\bigl(1 + u(\tau)\bigr)
+  \end{equation}
+  samples per unit of receiver-clock time.
+  When $u = 0$, playback proceeds at the nominal sample rate~$F_s$.
+  In the implementation, the quantity $1 + u(\tau)$ corresponds to
+  \texttt{freq\_coeff}.
+\end{definition}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Queue Dynamics}\label{sec:queue}
+
+The jitter buffer holds samples that have arrived but have not yet
+been played back.  Samples are added in bursts of~$N$ at each packet
+arrival (via~$A$) and consumed continuously at the desired rate~$r(\tau)$,
+subject to the constraint that the buffer cannot go negative: when the
+buffer is empty, silence is inserted instead of audio.
+
+\begin{definition}[Queue depth and underrun regulator]\label{def:queue}
+  The \emph{queue depth} $q(\tau)$ and the \emph{underrun regulator}
+  $L(\tau)$ are the unique pair of right-continuous processes satisfying
+  the following system for all $\tau \ge 0$:
+  \begin{equation}\label{eq:queue}
+    q(\tau) \;=\; q(0) \;+\; A(\tau)
+             \;-\; \int_0^{\tau} F_s\bigl(1 + u(s)\bigr)\,\dd s
+             \;+\; L(\tau),
+  \end{equation}
+  with the conditions
+  \begin{enumerate}[label=(\roman*)]
+    \item \textbf{Non-negativity.}\; $q(\tau) \ge 0$ for all
+      $\tau \ge 0$.
+    \item \textbf{Monotonicity.}\; $L$ is non-decreasing and
+      $L(0) = 0$.
+    \item \textbf{Complementarity.}\; $L$ increases only when $q = 0$:
+      \begin{equation}\label{eq:complementarity}
+        \int_0^{\infty} \mathbf{1}\{q(\tau) > 0\}\;\dd L(\tau) \;=\; 0.
+      \end{equation}
+  \end{enumerate}
+\end{definition}
+
+Equation~\eqref{eq:queue} is a one-sided Skorokhod reflection of the
+\emph{free queue process}
+\begin{equation}\label{eq:free-queue}
+  \tilde{q}(\tau) \;=\; q(0) + A(\tau)
+    - \int_0^{\tau} F_s\bigl(1 + u(s)\bigr)\,\dd s,
+\end{equation}
+which is the queue depth that would result if playback were never
+interrupted by an empty buffer.
+The regulator $L$ is the minimal non-negative correction that keeps
+$q \ge 0$; it is given explicitly by
+\begin{equation}\label{eq:regulator-explicit}
+  L(\tau) \;=\; \sup_{0 \le s \le \tau}
+    \bigl(-\tilde{q}(s)\bigr)^{\!+},
+\end{equation}
+where $x^+ = \max(x, 0)$.
+
+\begin{definition}[Underrun]\label{def:underrun}
+  An \emph{underrun event} occurs at time~$\tau$ when $q(\tau) = 0$
+  and the desired consumption rate $r(\tau) > 0$.
+  During an underrun, the receiver outputs silence.
+
+  The regulator $L(\tau)$ has a direct physical interpretation:
+  it is the cumulative number of \emph{silence samples} inserted
+  up to time~$\tau$ in place of audio that was not available.
+  The \emph{underrun time} is
+  \begin{equation}\label{eq:underrun-time}
+    U(\tau) \;=\; \int_0^{\tau} \mathbf{1}\{q(s) = 0\}\,\dd s,
+  \end{equation}
+  the total duration for which the buffer has been empty.
+\end{definition}
+
+\begin{remark}[Relationship between $L$ and $U$]
+  The processes $L$ and $U$ are related but distinct.  The underrun
+  time~$U$ measures duration; the regulator~$L$ measures samples.
+  By the complementarity condition, $L$ increases only on the set
+  $\{q = 0\}$, so
+  \begin{equation}\label{eq:L-U-relation}
+    L(\tau) \;=\; \int_0^{\tau} F_s\bigl(1 + u(s)\bigr)
+      \,\mathbf{1}\{q(s) = 0\}\,\dd s.
+  \end{equation}
+\end{remark}
+
+\begin{definition}[Overrun and session restart]\label{def:overrun}
+  The system enforces an upper bound $Q_{\max}$ on the queue depth.
+  The \emph{overrun stopping time} is
+  \begin{equation}\label{eq:overrun-time}
+    T_{\text{over}} \;=\; \inf\bigl\{\,\tau \ge 0 \;:\;
+      q(\tau) > Q_{\max}\,\bigr\},
+  \end{equation}
+  with $T_{\text{over}} = \infty$ if the bound is never exceeded.
+  When $T_{\text{over}} < \infty$, the receiver terminates the
+  current session and initiates a \emph{session restart}: the buffer
+  is flushed, all estimator state is reset, and a new session begins
+  with fresh initial conditions.
+
+  The queue dynamics \eqref{eq:queue}--\eqref{eq:complementarity}
+  and the controller \eqref{eq:controller} are therefore only defined
+  on $[0, T_{\text{over}})$.  A well-designed controller should ensure
+  $T_{\text{over}} = \infty$ almost surely under normal operating
+  conditions.
+\end{definition}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Observable Information}\label{sec:observables}
+
+The receiver does not have access to the absolute reference time~$t$,
+the sender clock~$\tau_A$, or the drift parameters $\alpha$, $\beta$,
+$\delta$ individually.
+
+At receiver-clock time~$\tau$, the following quantities are observable:
+\begin{enumerate}[label=(\alph*)]
+  \item The queue depth $q(s)$ for $s \le \tau$.
+  \item The arrival times $\tau_B^{(\text{arr})}(n)$ for all packets
+    received by time~$\tau$.
+  \item The RTP timestamps carried by each received packet, which
+    encode the sender-clock emission times
+    $\tau_A^{(\text{send})}(n) = n\,\Delta$.
+\end{enumerate}
+
+We collect these into the \emph{observable filtration}
+$\{\mathcal{F}_\tau\}_{\tau \ge 0}$, the $\sigma$-algebra generated
+by the history of~(a)--(c) up to time~$\tau$.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Definition of a Controller}\label{sec:controller-def}
+
+\begin{definition}[Controller]\label{def:controller}
+  A \emph{controller} is a causal (non-anticipative) functional
+  \begin{equation}\label{eq:controller}
+    u(\tau) \;=\; \Gamma\!\bigl(\mathcal{F}_\tau\bigr),
+  \end{equation}
+  mapping the observable history up to time~$\tau$ to a warp
+  rate~$u(\tau) \in \R$.
+  The closed-loop system is the coupled solution of
+  \eqref{eq:queue}--\eqref{eq:complementarity} and
+  \eqref{eq:controller}.
+\end{definition}
+
+%% ══════════════════════════════════════════════════════════════════════════════
+\section{Objectives}\label{sec:objectives}
+
+A controller $\Gamma$ induces a closed-loop trajectory
+$(q, u, L, U)$ on $[0, T_{\text{over}})$.
+We now formalise the criteria by which controllers are compared.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Warp Smoothness}\label{sec:warp-smooth}
+
+Abrupt changes in the warp rate $u$ produce audible pitch
+transients.  A constant warp rate (matching the true drift)
+is inaudible; only its \emph{variation} causes artefacts.
+We therefore penalise the temporal roughness of $u$.
+
+\begin{definition}[Warp cost]\label{def:warp-cost}
+  For a controller producing warp trajectory $u$ on $[0, T]$,
+  the \emph{warp cost} is the $\dot{H}^1$ seminorm
+  \begin{equation}\label{eq:warp-cost}
+    J_u(T) \;=\; \int_0^{T}\!
+      \left|\frac{\dd u}{\dd \tau}(\tau)\right|^2 \dd\tau.
+  \end{equation}
+  A trajectory with $J_u = 0$ corresponds to a constant warp rate.
+\end{definition}
+
+\begin{remark}
+  The $\dot{H}^1$ seminorm penalises only the derivative of~$u$,
+  not its magnitude.  This is deliberate: the steady-state value
+  of~$u$ is dictated by the clock drift~$\delta$ and is not a
+  design choice.  What the controller \emph{can} control is how
+  smoothly it converges to that value.
+\end{remark}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Latency Regulation}\label{sec:latency-obj}
+
+Let $q^*$ denote the \emph{target queue depth} (in samples) and
+define the \emph{queue error}
+\begin{equation}\label{eq:queue-error}
+  e(\tau) \;=\; q(\tau) - q^*.
+\end{equation}
+
+We decompose the latency performance into two components.
+
+\paragraph{Bias (mean error).}
+The long-run time-averaged queue error is
+\begin{equation}\label{eq:bias}
+  B(T) \;=\; \frac{1}{T}\int_0^{T} e(\tau)\,\dd\tau.
+\end{equation}
+A well-tuned controller should drive $B(T) \to 0$ as $T \to \infty$.
+
+\paragraph{Variance (error fluctuation).}
+The time-averaged mean-square error is
+\begin{equation}\label{eq:mse}
+  V(T) \;=\; \frac{1}{T}\int_0^{T} e(\tau)^2\,\dd\tau.
+\end{equation}
+This captures both persistent bias and stochastic fluctuation.
+In the ergodic regime where $B(T) \to 0$,
+$V(T)$ converges to the stationary variance of the queue error.
+
+\begin{remark}[Multi-speaker synchronisation]\label{rem:multi-speaker}
+  In multi-speaker setups, several receivers play the same audio
+  stream.  Each receiver~$i$ runs its own controller and produces
+  its own queue trajectory $q_i(\tau)$ with error $e_i(\tau)$.
+  Phase coherence across speakers requires that the
+  \emph{inter-speaker} variance
+  \begin{equation}\label{eq:inter-speaker}
+    V_{\text{sync}}(\tau)
+      \;=\; \frac{1}{K}\sum_{i=1}^{K}
+        \bigl(q_i(\tau) - \bar{q}(\tau)\bigr)^2,
+    \qquad
+    \bar{q}(\tau) = \frac{1}{K}\sum_{i=1}^{K} q_i(\tau),
+  \end{equation}
+  be small.  Since each $q_i$ fluctuates independently around its
+  target, minimising the per-receiver variance~$V$ directly
+  minimises $V_{\text{sync}}$.
+\end{remark}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Underrun and Overrun Avoidance}\label{sec:avoid-obj}
+
+\subsubsection{Overruns}
+
+An overrun triggers a session restart (Def.~\ref{def:overrun}),
+which is a catastrophic event: all accumulated state is lost and
+the stream audibly glitches.  Since the process terminates at
+$T_{\text{over}}$, overrun avoidance is naturally expressed via the
+stopping time.
+
+\begin{enumerate}[label=(O\arabic*)]
+  \item \textbf{Survival probability.}\;
+    For a given time horizon~$T$,
+    \begin{equation}\label{eq:overrun-survival}
+      P\bigl(T_{\text{over}} > T\bigr) \;\to\; 1.
+    \end{equation}
+  \item \textbf{Expected lifetime.}\;
+    $\E[T_{\text{over}}] \to \infty$, or more precisely, requiring
+    that all moments $\E[T_{\text{over}}^k]$ grow appropriately.
+\end{enumerate}
+
+A well-designed controller should ensure
+$T_{\text{over}} = \infty$ a.s.\ under the stationary drift
+and jitter assumptions
+(\cref{as:drift,as:jitter}).
+
+\subsubsection{Underruns}
+
+Unlike overruns, an underrun does not terminate the process---the
+receiver inserts silence and continues.  A good controller should
+recover from underruns and prevent them from recurring.  This
+suggests metrics that measure the \emph{density} of underruns rather
+than a single stopping time.
+
+\begin{enumerate}[label=(U\arabic*)]
+  \item \textbf{Underrun rate (samples).}\;
+    The long-run average rate of silence insertion:
+    \begin{equation}\label{eq:underrun-rate}
+      R_L \;=\; \limsup_{T \to \infty}\;
+        \frac{L(T)}{T}.
+    \end{equation}
+    This has units of samples per unit time and should be driven
+    to zero.
+
+  \item \textbf{Underrun fraction (time).}\;
+    The fraction of time spent in underrun:
+    \begin{equation}\label{eq:underrun-fraction}
+      R_U \;=\; \limsup_{T \to \infty}\;
+        \frac{U(T)}{T}.
+    \end{equation}
+    This is the long-run probability that the buffer is empty at a
+    uniformly chosen instant.
+
+  \item \textbf{Underrun event rate.}\;
+    Let $N_{\text{under}}(T)$ count the number of transitions
+    $q(\tau) : {>}0 \;\to\; 0$ on $[0, T]$.  The event rate
+    \begin{equation}\label{eq:underrun-event-rate}
+      R_N \;=\; \limsup_{T \to \infty}\;
+        \frac{N_{\text{under}}(T)}{T}
+    \end{equation}
+    measures how frequently underruns occur, regardless of their
+    duration.
+\end{enumerate}
+
+\begin{remark}
+  These three metrics are not equivalent.  A single long underrun
+  contributes heavily to $R_L$ and $R_U$ but only once to $R_N$.
+  Conversely, many brief underruns inflate $R_N$ while contributing
+  little to $R_U$.  In practice, all three should be small; the
+  choice of which to optimise depends on the application's
+  sensitivity to silence gaps versus playback interruptions.
+\end{remark}
+
+%% ══════════════════════════════════════════════════════════════════════════════
+\section{Fluid Approximation}\label{sec:fluid}
+
+The exact queue dynamics (\cref{def:queue}) involve a pure-jump
+arrival process, making direct transfer-function analysis difficult.
+In this section we replace the discrete packet arrivals with a
+continuous flow and derive an It\^{o} stochastic differential equation
+for the queue error.  All quantities remain in receiver-clock
+time~$\tau$.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Discrete Queue Recurrence}\label{sec:discrete-recurrence}
+
+We first derive the exact per-packet queue dynamics.  Let
+\begin{equation}\label{eq:q-sampled}
+  q_n \;\coloneqq\; q\!\bigl(\tau_B^{(\text{arr})}(n)^{+}\bigr)
+\end{equation}
+denote the queue depth immediately after the $n$-th packet's $N$~samples
+have been deposited.  Between arrivals $n{-}1$ and $n$, the receiver
+consumes samples at rate $F_s(1+u)$ for the inter-arrival
+duration
+\begin{equation}\label{eq:iat-recall}
+  \Delta\tau(n)
+    \;\coloneqq\; \tau_B^{(\text{arr})}(n) - \tau_B^{(\text{arr})}(n-1)
+    \;=\; \frac{\Delta}{1+\delta} + (1+\beta)\,\xi(n)
+\end{equation}
+(from \eqref{eq:inter-arrival}).
+Ignoring the reflecting barrier (i.e.\ assuming $q > 0$ throughout),
+the recurrence is
+\begin{equation}\label{eq:q-recurrence}
+  q_n \;=\; q_{n-1} \;+\; N
+        \;-\; F_s\bigl(1 + u_n\bigr)\,\Delta\tau(n),
+\end{equation}
+where $u_n$ is the warp rate in effect during the interval
+(assumed constant over one packet period).
+
+\paragraph{Expanding.}
+Substituting $N = F_s\,\Delta$ and
+\eqref{eq:iat-recall} into \eqref{eq:q-recurrence}:
+\begin{align}
+  q_n - q_{n-1}
+    &= F_s\,\Delta
+       \;-\; F_s(1+u_n)\!\left[
+         \frac{\Delta}{1+\delta} + (1+\beta)\,\xi(n)\right]
+       \notag \\[4pt]
+    &= F_s\,\Delta\!\left[1 - \frac{1+u_n}{1+\delta}\right]
+       \;-\; F_s(1+u_n)(1+\beta)\,\xi(n).
+       \label{eq:dq-exact}
+\end{align}
+
+The first term is the deterministic drift. Since
+$1 - \frac{1+u}{1+\delta} = \frac{\delta - u}{1+\delta}$,
+it equals
+\begin{equation}\label{eq:dq-drift}
+  F_s\,\Delta\;\frac{\delta - u_n}{1+\delta}.
+\end{equation}
+
+The second term is the stochastic jitter contribution:
+\begin{equation}\label{eq:dq-jitter}
+  -\,F_s(1+u_n)(1+\beta)\,\xi(n).
+\end{equation}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Summing Over a Control Epoch}\label{sec:epoch-sum}
+
+Consider a control epoch of receiver-clock duration~$h$, during which
+the warp rate $u$ is held constant.  The number of packets arriving
+in this epoch is
+\begin{equation}\label{eq:epoch-count}
+  M(h) \;=\; \#\bigl\{\,n : \tau_B^{(\text{arr})}(n) \in
+    [\tau,\,\tau + h]\,\bigr\}.
+\end{equation}
+Since $\E[\Delta\tau(n)] = \Delta/(1+\delta)$, the expected count is
+\begin{equation}\label{eq:epoch-count-mean}
+  \E[M(h)] \;=\; \frac{h(1+\delta)}{\Delta}.
+\end{equation}
+
+Summing \eqref{eq:dq-exact} over the $M(h)$ packets in the epoch:
+\begin{equation}\label{eq:dq-epoch}
+  q(\tau+h) - q(\tau)
+    \;=\; F_s(\delta - u)\,h
+    \;-\; F_s(1+u)(1+\beta)\sum_{n \in \text{epoch}} \xi(n),
+\end{equation}
+where we have used
+$M(h) \cdot \frac{F_s\,\Delta}{1+\delta} = F_s\,h$
+for the deterministic term (replacing $M$ by its mean; the
+fluctuation in $M$ is itself a jitter effect already captured
+by the $\xi$~sum).
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Central Limit Passage}\label{sec:clt}
+
+\begin{assumption}[Timescale separation]\label{as:timescale}
+  The control update period~$h$ satisfies $h \gg \Delta$ and
+  $h \gg M\,\Delta$, where $M$ is the mixing horizon from
+  \cref{as:jitter}.  That is, many packets arrive per control
+  epoch, and the epoch spans many mixing lengths.
+\end{assumption}
+
+Under \cref{as:timescale}, the epoch contains $M(h) \gg 1$ jitter
+increments $\xi(n)$, many of which are approximately independent
+(by the mixing condition in \cref{as:jitter}).  By Donsker's
+invariance principle for mixing sequences, the partial-sum process
+\begin{equation}\label{eq:partial-sum}
+  S(m) \;=\; \sum_{n=1}^{m} \xi(n)
+\end{equation}
+converges (in distribution, under diffusive rescaling) to a Brownian
+motion:
+\begin{equation}\label{eq:donsker}
+  \frac{1}{\sqrt{m}}\,S(\lfloor m\,\cdot \rfloor)
+  \;\xRightarrow{\;d\;}\; \sigma_{\text{eff}}\;W(\cdot),
+  \qquad m \to \infty,
+\end{equation}
+where $W$ is a standard Wiener process and the
+\emph{effective jitter standard deviation} is
+\begin{equation}\label{eq:sigma-eff}
+  \sigma_{\text{eff}}^2
+    \;=\; \sum_{k=-\infty}^{\infty}
+      \mathrm{Cov}\bigl(\xi(0),\,\xi(k)\bigr)
+    \;=\; \sigma_\xi^2 + 2\sum_{k=1}^{\infty}
+      \mathrm{Cov}\bigl(\xi(0),\,\xi(k)\bigr).
+\end{equation}
+This is the spectral density of the $\xi$~process evaluated at
+frequency zero.  If $\xi$ is uncorrelated (i.i.d.), then
+$\sigma_{\text{eff}} = \sigma_\xi$.  Short-range positive
+correlations increase $\sigma_{\text{eff}}$; negative correlations
+decrease it.
+
+\begin{remark}
+  The convergence
+  $\sigma_{\text{eff}}^2 < \infty$ is guaranteed by the mixing
+  condition in \cref{as:jitter}: the autocovariances decay fast
+  enough for the series to converge absolutely.
+\end{remark}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{The Fluid SDE}\label{sec:fluid-sde}
+
+Applying the CLT result to \eqref{eq:dq-epoch}, the queue
+depth~$q(\tau)$ satisfies the It\^{o} stochastic differential equation
+\begin{equation}\label{eq:fluid-sde}
+  \boxed{%
+    \dd q \;=\; F_s(\delta - u)\,\dd\tau
+          \;+\; \sigma_w\,\dd W(\tau),
+  }
+\end{equation}
+where $W$ is a standard Wiener process and the
+\emph{diffusion coefficient} is
+\begin{equation}\label{eq:sigma-w}
+  \sigma_w
+    \;=\; F_s\,(1+u)(1+\beta)\;\sigma_{\text{eff}}\,
+          \sqrt{\frac{1+\delta}{\Delta}}.
+\end{equation}
+
+\paragraph{Derivation of $\sigma_w$.}
+In one epoch of duration $h$, the noise term in \eqref{eq:dq-epoch}
+has variance
+\begin{equation}\label{eq:noise-var}
+  \Var\!\left[F_s(1+u)(1+\beta)\sum_{n=1}^{M(h)} \xi(n)\right]
+  \;=\; F_s^2(1+u)^2(1+\beta)^2 \;\cdot\; M(h)\,\sigma_{\text{eff}}^2.
+\end{equation}
+Substituting $M(h) = h(1+\delta)/\Delta$ from
+\eqref{eq:epoch-count-mean}, the variance is proportional to~$h$:
+\begin{equation}\label{eq:noise-var-h}
+  \sigma_w^2\,h
+  \;=\; F_s^2(1+u)^2(1+\beta)^2\,
+        \frac{(1+\delta)}{\Delta}\,
+        \sigma_{\text{eff}}^2\;h,
+\end{equation}
+confirming the diffusive scaling and yielding \eqref{eq:sigma-w}.
+
+\paragraph{Simplified form.}
+Since $|u|, |\beta|, |\delta| \ll 1$ (all at the ppm level), to
+leading order
+\begin{equation}\label{eq:sigma-w-simple}
+  \sigma_w \;=\; \frac{F_s\,\sigma_{\text{eff}}}{\sqrt{\Delta}}
+           \;=\; \frac{F_s^{3/2}\,\sigma_{\text{eff}}}{\sqrt{N}}.
+\end{equation}
+We use this simplified form in subsequent analysis.
+
+\begin{remark}
+  The second equality follows from $\Delta = N/F_s$.
+  The dependence $\sigma_w \propto 1/\sqrt{N}$ is intuitive: larger
+  packets (more samples per packet) mean fewer arrivals per unit time,
+  so each jitter increment has more influence per unit of consumed time.
+\end{remark}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Queue Error SDE}\label{sec:error-sde}
+
+In terms of the queue error $e(\tau) = q(\tau) - q^*$
+(\cref{eq:queue-error}), the fluid SDE becomes
+\begin{equation}\label{eq:error-sde}
+  \dd e \;=\; F_s(\delta - u)\,\dd\tau
+        \;+\; \sigma_w\,\dd W(\tau),
+\end{equation}
+since $q^*$ is constant.  This is valid on the region $\{q > 0\}
+\cap \{q < Q_{\max}\}$, i.e.\ away from the reflecting barrier and
+the overrun boundary.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Validity and Limitations}\label{sec:fluid-validity}
+
+The fluid approximation \eqref{eq:fluid-sde} is accurate when:
+\begin{enumerate}[label=(\alph*)]
+  \item The control timescale is much longer than the packet
+    period~$\Delta$ (\cref{as:timescale}).
+  \item The queue depth~$q$ is well above zero, so the reflecting
+    barrier is not active.  Near $q = 0$, the discrete nature of
+    arrivals matters: an underrun lasts until the next packet
+    arrives (a random time on the order of~$\Delta$), which the
+    continuous model cannot capture.
+  \item The jitter increments $\xi(n)$ have finite
+    $\sigma_{\text{eff}}$ (\cref{eq:sigma-eff}).  Heavy-tailed
+    jitter (infinite variance) would invalidate the CLT and
+    require a different scaling limit (e.g.\ $\alpha$-stable
+    processes).
+\end{enumerate}
+
+%% ══════════════════════════════════════════════════════════════════════════════
+\section{Analysis of the Proportional Controller}\label{sec:prop-analysis}
+
+We now analyse the simplest non-trivial controller under the fluid
+model: feedforward drift cancellation plus proportional feedback on the
+queue error.  All results in this section follow from elementary
+properties of the Ornstein--Uhlenbeck process.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Pure Feedforward is Insufficient}\label{sec:ff-fail}
+
+Suppose the controller has perfect knowledge of the relative
+drift~$\delta$ and sets $u(\tau) = \delta$ for all~$\tau$ (pure
+feedforward, no feedback).  The error SDE
+\eqref{eq:error-sde} becomes
+\begin{equation}\label{eq:ff-sde}
+  \dd e \;=\; \sigma_w\,\dd W(\tau),
+\end{equation}
+a driftless Brownian motion.  Its variance grows without bound:
+\begin{equation}\label{eq:ff-var}
+  \Var[e(\tau)] \;=\; \sigma_w^2\;\tau.
+\end{equation}
+By the recurrence of one-dimensional Brownian motion, the process
+hits every level in finite time almost surely.  In particular,
+both the underrun barrier ($e = -q^*$) and the overrun barrier
+($e = Q_{\max} - q^*$) are reached in finite expected time:
+\begin{equation}\label{eq:ff-hitting}
+  \E[T_{\text{hit}}] \;=\; \frac{q^*\,(Q_{\max} - q^*)}{\sigma_w^2}.
+\end{equation}
+No amount of buffering can prevent eventual session death under
+pure feedforward control.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Feedforward Plus Proportional Feedback}\label{sec:ff-prop}
+
+Now consider the controller
+\begin{equation}\label{eq:prop-controller}
+  u(\tau) \;=\; \delta + K\,e(\tau),
+\end{equation}
+where $K > 0$ is the proportional gain.  Substituting into
+\eqref{eq:error-sde}:
+\begin{equation}\label{eq:ou-sde}
+  \dd e \;=\; -F_s\,K\,e\;\dd\tau \;+\; \sigma_w\,\dd W(\tau).
+\end{equation}
+This is the \emph{Ornstein--Uhlenbeck} (OU) SDE with
+mean-reversion rate $\theta = F_s\,K$ and diffusion
+coefficient~$\sigma_w$.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Stationary Distribution}\label{sec:ou-stationary}
+
+The OU process \eqref{eq:ou-sde} has a unique stationary
+distribution:
+\begin{equation}\label{eq:ou-stat}
+  e \;\sim\; \mathcal{N}\!\left(0,\;\frac{\sigma_w^2}{2\,F_s\,K}\right)
+  \qquad\text{(in steady state)}.
+\end{equation}
+Unlike the pure feedforward case, the variance is bounded and
+time-independent.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{The Fundamental Tradeoff}\label{sec:tradeoff}
+
+The controller gain $K$ simultaneously determines the distributions
+of the queue error~$e$ and the warp rate~$u$.  Since
+$u = \delta + K\,e$ and $\delta$ is (approximately) constant,
+the stochastic part of~$u$ is $K\,e$.
+
+\begin{proposition}[Stationary variances]\label{prop:variances}
+  Under the proportional controller \eqref{eq:prop-controller}
+  with the fluid model \eqref{eq:error-sde}, the stationary
+  variances of the queue error and the warp rate are
+  \begin{align}
+    \Var[e] &\;=\; \frac{\sigma_w^2}{2\,F_s\,K},
+      \label{eq:var-e} \\[6pt]
+    \Var[u] &\;=\; K^2\,\Var[e]
+             \;=\; \frac{K\,\sigma_w^2}{2\,F_s}.
+      \label{eq:var-u}
+  \end{align}
+\end{proposition}
+
+These move in \textbf{opposite directions} as $K$ varies:
+\begin{center}
+\begin{tabular}{@{}lcc@{}}
+  \toprule
+  & $K \uparrow$ & $K \downarrow$ \\
+  \midrule
+  $\Var[e]$ (queue error) & $\downarrow$ & $\uparrow$ \\
+  $\Var[u]$ (warp variation) & $\uparrow$ & $\downarrow$ \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\noindent
+Eliminating~$K$ between \eqref{eq:var-e} and \eqref{eq:var-u} yields
+the \emph{Pareto frontier}:
+\begin{equation}\label{eq:pareto}
+  \boxed{\;\Var[e] \;\cdot\; \Var[u]
+    \;=\; \frac{\sigma_w^4}{4\,F_s^2}.\;}
+\end{equation}
+This is a hyperbola in the $(\Var[e],\,\Var[u])$ plane.  No
+proportional controller can achieve a point below this curve: any
+reduction in queue error variance must be paid for by an increase in
+warp rate variance, and vice versa.  The product is fixed by the
+jitter intensity~$\sigma_w$ and the sample rate~$F_s$.
+
+\begin{remark}
+  The Pareto frontier \eqref{eq:pareto} arises from the
+  \emph{proportional} controller family.
+  A more general controller (e.g.\ one that
+  also acts on $\dd u/\dd\tau$) could potentially achieve points
+  below this curve, at the cost of introducing higher-order dynamics.
+\end{remark}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Underrun Probability}\label{sec:underrun-prob}
+
+In steady state, the queue error $e$ is Gaussian with zero mean and
+variance $\Var[e]$ from \eqref{eq:var-e}.  An underrun occurs when
+$e < -q^*$, i.e.\ $q < 0$.  The steady-state probability of being
+in an underrun state is
+\begin{equation}\label{eq:underrun-tail}
+  P(q < 0)
+    \;=\; P(e < -q^*)
+    \;=\; \Phi\!\left(\frac{-q^*}{\sqrt{\Var[e]}}\right)
+    \;=\; \Phi\!\left(-q^*\,\sqrt{\frac{2\,F_s\,K}{\sigma_w^2}}\right),
+\end{equation}
+where $\Phi$ is the standard normal CDF.  This decreases rapidly
+(Gaussian tail) as either $q^*$ or $K$ increases.
+
+\begin{remark}
+  This is the steady-state occupancy probability
+  $R_U$ from \cref{eq:underrun-fraction}.  For practical targets
+  (e.g.\ $q^* = 5\sqrt{\Var[e]}$), the underrun probability is
+  negligibly small ($< 10^{-6}$).  The tradeoff is that a larger
+  $q^*$ means higher nominal latency.
+\end{remark}
+
+%% ══════════════════════════════════════════════════════════════════════════════
+\section{Spectral Analysis}\label{sec:spectral}
+
+The results of \cref{sec:prop-analysis} were derived via the
+time-domain properties of the OU process.  In this section we
+re-derive them in the frequency domain, which reveals a more general
+principle: for linear systems driven by Gaussian noise, the
+\emph{transfer function completely determines the output probability
+distribution}.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Plant Transfer Function}\label{sec:plant-tf}
+
+The fluid error SDE \eqref{eq:error-sde}, written in input--output
+form, is
+\begin{equation}\label{eq:plant-io}
+  \dot{e}(\tau) \;=\; -F_s\,u(\tau) \;+\; w(\tau),
+\end{equation}
+where $w(\tau) = \sigma_w\,\dot{W}(\tau)$ is white Gaussian noise
+with (two-sided) power spectral density
+\begin{equation}\label{eq:psd-input}
+  S_w(\omega) \;=\; \sigma_w^2
+\end{equation}
+and we have absorbed the constant $F_s\,\delta$ into the feedforward
+part of~$u$ (i.e.\ we take $u$ to include the drift cancellation,
+so the remaining dynamics are driven by noise alone).
+
+Taking the Laplace transform of \eqref{eq:plant-io} with zero
+initial conditions:
+\begin{equation}\label{eq:plant-laplace}
+  s\,E(s) \;=\; -F_s\,U(s) \;+\; W(s).
+\end{equation}
+The open-loop plant from $U$ to $E$ is the pure integrator
+\begin{equation}\label{eq:plant-G}
+  G(s) \;=\; \frac{E(s)}{W(s) - F_s\,U(s)}
+       \;=\; \frac{1}{s},
+\end{equation}
+and the noise enters the error through the same integrator:
+$E(s) = \frac{1}{s}\bigl[W(s) - F_s\,U(s)\bigr]$.
+
+\begin{remark}[Intuition: the integrator]
+  The plant $G(s) = 1/s$ is an integrator: it accumulates its input
+  over time.  In the frequency domain, this means that slow
+  disturbances (low~$\omega$) are amplified much more than fast ones
+  (high~$\omega$), since $|1/j\omega|$ is large when $\omega$ is small.
+  Physically, a slow persistent jitter bias drains or fills the buffer
+  steadily, while a fast oscillating jitter averages out before the
+  queue can respond.  This is why drift (a zero-frequency disturbance)
+  is so dangerous: the integrator amplifies it to infinity.
+\end{remark}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{PSD Propagation}\label{sec:psd-prop}
+
+For any linear time-invariant system with transfer function $H(s)$
+driven by a wide-sense stationary input with PSD $S_{\text{in}}(\omega)$,
+the output PSD is
+\begin{equation}\label{eq:psd-general}
+  S_{\text{out}}(\omega) \;=\; \bigl|H(j\omega)\bigr|^2\;
+    S_{\text{in}}(\omega),
+\end{equation}
+and the output variance (the total power) is
+\begin{equation}\label{eq:var-psd}
+  \Var[\text{output}]
+    \;=\; \int_{-\infty}^{\infty}
+      S_{\text{out}}(\omega)\;\frac{\dd\omega}{2\pi}
+    \;=\; S_{\text{in}} \cdot \|H\|_{\mathcal{H}_2}^2,
+\end{equation}
+where $\|H\|_{\mathcal{H}_2}^2 = \int |H(j\omega)|^2\,
+\frac{\dd\omega}{2\pi}$ is the squared $\mathcal{H}_2$ norm of
+the transfer function.
+
+\begin{remark}[Intuition: PSD as a frequency-by-frequency budget]
+  Think of any signal as a superposition of sine waves at different
+  frequencies.  The PSD $S(\omega)$ tells you how much power is
+  carried by each frequency~$\omega$---it is the signal's
+  ``energy budget'' across frequencies.
+
+  A linear system cannot create new frequencies; it can only amplify
+  or attenuate existing ones.  The transfer function $H(j\omega)$
+  gives the complex gain at each frequency, so the output power at
+  frequency~$\omega$ is the input power times $|H(j\omega)|^2$.
+  The total output variance is the sum (integral) over all
+  frequencies.
+
+  The $\mathcal{H}_2$ norm $\|H\|_{\mathcal{H}_2}$ is therefore
+  a single number that captures \emph{how much total noise the
+  system lets through}.  A controller that minimises the
+  $\mathcal{H}_2$ norm of the closed-loop transfer function is
+  one that suppresses as much noise as possible.
+\end{remark}
+
+\begin{remark}[Gaussianity]
+  When the input is Gaussian and the system is linear, the output
+  is also Gaussian.  A Gaussian distribution is uniquely determined
+  by its mean and variance.  Therefore the transfer function
+  $H(s)$, together with the input PSD, \emph{completely determines
+  the output probability distribution}---not merely its second
+  moment.
+\end{remark}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Closed-Loop Transfer Functions}\label{sec:cl-tf}
+
+Under the proportional controller $U(s) = K\,E(s)$, the
+closed-loop becomes
+\begin{equation}\label{eq:cl-E}
+  s\,E(s) = -F_s\,K\,E(s) + W(s)
+  \quad\Longrightarrow\quad
+  E(s) = \frac{1}{s + F_s K}\;W(s).
+\end{equation}
+
+Define the closed-loop transfer functions from the noise $W$ to
+each signal of interest:
+
+\paragraph{Noise to queue error.}
+\begin{equation}\label{eq:tf-e}
+  H_e(s) \;=\; \frac{E(s)}{W(s)} \;=\; \frac{1}{s + F_s K}.
+\end{equation}
+
+\paragraph{Noise to warp rate.}
+Since $U = K\,E$:
+\begin{equation}\label{eq:tf-u}
+  H_u(s) \;=\; \frac{U(s)}{W(s)} \;=\; \frac{K}{s + F_s K}.
+\end{equation}
+
+\paragraph{Noise to warp rate derivative.}
+Since $\dot{u} = K\,\dot{e}$, multiplication by $s$ in the
+Laplace domain gives
+\begin{equation}\label{eq:tf-v}
+  H_v(s) \;=\; s\,H_u(s) \;=\; \frac{K\,s}{s + F_s K}.
+\end{equation}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Output PSDs and Variances}\label{sec:output-psd}
+
+Since $S_w = \sigma_w^2$ (constant), the output PSDs are:
+
+\paragraph{Queue error.}
+\begin{equation}\label{eq:psd-e}
+  S_e(\omega) \;=\; \frac{\sigma_w^2}{(F_s K)^2 + \omega^2}.
+\end{equation}
+This is a Lorentzian with half-width $F_s K$.
+
+The half-width $\omega_c = F_s K$ is the controller's
+\emph{bandwidth}: it divides the frequency axis into two regimes.
+\begin{itemize}
+  \item \textbf{Low frequencies} ($\omega \ll F_s K$):
+    $S_e(\omega) \approx \sigma_w^2 / (F_s K)^2$.  The controller
+    successfully suppresses slow queue variations---the error is
+    small and nearly flat.
+  \item \textbf{High frequencies} ($\omega \gg F_s K$):
+    $S_e(\omega) \approx \sigma_w^2 / \omega^2$.  The controller
+    is too slow to react, and the error behaves like uncontrolled
+    integrated noise.
+\end{itemize}
+Increasing $K$ widens the bandwidth: the controller can fight
+faster disturbances, reducing the total queue error variance.
+But this comes at a cost, as we see next.
+The variance is
+\begin{equation}\label{eq:var-e-psd}
+  \Var[e] \;=\; \int_{-\infty}^{\infty}
+    \frac{\sigma_w^2}{(F_s K)^2 + \omega^2}\;
+    \frac{\dd\omega}{2\pi}
+  \;=\; \frac{\sigma_w^2}{2\,F_s\,K},
+\end{equation}
+recovering \eqref{eq:var-e}.
+
+\paragraph{Warp rate.}
+\begin{equation}\label{eq:psd-u}
+  S_u(\omega) \;=\; \frac{K^2\,\sigma_w^2}{(F_s K)^2 + \omega^2}.
+\end{equation}
+The variance is
+\begin{equation}\label{eq:var-u-psd}
+  \Var[u] \;=\; \frac{K^2\,\sigma_w^2}{2\,F_s\,K}
+          \;=\; \frac{K\,\sigma_w^2}{2\,F_s},
+\end{equation}
+recovering \eqref{eq:var-u}.
+
+\paragraph{Warp rate derivative.}
+\begin{equation}\label{eq:psd-v}
+  S_v(\omega) \;=\; \frac{K^2\,\omega^2\,\sigma_w^2}
+    {(F_s K)^2 + \omega^2}.
+\end{equation}
+The variance is
+\begin{equation}\label{eq:var-v-psd}
+  \Var[\dot{u}] \;=\; K^2\,\sigma_w^2
+    \int_{-\infty}^{\infty}
+    \frac{\omega^2}{(F_s K)^2 + \omega^2}\;
+    \frac{\dd\omega}{2\pi}
+  \;=\; +\infty.
+\end{equation}
+The integral diverges because the integrand approaches
+$K^2\sigma_w^2$ as $|\omega| \to \infty$.
+
+\begin{proposition}[Infinite warp roughness]\label{prop:inf-roughness}
+  Under the proportional controller \eqref{eq:prop-controller}
+  with the fluid model, the warp cost functional
+  $J_u$ (\cref{def:warp-cost}) is infinite almost surely.
+  That is, the proportional controller produces warp trajectories
+  that are nowhere differentiable.
+\end{proposition}
+
+\begin{remark}[Intuition: high-frequency passthrough]
+  The transfer function $H_v(s) = Ks/(s + F_s K)$ is a
+  \emph{high-pass filter}.  At low frequencies it attenuates
+  (the controller changes $u$ slowly in response to slow queue
+  drifts), but at high frequencies $|H_v(j\omega)| \to K$---it
+  passes noise straight through with gain~$K$, without any
+  attenuation.
+
+  Since white noise has equal power at all frequencies, and $H_v$
+  does not roll off, the warp derivative picks up an infinite
+  amount of high-frequency noise.  This is the mathematical
+  expression of the fact that ``reacting proportionally to every
+  instantaneous queue fluctuation produces jittery, rough control
+  actions.''
+
+  A controller that instead acts on $v = \dot{u}$ (controlling the
+  rate of change of the warp) would introduce an additional $1/s$
+  factor, turning the high-pass into a band-pass that decays at
+  high frequency, yielding finite $\Var[\dot{u}]$.
+\end{remark}
+
+%% ══════════════════════════════════════════════════════════════════════════════
+\section{Second-Order Controller}\label{sec:second-order}
+
+The proportional controller of \cref{sec:prop-analysis} acts directly
+on the warp rate~$u$, producing warp trajectories with infinite
+roughness (\cref{prop:inf-roughness}).  We now promote the control
+input to the \emph{derivative} of the warp rate, $v = \dot{u}$,
+treating $u$ as an additional state variable.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Augmented State Space}\label{sec:augmented-state}
+
+The augmented system has state $\mathbf{x} = (e,\,u)^{\!\top}$
+and control input $v = \dot{u}$.  Absorbing the drift feedforward
+($u$ represents the feedback component after subtracting~$\delta$),
+the dynamics are
+\begin{equation}\label{eq:augmented-dynamics}
+  \dd\!\begin{pmatrix} e \\ u \end{pmatrix}
+  \;=\;
+  \underbrace{%
+    \begin{pmatrix} 0 & -F_s \\ 0 & 0 \end{pmatrix}
+  }_{A}
+  \begin{pmatrix} e \\ u \end{pmatrix}\dd\tau
+  \;+\;
+  \underbrace{%
+    \begin{pmatrix} 0 \\ 1 \end{pmatrix}
+  }_{B}
+  v\;\dd\tau
+  \;+\;
+  \underbrace{%
+    \begin{pmatrix} \sigma_w \\ 0 \end{pmatrix}
+  }_{G}
+  \dd W.
+\end{equation}
+The open-loop plant (from $v$ to $e$, without noise) is a
+\emph{double integrator}: $v$ drives $u$, which in turn drives $e$
+through the integrator $G(s) = 1/s$.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Control Law}\label{sec:2nd-control-law}
+
+\begin{definition}[Second-order controller]\label{def:2nd-controller}
+  The \emph{second-order controller} sets
+  \begin{equation}\label{eq:2nd-law}
+    v(\tau) \;=\; K_1\,e(\tau) \;-\; K_2\,u(\tau),
+  \end{equation}
+  where $K_1 > 0$ and $K_2 > 0$ are gains.  The term $K_1\,e$
+  provides a restoring force proportional to the queue error,
+  and $-K_2\,u$ provides damping proportional to the current
+  warp rate.
+\end{definition}
+
+\begin{remark}[Physical analogy: damped harmonic oscillator]
+  Under \eqref{eq:2nd-law}, the queue error satisfies the
+  second-order ODE (ignoring noise):
+  \begin{equation}\label{eq:damped-oscillator}
+    \ddot{e} + K_2\,\dot{e} + F_s\,K_1\,e \;=\; 0.
+  \end{equation}
+  This is a damped harmonic oscillator with natural frequency and
+  damping ratio
+  \begin{equation}\label{eq:oscillator-params}
+    \omega_n \;=\; \sqrt{F_s\,K_1},
+    \qquad
+    \zeta \;=\; \frac{K_2}{2\,\omega_n}
+         \;=\; \frac{K_2}{2\sqrt{F_s\,K_1}}.
+  \end{equation}
+  The queue error behaves like a mass on a spring, kicked by jitter
+  noise, with $K_1$ controlling the spring stiffness (how fast it
+  returns to centre) and $K_2$ controlling the damping (how quickly
+  oscillations die out).
+\end{remark}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Closed-Loop Transfer Functions}\label{sec:2nd-tf}
+
+In the Laplace domain, $V(s) = K_1\,E(s) - K_2\,U(s)$.
+With $s\,U = V$ (i.e.\ $U = V/s$), we have
+$(s + K_2)\,U = K_1\,E$, so
+\begin{equation}\label{eq:2nd-U-E}
+  U(s) \;=\; \frac{K_1}{s + K_2}\;E(s).
+\end{equation}
+
+Substituting into the plant equation $s\,E = -F_s\,U + W$:
+\begin{equation}\label{eq:2nd-char}
+  \left(s^2 + K_2\,s + F_s\,K_1\right) E(s)
+    \;=\; (s + K_2)\,W(s).
+\end{equation}
+
+Denote the characteristic polynomial
+\begin{equation}\label{eq:char-poly}
+  D(s) \;=\; s^2 + K_2\,s + F_s\,K_1
+       \;=\; s^2 + 2\zeta\omega_n\,s + \omega_n^2.
+\end{equation}
+All roots lie in the open left half-plane for $K_1, K_2 > 0$,
+confirming stability.
+
+The closed-loop transfer functions from the jitter noise~$W$ to
+each output are:
+
+\paragraph{Noise to queue error.}
+\begin{equation}\label{eq:2nd-tf-e}
+  H_e(s) \;=\; \frac{s + K_2}{D(s)}.
+\end{equation}
+
+\paragraph{Noise to warp rate.}
+\begin{equation}\label{eq:2nd-tf-u}
+  H_u(s) \;=\; \frac{K_1}{D(s)}.
+\end{equation}
+
+\paragraph{Noise to warp rate derivative.}
+\begin{equation}\label{eq:2nd-tf-v}
+  H_v(s) \;=\; s\,H_u(s) \;=\; \frac{K_1\,s}{D(s)}.
+\end{equation}
+This is a \emph{band-pass filter}: it rolls off as $1/s$ at high
+frequency and vanishes at $s = 0$.  Unlike the first-order case
+(\cref{eq:tf-v}), $|H_v(j\omega)| \to 0$ as $\omega \to \infty$.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Stationary Variances}\label{sec:2nd-variances}
+
+We use the standard $\mathcal{H}_2$ norm formula for second-order
+systems.  For a transfer function $H(s) = (n_1\,s + n_0)/
+(s^2 + a\,s + b)$ with $a, b > 0$:
+\begin{equation}\label{eq:h2-formula}
+  \|H\|_{\mathcal{H}_2}^2
+    \;=\; \frac{n_1^2\,b \;+\; n_0^2}{2\,a\,b}.
+\end{equation}
+
+Applying this with $a = K_2$ and $b = F_s\,K_1$:
+
+\begin{proposition}[Stationary variances, second-order controller]
+  \label{prop:2nd-variances}
+  Under the second-order controller \eqref{eq:2nd-law} with the
+  fluid model, all three stationary variances are finite:
+  \begin{align}
+    \Var[e]
+      &\;=\; \sigma_w^2\;\frac{F_s\,K_1 + K_2^2}{2\,K_2\,F_s\,K_1},
+      \label{eq:2nd-var-e} \\[6pt]
+    \Var[u]
+      &\;=\; \sigma_w^2\;\frac{K_1}{2\,K_2\,F_s},
+      \label{eq:2nd-var-u} \\[6pt]
+    \Var[\dot{u}]
+      &\;=\; \sigma_w^2\;\frac{K_1^2}{2\,K_2}.
+      \label{eq:2nd-var-v}
+  \end{align}
+\end{proposition}
+
+\begin{remark}[Derivation]
+  For example, $H_u(s) = K_1/(s^2 + K_2\,s + F_s K_1)$ has
+  $n_1 = 0$, $n_0 = K_1$.
+  Applying \eqref{eq:h2-formula}:
+  $\|H_u\|^2 = (0 + K_1^2)/(2 K_2 F_s K_1) = K_1/(2 K_2 F_s)$.
+  Multiplying by $\sigma_w^2$ gives \eqref{eq:2nd-var-u}.
+  The other cases follow analogously.
+\end{remark}
+
+\begin{remark}[Comparison with first-order controller]
+  The first-order controller (\cref{sec:tradeoff}) has
+  $\Var[\dot{u}] = \infty$, so the warp cost $J_u$ is undefined.
+  The second-order controller makes all three quantities finite
+  and provides a two-parameter family $(K_1, K_2)$ of controllers.
+  The Pareto surface in the three-dimensional space
+  $(\Var[e],\,\Var[u],\,\Var[\dot{u}])$ is now a smooth manifold
+  parameterised by $(K_1, K_2)$, allowing principled tradeoffs
+  among queue accuracy, warp magnitude, and warp smoothness.
+\end{remark}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{In Terms of Oscillator Parameters}\label{sec:2nd-oscillator}
+
+Expressing the variances in terms of the natural frequency
+$\omega_n = \sqrt{F_s K_1}$ and damping ratio
+$\zeta = K_2/(2\omega_n)$:
+\begin{align}
+  \Var[e]
+    &\;=\; \frac{\sigma_w^2(1 + 4\zeta^2)}{4\,\zeta\,\omega_n},
+    \label{eq:2nd-var-e-osc} \\[6pt]
+  \Var[u]
+    &\;=\; \frac{\sigma_w^2\,\omega_n}{4\,\zeta\,F_s^2},
+    \label{eq:2nd-var-u-osc} \\[6pt]
+  \Var[\dot{u}]
+    &\;=\; \frac{\sigma_w^2\,\omega_n^3}{4\,\zeta\,F_s^2}.
+    \label{eq:2nd-var-v-osc}
+\end{align}
+
+\begin{remark}[Role of $\omega_n$ and $\zeta$]
+  The natural frequency $\omega_n$ controls the controller bandwidth:
+  higher $\omega_n$ means faster response (lower $\Var[e]$, but higher
+  $\Var[u]$ and $\Var[\dot{u}]$).  The damping ratio $\zeta$ controls
+  oscillatory behaviour: underdamped ($\zeta < 1$) gives faster
+  settling but overshoot; overdamped ($\zeta > 1$) gives slower,
+  monotone convergence.  All three variances scale as $1/\zeta$,
+  and critically damped ($\zeta = 1$) is not necessarily optimal.
+\end{remark}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Dropping the Warp Magnitude Objective}\label{sec:drop-var-u}
+
+The steady-state warp rate $u$ is dominated by the
+drift~$\delta$, which is on the order of $10^{-5}$--$10^{-6}$
+(a few ppm).  Its stochastic variance $\Var[u]$ is even smaller
+and always inaudible.  What matters for audio quality is the
+\emph{rate of change} $\dot{u}$: rapid pitch changes produce
+audible chirp artefacts, whereas a slowly-varying pitch offset
+is imperceptible.
+
+Moreover, controlling $\Var[\dot{u}]$ implicitly bounds
+$\Var[u]$: if $\dot{u}$ is small, $u$ cannot wander far from
+its steady-state value.
+
+We therefore optimise over two objectives only:
+\begin{equation}\label{eq:2obj}
+  J(K_1, K_2)
+    \;=\; \Var[e] \;+\; \lambda\;\Var[\dot{u}],
+\end{equation}
+where $\lambda > 0$ is a design parameter weighting queue accuracy
+against warp smoothness.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Optimal Gains}\label{sec:optimal-gains}
+
+Substituting \eqref{eq:2nd-var-e} and \eqref{eq:2nd-var-v} into
+\eqref{eq:2obj}:
+\begin{equation}\label{eq:J-expanded}
+  J \;=\; \sigma_w^2\!\left[
+    \frac{1}{2\,K_2}
+    + \frac{K_2}{2\,F_s\,K_1}
+    + \frac{\lambda\,K_1^2}{2\,K_2}
+  \right].
+\end{equation}
+
+Setting $\partial J / \partial K_1 = 0$:
+\begin{equation}\label{eq:opt-K1-cond}
+  -\frac{K_2}{2\,F_s\,K_1^2} + \frac{\lambda\,K_1}{K_2} \;=\; 0
+  \quad\Longrightarrow\quad
+  K_2^2 \;=\; 2\,\lambda\,F_s\,K_1^3.
+\end{equation}
+
+Setting $\partial J / \partial K_2 = 0$:
+\begin{equation}\label{eq:opt-K2-cond}
+  -\frac{1}{2\,K_2^2} + \frac{1}{2\,F_s\,K_1}
+  - \frac{\lambda\,K_1^2}{2\,K_2^2} \;=\; 0
+  \quad\Longrightarrow\quad
+  K_2^2 \;=\; F_s\,K_1\,(1 + \lambda\,K_1^2).
+\end{equation}
+
+Equating \eqref{eq:opt-K1-cond} and \eqref{eq:opt-K2-cond}:
+\begin{equation}
+  2\,\lambda\,F_s\,K_1^3
+    \;=\; F_s\,K_1 + \lambda\,F_s\,K_1^3
+  \quad\Longrightarrow\quad
+  \lambda\,K_1^2 \;=\; 1,
+\end{equation}
+giving the optimal gains:
+
+\begin{proposition}[Optimal second-order gains]\label{prop:opt-gains}
+  The cost $J = \Var[e] + \lambda\,\Var[\dot{u}]$ is minimised by
+  \begin{equation}\label{eq:opt-K1}
+    K_1^* \;=\; \frac{1}{\sqrt{\lambda}},
+    \qquad
+    K_2^* \;=\; \sqrt{2\,F_s\,K_1^*}
+          \;=\; \sqrt{\frac{2\,F_s}{\lambda^{1/2}}}.
+  \end{equation}
+  The corresponding oscillator parameters are
+  \begin{equation}\label{eq:opt-osc}
+    \omega_n^* \;=\; \sqrt{F_s\,K_1^*}
+              \;=\; \left(\frac{F_s^2}{\lambda}\right)^{\!1/4},
+    \qquad
+    \boxed{\;\zeta^* \;=\; \frac{1}{\sqrt{2}}
+      \;\approx\; 0.707.\;}
+  \end{equation}
+\end{proposition}
+
+\begin{remark}[Universal damping ratio]
+  The optimal damping ratio $\zeta^* = 1/\sqrt{2}$ is
+  \textbf{independent of~$\lambda$}, the jitter intensity~$\sigma_w$,
+  and the sample rate~$F_s$.  Only the natural frequency~$\omega_n$
+  changes with the design parameters.  The value
+  $\zeta = 1/\sqrt{2}$ is the Butterworth (maximally flat magnitude)
+  damping, well known in filter design and classical optimal control.
+\end{remark}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Optimal Variances}\label{sec:opt-variances}
+
+Substituting the optimal gains into the variance expressions:
+\begin{align}
+  \Var[e]^*
+    &\;=\; \frac{3\,\sigma_w^2}{2\sqrt{2}\;\omega_n^*},
+    \label{eq:opt-var-e} \\[6pt]
+  \Var[\dot{u}]^*
+    &\;=\; \frac{\sigma_w^2\,(\omega_n^*)^3}{2\sqrt{2}\;F_s^2},
+    \label{eq:opt-var-v} \\[6pt]
+  J^*
+    &\;=\; \Var[e]^* + \lambda\,\Var[\dot{u}]^*
+    \;=\; \frac{3\,\sigma_w^2}{2\sqrt{2}\;\omega_n^*}
+      + \frac{\sigma_w^2\,(\omega_n^*)^3}{2\sqrt{2}\;F_s^2}\cdot\lambda.
+    \label{eq:opt-J}
+\end{align}
+
+Since $\omega_n^* = (F_s^2/\lambda)^{1/4}$, both terms depend
+on~$\lambda$ through~$\omega_n^*$ alone: increasing $\lambda$
+(more weight on smoothness) decreases $\omega_n^*$, widening
+$\Var[e]$ and shrinking $\Var[\dot{u}]$.
+
+
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Steady-State Bias}\label{sec:bias}
+
+The second-order controller has a nonzero steady-state queue error
+in the presence of constant clock drift.  This section analyses the
+bias, explains its root cause in terms of system type, and outlines
+a path to eliminating it.
+
+\subsubsection{Equilibrium Analysis}
+
+In steady state all derivatives vanish.  From the plant
+equation~\eqref{eq:error-sde} (deterministic part):
+\begin{equation}\label{eq:ss-plant}
+  \frac{\dd e}{\dd\tau} = 0
+  \quad\Longrightarrow\quad
+  F_s\,(\delta - u_{\text{ss}}) = 0
+  \quad\Longrightarrow\quad
+  u_{\text{ss}} = \delta.
+\end{equation}
+From the controller law~\eqref{eq:2nd-control-law}:
+\begin{equation}\label{eq:ss-controller}
+  \frac{\dd u}{\dd\tau} = 0
+  \quad\Longrightarrow\quad
+  K_1\,e_{\text{ss}} = K_2\,u_{\text{ss}} = K_2\,\delta
+  \quad\Longrightarrow\quad
+  \boxed{\;e_{\text{ss}} = \frac{K_2}{K_1}\,\delta.\;}
+\end{equation}
+The bias is proportional to the drift~$\delta$ and to the ratio
+$K_2/K_1$.
+
+\paragraph{Numerical magnitude.}
+For the default gains $K_1 = 10^{-5}$ and
+$K_2 = \sqrt{2\,F_s\,K_1} \approx 0.98$ at $F_s = 48\,000$:
+\begin{equation}
+  \frac{K_2}{K_1} \approx 9.8 \times 10^4.
+\end{equation}
+A drift of $\delta = 10\;\text{ppm} = 10^{-5}$ gives a steady-state
+bias of
+\begin{equation}
+  e_{\text{ss}} \approx 0.98\;\text{samples}
+  \;\approx\; 20\;\mu\text{s}\;\text{at 48\,kHz},
+\end{equation}
+which is negligible compared to jitter-induced fluctuations.
+For larger drifts (e.g.\ $\delta = 100\;\text{ppm}$), the bias
+grows to $\approx 10\;\text{samples} \approx 200\;\mu\text{s}$.
+
+\subsubsection{Root Cause: System Type}
+
+The open-loop transfer function from
+error~$e$ to the plant input~$u$ contains exactly \emph{one}
+integrator (the warp state~$u$), but the damping term
+$-K_2\,u$ makes it a \emph{leaky} integrator:
+\begin{equation}
+  U(s) = \frac{K_1}{s + K_2}\,E(s).
+\end{equation}
+In classical control terminology, this is a \textbf{Type~1} system.
+A Type~1 system rejects step disturbances with zero steady-state
+error but has nonzero error for a ramp.  The constant drift~$\delta$
+enters the plant as a step in~$\dot{e}$, which from the perspective
+of the error~$e$ is a ramp input---hence the nonzero
+position error.
+
+\subsubsection{Why the H2 Cost Misses the Bias}
+
+The H2 optimisation (Section~\ref{sec:drop-var-u}) minimises
+\begin{equation}
+  J = \Var[e] + \lambda\,\Var[\dot{u}],
+\end{equation}
+which captures only the \emph{variance} (fluctuation around the
+mean), not the \emph{mean} itself.  The steady-state bias
+$e_{\text{ss}} = (K_2/K_1)\,\delta$ is deterministic and does not
+appear in the variance.  Consequently, the H2-optimal gains make no
+attempt to reduce the bias, focusing entirely on minimising the
+stochastic fluctuations.
+
+\subsubsection{Towards Zero Bias: Type~2 Design}
+
+To achieve $e_{\text{ss}} = 0$ for constant drift, one needs a
+\textbf{Type~2} system---two integrators in the open loop.  This
+requires adding a third state variable that accumulates the
+integral of the error:
+\begin{align}
+  \frac{\dd \xi}{\dd\tau} &= e, \label{eq:type2-xi}\\[4pt]
+  \frac{\dd u}{\dd\tau} &= K_1\,e + K_0\,\xi - K_2\,u,
+    \label{eq:type2-u}
+\end{align}
+where $\xi$ is the integrated error and $K_0 > 0$ is the integral
+gain.  The controller now has three gains: $K_0$ (integral),
+$K_1$ (proportional), and $K_2$ (damping).
+
+\paragraph{Steady-state verification.}
+In steady state, $\dot{\xi} = 0$ implies $e_{\text{ss}} = 0$
+immediately---regardless of the drift~$\delta$ or the gain
+values.  The integrator state settles to
+$\xi_{\text{ss}} = K_2\,\delta/K_0$, and the warp state to
+$u_{\text{ss}} = \delta$ as before.
+
+\subsubsection{PID Interpretation}
+
+The control law~\eqref{eq:type2-u} is a PID controller applied to
+the queue error:
+\begin{itemize}
+  \item $K_0\,\xi = K_0\!\int\!e\,\dd\tau$: \textbf{Integral}
+    action (eliminates bias),
+  \item $K_1\,e$: \textbf{Proportional} action (restoring force),
+  \item $-K_2\,u$: \textbf{Derivative} action on the warp state
+    (damping).
+\end{itemize}
+The previous second-order controller is the PD subset ($K_0 = 0$).
+
+\subsubsection{Closed-Loop Transfer Functions}
+
+The state-space representation with state $\mathbf{x} = (e, \xi, u)^\top$
+and noise input $w$:
+\begin{equation}
+  \underbrace{
+  \begin{pmatrix} \dot{e} \\ \dot{\xi} \\ \dot{u} \end{pmatrix}
+  }_{\dot{\mathbf{x}}}
+  =
+  \underbrace{
+  \begin{pmatrix}
+    0 & 0 & -F_s \\
+    1 & 0 & 0 \\
+    K_1 & K_0 & -K_2
+  \end{pmatrix}
+  }_{A}
+  \begin{pmatrix} e \\ \xi \\ u \end{pmatrix}
+  +
+  \underbrace{
+  \begin{pmatrix} \sigma_w \\ 0 \\ 0 \end{pmatrix}
+  }_{B}\,\dot{W}.
+\end{equation}
+
+The closed-loop characteristic polynomial is
+\begin{equation}\label{eq:type2-charpoly}
+  p(s) = s^3 + K_2\,s^2 + F_s\,K_1\,s + F_s\,K_0.
+\end{equation}
+
+The transfer function from noise~$w$ to queue error~$e$ is
+\begin{equation}\label{eq:type2-He}
+  H_e(s) = \frac{\sigma_w\,s\,(s + K_2)}{p(s)},
+\end{equation}
+and from noise to warp derivative $\dot{u}$:
+\begin{equation}\label{eq:type2-Hu}
+  H_{\dot{u}}(s) = \frac{\sigma_w\,s\,(K_1\,s + K_0)}{p(s)}.
+\end{equation}
+
+Note the \emph{extra zero at $s = 0$} in both transfer functions
+compared to the PD controller.  This zero suppresses the
+low-frequency response, which is precisely the mechanism by
+which integral action rejects the DC disturbance (drift).
+
+\subsubsection{Dominant-Pole Gain Design}\label{sec:dominant-pole}
+
+Rather than solving the full 3-parameter H2 optimisation (which
+yields transcendental equations), we exploit the separation of
+timescales.  Choose the integral gain $K_0$ small enough that the
+characteristic polynomial factors approximately as
+\begin{equation}\label{eq:dominant-factor}
+  p(s) \;\approx\; (s^2 + 2\zeta\omega_n\,s + \omega_n^2)\,(s + p_0),
+\end{equation}
+where $p_0 \ll \zeta\omega_n$ is a slow real pole governing the
+integral mode.  Expanding and matching
+with~\eqref{eq:type2-charpoly}:
+\begin{align}
+  K_2 &= 2\zeta\omega_n + p_0 \;\approx\; 2\zeta\omega_n,
+    \label{eq:K2-pid}\\
+  F_s\,K_1 &= \omega_n^2 + 2\zeta\omega_n\,p_0
+    \;\approx\; \omega_n^2,
+    \label{eq:K1-pid}\\
+  F_s\,K_0 &= \omega_n^2\,p_0
+    \quad\Longrightarrow\quad
+    \boxed{\;K_0 = K_1\,p_0.\;}
+    \label{eq:K0-pid}
+\end{align}
+
+\begin{proposition}[PID gain design]\label{prop:pid-gains}
+  Keep the Butterworth-optimal PD gains
+  (Proposition~\ref{prop:opt-gains}):
+  \begin{equation}
+    K_1 = \frac{1}{\sqrt{\lambda}},\qquad
+    K_2 = \sqrt{2\,F_s\,K_1},\qquad
+    \zeta = \frac{1}{\sqrt{2}}.
+  \end{equation}
+  Set the integral gain via its settling time $T_I$:
+  \begin{equation}\label{eq:K0-from-TI}
+    p_0 = \frac{1}{T_I},\qquad
+    K_0 = \frac{K_1}{T_I}.
+  \end{equation}
+  The integral mode eliminates the steady-state bias with time
+  constant~$T_I$, while the dominant oscillator dynamics are
+  essentially unchanged.
+\end{proposition}
+
+\begin{remark}[Stability margin]
+  The Routh condition requires $K_0 < K_1\,K_2$.  Since
+  $K_0 = K_1/T_I$ and $K_2 \approx \omega_n\sqrt{2}$, the
+  condition becomes $T_I > 1/K_2 \approx 1/\omega_n$.  For
+  $K_1 = 10^{-5}$ and $F_s = 48\,000$: $\omega_n \approx 0.69$,
+  so $T_I > 1.4\;\text{s}$.  A practical choice of
+  $T_I = 30\;\text{s}$ gives a large stability margin.
+\end{remark}
+
+\subsubsection{Effect on Variances}
+
+Solving the Lyapunov equation $AP + PA^\top + BB^\top = 0$ for the
+PID state-space representation yields the exact stationary variance:
+\begin{equation}\label{eq:pid-var-e}
+  \Var[e]_{\text{PID}}
+    = \frac{\sigma_w^2\,(K_2^2 + F_s\,K_1)}
+           {2\,F_s\,(K_1\,K_2 - K_0)}.
+\end{equation}
+Comparing with the PD result ($K_0 = 0$):
+\begin{equation}\label{eq:pid-var-ratio}
+  \frac{\Var[e]_{\text{PID}}}{\Var[e]_{\text{PD}}}
+    = \frac{K_1\,K_2}{K_1\,K_2 - K_0}
+    = \frac{1}{1 - K_0/(K_1\,K_2)}.
+\end{equation}
+Since $K_0 > 0$, the PID variance is \emph{slightly larger} than
+the PD variance.  The integral mode adds a slow resonance that
+admits more low-frequency noise energy.
+
+\paragraph{Numerical overhead.}
+For $K_0 = K_1/T_I$ with $T_I = 30\;\text{s}$ and
+$K_2 \approx 0.98$:
+\begin{equation}
+  \frac{K_0}{K_1\,K_2} = \frac{1}{K_2\,T_I}
+    \approx \frac{1}{0.98 \times 30} \approx 3.4\%.
+\end{equation}
+The variance overhead is thus $\approx 3.5\%$---negligible
+compared to the benefit of eliminating steady-state bias entirely.
+
+\subsubsection{The Full Three-Objective Cost}
+
+The complete cost function incorporating all three objectives is
+\begin{equation}\label{eq:full-cost}
+  J = \underbrace{\E[e]^2}_{J_1\;\text{(bias)}}
+    + \underbrace{\Var[e]}_{J_2\;\text{(regulation)}}
+    + \lambda\,\underbrace{\Var[\dot{u}]}_{J_3\;\text{(smoothness)}}.
+\end{equation}
+For the PID controller:
+\begin{align}
+  J_1 &= 0  &&\text{(structurally zero for any $K_0 > 0$)},\\
+  J_2 &= \frac{\sigma_w^2\,(K_2^2 + F_s\,K_1)}
+              {2\,F_s\,(K_1\,K_2 - K_0)}
+       &&\text{(increases with $K_0$)},\\
+  J_3 &\approx \frac{\sigma_w^2\,\omega_n^3}{2\sqrt{2}\,F_s^2}
+       &&\text{(weakly affected)}.
+\end{align}
+
+\begin{remark}[Optimal $K_0$ depends on unknown drift]
+  Since $J_1 = 0$ for any $K_0 > 0$ but $J_2$ increases with $K_0$,
+  the H2-optimal integral gain is $K_0 \to 0^+$---as small as
+  possible while still nonzero.  In practice, $K_0$ must be large
+  enough that the integral mode settles within a reasonable time
+  (e.g.\ $T_I = 30$\,s), giving the dominant-pole
+  design~\eqref{eq:K0-from-TI} as the pragmatic optimum.
+\end{remark}
+
+The user controls the $J_2$--$J_3$ tradeoff through $K_1$
+(equivalently $\lambda$ or $\omega_n$), while $K_0 = K_1/T_I$
+handles the bias independently.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Discrete-Time Implementation}\label{sec:implementation}
+
+In practice the controller runs at discrete epochs of
+duration~$h$ (the scaling interval).  At each epoch~$k$:
+
+\begin{enumerate}
+  \item Observe the queue error $e_k = q_k - q^*$.
+  \item Update the integral state:
+    \begin{equation}\label{eq:impl-xi}
+      \xi_{k+1} \;=\; \xi_k \;+\; e_k\,h.
+    \end{equation}
+  \item Compute the control acceleration:
+    \begin{equation}\label{eq:impl-v}
+      v_k \;=\; K_1\,e_k \;+\; K_0\,\xi_k \;-\; K_2\,u_k.
+    \end{equation}
+  \item Update the warp state by Euler integration:
+    \begin{equation}\label{eq:impl-u}
+      u_{k+1} \;=\; u_k \;+\; v_k\,h.
+    \end{equation}
+  \item Clamp to safety bounds and set the resampler coefficient:
+    \begin{equation}\label{eq:impl-coeff}
+      \texttt{freq\_coeff}_k \;=\; 1 + \text{clamp}(u_k,\;
+        -u_{\max},\; u_{\max}).
+    \end{equation}
+\end{enumerate}
+
+\begin{remark}[Anti-windup]
+  When the warp state~$u$ saturates at $\pm u_{\max}$, the
+  integrator~$\xi$ must be frozen to prevent windup.  In the
+  implementation, $\xi$ is not updated when $u$ is clamped and the
+  error has the same sign as the saturation direction.  This
+  ensures the integral state does not grow unboundedly during
+  transients or fault conditions.
+\end{remark}
+
+\begin{remark}[No feedforward drift estimate]
+  An external drift estimate $\hat{\delta}$ (e.g.\ from RTP timestamp
+  ratios) is not required.  The integral action drives the
+  steady-state bias to exactly zero for any constant drift, making
+  feedforward unnecessary.  Omitting feedforward avoids step
+  disturbances from estimator artefacts (NTP corrections, session
+  restarts, bias in early samples).
+\end{remark}
+
+%% ══════════════════════════════════════════════════════════════════════════════
+\section{Skewness and Asymmetric Control}%
+\label{sec:skewness}
+
+The preceding analysis assumes symmetric Gaussian noise, yielding
+a symmetric stationary distribution for the queue error.  In practice,
+network jitter is \emph{one-sided}: packets can be delayed but never
+arrive before the minimum propagation time.  This produces a
+skewed queue error distribution whose tails are asymmetric,
+with direct consequences for the underrun probability.
+
+This section develops a Fokker--Planck analysis of the queue error
+under asymmetric feedback, yielding a closed-form stationary density
+and exact skewness control.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Physical Origin of Skewness}%
+\label{sec:skew-origin}
+
+Each packet's transit delay decomposes as
+$d_k = d_{\min} + j_k$ where $j_k \geq 0$.  The non-negative
+constraint on~$j_k$ is physical (speed of light plus serialization)
+and implies that per-packet jitter has strictly positive skewness:
+$\kappa_3[j_k] > 0$.  Common models include exponential jitter
+($\gamma_3 = 2$) and gamma jitter ($\gamma_3 = 2/\sqrt{\alpha}$).
+
+The aggregate noise $w_k$ driving the queue in each control epoch
+inherits this skewness.  By the CLT with Edgeworth correction, if
+$N$ packets arrive per epoch:
+\begin{equation}\label{eq:epoch-skew}
+  \gamma_3[w_k] = \frac{\gamma_3[j]}{\sqrt{N}},
+\end{equation}
+which shrinks as $1/\sqrt{N}$ but remains nonzero for finite~$N$.
+
+Through the linear controller, the queue error skewness is
+\begin{equation}\label{eq:skew-propagation}
+  \kappa_3[e] = \kappa_3[w] \cdot \int_0^\infty h_e(\tau)^3\,\dd\tau,
+\end{equation}
+where $h_e$ is the closed-loop impulse response from noise to
+error.  For a stable linear system with all-positive impulse
+response, $\int h_e^3 > 0$, so the output skewness has the same
+sign as the input.
+
+\begin{remark}[Linear controllers cannot eliminate skewness]
+  Skewness is a third-order cumulant.  A linear filter's transfer
+  function controls the power spectrum (second-order), not the
+  bispectrum (third-order).  To set $\kappa_3[e] = 0$ from nonzero
+  input skewness requires $\int h_e^3 = 0$, which for the class of
+  stable minimum-phase responses needed here cannot be achieved.
+  Independent control of skewness requires a \emph{nonlinear}
+  controller element.
+\end{remark}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Asymmetric Proportional Controller}%
+\label{sec:asym-controller}
+
+The simplest nonlinear element that targets skewness is an
+\emph{asymmetric gain}: the controller responds more aggressively
+when the queue error is in the dangerous (underrun) direction.
+
+Replace the constant proportional gain~$K$ with a piecewise gain:
+\begin{equation}\label{eq:asym-gain}
+  K(e) \;=\;
+  \begin{cases}
+    K_+ & \text{if } e \geq 0 \quad\text{(queue above target)},\\[4pt]
+    K_- & \text{if } e < 0   \quad\text{(queue below target)},
+  \end{cases}
+\end{equation}
+with $K_- > K_+$ to respond more aggressively in the underrun
+direction.
+
+For analytical tractability, we analyse the first-order
+(proportional) controller $u = K(e)\,e$ under the fluid
+approximation.  The queue error SDE becomes a
+\emph{piecewise-linear} diffusion:
+\begin{equation}\label{eq:asym-sde}
+  \dd e \;=\; -F_s\,K(e)\,e\;\dd\tau
+            \;+\; \sigma_w\;\dd W.
+\end{equation}
+This is an Ornstein--Uhlenbeck process with rate
+$\alpha_+ = F_s\,K_+$ for $e > 0$ and rate
+$\alpha_- = F_s\,K_-$ for $e < 0$.
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Fokker--Planck Equation}%
+\label{sec:fokker-planck}
+
+Write $D = \sigma_w^2/2$ for the diffusion coefficient.  The
+stationary Fokker--Planck equation for the probability density
+$p(e)$ is
+\begin{equation}\label{eq:fp}
+  \frac{\partial}{\partial e}\bigl[\alpha(e)\,e\,p(e)\bigr]
+  + D\,\frac{\partial^2 p}{\partial e^2} = 0,
+\end{equation}
+where $\alpha(e) = \alpha_\pm$ on each half-line.  On each
+half, ~\eqref{eq:fp} is the standard Fokker--Planck equation for an
+OU process, whose stationary solution is Gaussian:
+\begin{equation}\label{eq:fp-solution}
+  p(e) \;=\;
+  \begin{cases}
+    \displaystyle
+    C\,\exp\!\Bigl(-\frac{e^2}{2\sigma_+^2}\Bigr)
+      & e \geq 0, \\[10pt]
+    \displaystyle
+    C\,\exp\!\Bigl(-\frac{e^2}{2\sigma_-^2}\Bigr)
+      & e < 0,
+  \end{cases}
+\end{equation}
+with half-variances
+\begin{equation}\label{eq:half-var}
+  \sigma_+^2 = \frac{D}{\alpha_+}
+    = \frac{\sigma_w^2}{2\,F_s\,K_+},
+  \qquad
+  \sigma_-^2 = \frac{D}{\alpha_-}
+    = \frac{\sigma_w^2}{2\,F_s\,K_-}.
+\end{equation}
+
+\paragraph{Matching conditions.}
+At $e = 0$: (i)~continuity of $p$ is ensured by using the same
+constant~$C$ on both halves; (ii)~the probability current
+$J = -\alpha\,e\,p - D\,p'$ vanishes identically on each half
+(since $p$ satisfies the OU equation), ensuring zero-current
+continuity.
+
+\paragraph{Normalisation.}
+\begin{equation}\label{eq:split-norm}
+  1 = C\!\int_0^\infty\!
+      e^{-e^2/(2\sigma_+^2)}\dd e
+    + C\!\int_{-\infty}^0\!
+      e^{-e^2/(2\sigma_-^2)}\dd e
+    = C\,\sqrt{\tfrac{\pi}{2}}\,
+      (\sigma_+ + \sigma_-)
+\end{equation}
+gives
+$C = \sqrt{2/\pi}\,/\,(\sigma_+ + \sigma_-)$.
+
+\begin{definition}[Split normal distribution]%
+\label{def:split-normal}
+  The density~\eqref{eq:fp-solution} is a \emph{split normal}
+  (two-piece Gaussian) with scale parameters $\sigma_+$ and
+  $\sigma_-$.  When $\sigma_+ = \sigma_-$ it reduces to the
+  ordinary Gaussian.
+\end{definition}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Moments of the Split Normal}%
+\label{sec:split-moments}
+
+Let $r = \sigma_-/\sigma_+ = \sqrt{K_+/K_-}$ be the asymmetry
+ratio ($r < 1$ when the underrun side is tighter).  All moments
+are expressible in closed form.
+
+\paragraph{Mean.}
+\begin{equation}\label{eq:split-mean}
+  \E[e] = \sqrt{\frac{2}{\pi}}\;(\sigma_+ - \sigma_-)
+    = \sqrt{\frac{2}{\pi}}\;\sigma_+\,(1 - r),
+\end{equation}
+which is \emph{positive} when $K_- > K_+$ ($r < 1$): the
+asymmetric controller shifts the mean toward the safe (positive)
+side.
+
+\paragraph{Second moment and variance.}
+\begin{align}
+  \E[e^2]
+    &= \frac{\sigma_+^3 + \sigma_-^3}{\sigma_+ + \sigma_-}
+    = \sigma_+^2\,\frac{1 + r^3}{1 + r},
+    \label{eq:split-e2}\\[6pt]
+  \Var[e]
+    &= \sigma_+^2\left[
+        \frac{1 + r^3}{1 + r}
+        - \frac{2}{\pi}(1 - r)^2
+      \right].
+    \label{eq:split-var}
+\end{align}
+
+\paragraph{Skewness.}
+For small asymmetry $r = 1 - \epsilon$ with $\epsilon \ll 1$,
+the skewness coefficient simplifies to:
+\begin{equation}\label{eq:split-skew-approx}
+  \gamma_3 \;\approx\;
+    \sqrt{\frac{2}{\pi}}\;
+    \frac{(4/\pi - 1)\,\epsilon}
+         {\bigl(1 - 2/\pi\bigr)^{3/2}}
+    \;\approx\; 0.31\,\epsilon.
+\end{equation}
+
+\begin{remark}[Interpretation]
+  Each unit of gain asymmetry ($\epsilon = 1 - r
+  = 1 - \sqrt{K_+/K_-}$) produces $\approx 0.31$ units of
+  skewness.  Since $\gamma_3$ of the input noise is typically
+  $0.3$--$1.0$, a modest asymmetry of $K_-/K_+ \approx 1.5$
+  ($\epsilon \approx 0.18$, $\gamma_3 \approx 0.06$) can
+  already partially compensate the intrinsic jitter skewness.
+\end{remark}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Underrun Probability}%
+\label{sec:asym-underrun}
+
+The probability that the queue error exceeds a threshold~$-M$
+(i.e.\ the queue drops $M$ samples below target) is the left
+tail of the split normal:
+\begin{equation}\label{eq:asym-underrun}
+  P(e < -M)
+    = \frac{\sigma_-}{\sigma_+ + \sigma_-}\;
+      \operatorname{erfc}\!\left(
+        \frac{M}{\sigma_-\sqrt{2}}
+      \right).
+\end{equation}
+
+For the symmetric controller ($\sigma_+ = \sigma_- = \sigma$):
+\begin{equation}
+  P_{\text{sym}}(e < -M) = \tfrac{1}{2}\,
+    \operatorname{erfc}\!\bigl(M/(\sigma\sqrt{2})\bigr).
+\end{equation}
+
+The key observation is that in the asymmetric case, the argument
+of the erfc is $M/\sigma_-$, and since $\sigma_- < \sigma_+$ (the
+underrun side is tighter), the effective number of standard
+deviations \emph{increases}:
+\begin{equation}
+  \frac{M}{\sigma_-}
+    = \frac{M}{\sigma_+\,r}
+    = \frac{1}{r}\,\frac{M}{\sigma_+}.
+\end{equation}
+
+\begin{proposition}[Underrun reduction]%
+\label{prop:underrun-reduction}
+  With asymmetry ratio $r = \sqrt{K_+/K_-}$, a buffer margin
+  of~$M$ provides $M/(\sigma_+\,r)$ effective standard deviations
+  of protection on the underrun side, compared to $M/\sigma$ for
+  the symmetric case.  For $K_-/K_+ = 2$ ($r = 1/\sqrt{2}$):
+  \begin{itemize}
+    \item A $3\sigma$ margin becomes effectively $4.2\sigma$,
+    \item The underrun probability drops by a factor of~${\approx\,10}$.
+  \end{itemize}
+\end{proposition}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{The Variance--Skewness Tradeoff}%
+\label{sec:var-skew-tradeoff}
+
+The asymmetric controller shifts the mean to $\E[e] > 0$
+(the queue sits slightly above target on average).  This is a
+deliberate asymmetric operating point that protects the underrun
+tail.
+
+For small asymmetry, the variance penalty is \emph{second-order}
+while the underrun benefit is \emph{first-order}:
+
+\begin{proposition}[Variance--skewness tradeoff]%
+\label{prop:var-skew}
+  At leading order in $\epsilon = 1 - r$:
+  \begin{itemize}
+    \item Underrun probability decreases exponentially
+      (via the increased $M/\sigma_-$ ratio),
+    \item Variance increases as $1 + O(\epsilon^2)$
+      (quadratic cost),
+    \item Mean shift is $O(\epsilon)$ (linear, compensated by
+      integral action if present).
+  \end{itemize}
+  The tradeoff strongly favours small asymmetry when the
+  buffer margin~$M$ is large relative to~$\sigma$.
+\end{proposition}
+
+%% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Extension to the PID Controller}%
+\label{sec:asym-extension}
+
+The Fokker--Planck analysis above uses a first-order
+(proportional) controller for analytical tractability.  For the
+PID controller (Section~\ref{sec:bias}), the state space is
+three-dimensional $(e, \xi, u)$ and the Fokker--Planck equation
+becomes a 3D PDE, which does not admit closed-form solutions in
+general.
+
+However, the qualitative results carry over:
+\begin{enumerate}
+  \item The marginal density of~$e$ remains approximately
+    split-normal when the gain asymmetry is a slowly-varying
+    modulation of the linear dynamics (\emph{adiabatic
+    approximation}).
+  \item The integral action ($K_0$) compensates the mean shift
+    introduced by the asymmetric gain, restoring $\E[e] = 0$
+    while preserving the asymmetric tail structure.
+  \item The dominant pole separation ($p_0 \ll \omega_n$) means
+    the integral mode operates on a much slower timescale
+    and does not interact with the asymmetric gain dynamics.
+\end{enumerate}
+
+In practice, the asymmetric PID controller would use:
+\begin{equation}\label{eq:asym-pid}
+  v \;=\;
+    K_1(e)\,e + K_0\,\xi - K_2\,u,
+  \qquad
+  K_1(e) = K_1\,(1 + \beta\,\operatorname{sgn}(-e)),
+\end{equation}
+where $\beta \in [0, 1)$ controls the asymmetry.
+The effective gains are $K_- = K_1(1+\beta)$ for $e < 0$
+and $K_+ = K_1(1-\beta)$ for $e > 0$, giving
+$r = \sqrt{(1-\beta)/(1+\beta)}$.
+
+%% ══════════════════════════════════════════════════════════════════════════════
+%\bibliographystyle{plain}
+%\bibliography{references}
+
+\end{document}

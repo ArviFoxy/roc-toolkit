@@ -14,6 +14,7 @@
 
 #include "roc_audio/freq_estimator.h"
 #include "roc_audio/latency_config.h"
+#include "roc_audio/precise_freq_estimator.h"
 #include "roc_audio/sample_spec.h"
 #include "roc_core/noncopyable.h"
 #include "roc_core/optional.h"
@@ -22,6 +23,8 @@
 #include "roc_packet/ilink_meter.h"
 #include "roc_packet/units.h"
 #include "roc_status/status_code.h"
+
+#include <cmath>
 
 #ifdef ROC_TARGET_PROMETHEUS
 #include <prometheus/family.h>
@@ -108,6 +111,7 @@ private:
     void dump_();
 
     core::Optional<FreqEstimator> fe_;
+    core::Optional<PreciseFreqEstimator> pfe_;
 
     packet::stream_timestamp_t stream_pos_;
 
@@ -185,9 +189,34 @@ private:
 
     status::StatusCode init_status_;
 
+    // Controller-independent objective metrics.
+    // These measure closed-loop performance regardless of which
+    // controller (first-order or second-order) is active.
+    //  J1: queue error bias      (1st moment, should → 0)
+    //  J2: queue error stddev    (2nd moment, regulation quality)
+    //  J3: queue error skewness  (E[(e-μ)³]/σ³, dimensionless, tail asymmetry)
+    //  J4: warp derivative RMS   (frequency smoothness)
+    //
+    // EMA time constant is 30 seconds (smooths over NTP sync transients).
+    // Alpha = scaling_interval / tau_ema. Bias correction: divide raw EMA
+    // by (1 - w) where w = (1-alpha)^n decays from 1 to 0.
+    double obj_ema_alpha_;       // EMA discount factor = h / tau_ema.
+    double obj_ema_w_;           // Bias correction weight = (1-alpha)^n.
+    double obj_error_mean_;      // Raw EMA of e (queue error in samples).
+    double obj_error_sq_;        // Raw EMA of e² (second moment).
+    double obj_error_cube_;      // Raw EMA of e³ (third moment).
+    double obj_warp_deriv_sq_;   // Raw EMA of (du/dt)².
+    float prev_freq_coeff_;      // Previous freq_coeff for finite differencing.
+    double sample_rate_;         // Fs, for samples → seconds conversion.
+    double scale_interval_sec_;  // Scaling interval in seconds, for du/dt.
+
 #ifdef ROC_TARGET_PROMETHEUS
     prometheus::Gauge* target_latency_gauge_;
     prometheus::Histogram* niq_latency_histogram_;
+    prometheus::Gauge* obj_error_mean_gauge_;
+    prometheus::Gauge* obj_error_stddev_gauge_;
+    prometheus::Gauge* obj_warp_deriv_rms_gauge_;
+    prometheus::Gauge* obj_error_skewness_gauge_;
 #endif
 };
 

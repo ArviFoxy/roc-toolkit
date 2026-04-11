@@ -53,12 +53,15 @@ section "Decoding options"
         values="niq","e2e" default="niq" enum optional
 
     option "latency-profile" - "Latency tuning profile"
-        values="auto","responsive","gradual","intact" default="auto" enum optional
+        values="auto","responsive","gradual","second-order","intact" default="auto" enum optional
 
     option "resampler-backend" - "Resampler backend"
         values="auto","builtin","speex","speexdec" default="auto" enum optional
     option "resampler-profile" - "Resampler profile"
         values="low","medium","high" default="medium" enum optional
+
+    option "latency-aggressiveness" - "Latency controller aggressiveness (K1 spring gain)"
+        double default="1e-5" optional
 
 section "Latency options"
 

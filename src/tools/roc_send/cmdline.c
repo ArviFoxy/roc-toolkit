@@ -56,7 +56,7 @@ const char *gengetopt_args_info_help[] = {
   "      --fec-block-src=INT       Number of source packets in FEC block",
   "      --fec-block-rpr=INT       Number of repair packets in FEC block",
   "      --latency-backend=ENUM    Which latency to use in latency tuner\n                                  (possible values=\"niq\", \"e2e\"\n                                  default=`niq')",
-  "      --latency-profile=ENUM    Latency tuning profile  (possible\n                                  values=\"responsive\", \"gradual\",\n                                  \"intact\" default=`intact')",
+  "      --latency-profile=ENUM    Latency tuning profile  (possible\n                                  values=\"responsive\", \"gradual\",\n                                  \"second-order\", \"intact\" default=`intact')",
   "      --resampler-backend=ENUM  Resampler backend  (possible values=\"auto\",\n                                  \"builtin\", \"speex\", \"speexdec\"\n                                  default=`auto')",
   "      --resampler-profile=ENUM  Resampler profile  (possible values=\"low\",\n                                  \"medium\", \"high\" default=`medium')",
   "\nLatency options (for sender-side latency tuning):",
@@ -116,7 +116,7 @@ cmdline_parser_required2 (struct gengetopt_args_info *args_info, const char *pro
 
 const char *cmdline_parser_color_values[] = {"auto", "always", "never", 0}; /*< Possible values for color. */
 const char *cmdline_parser_latency_backend_values[] = {"niq", "e2e", 0}; /*< Possible values for latency-backend. */
-const char *cmdline_parser_latency_profile_values[] = {"responsive", "gradual", "intact", 0}; /*< Possible values for latency-profile. */
+const char *cmdline_parser_latency_profile_values[] = {"responsive", "gradual", "second-order", "intact", 0}; /*< Possible values for latency-profile. */
 const char *cmdline_parser_resampler_backend_values[] = {"auto", "builtin", "speex", "speexdec", 0}; /*< Possible values for resampler-backend. */
 const char *cmdline_parser_resampler_profile_values[] = {"low", "medium", "high", 0}; /*< Possible values for resampler-profile. */
 const char *cmdline_parser_prometheus_niq_latency_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-niq-latency-scale. */

@@ -31,12 +31,12 @@ extern "C" {
 
 #ifndef CMDLINE_PARSER_VERSION
 /** @brief the program version */
-#define CMDLINE_PARSER_VERSION VERSION
+#define CMDLINE_PARSER_VERSION "0.4.0 (205ff68d52)"
 #endif
 
 enum enum_color { color__NULL = -1, color_arg_auto = 0, color_arg_always, color_arg_never };
 enum enum_latency_backend { latency_backend__NULL = -1, latency_backend_arg_niq = 0, latency_backend_arg_e2e };
-enum enum_latency_profile { latency_profile__NULL = -1, latency_profile_arg_responsive = 0, latency_profile_arg_gradual, latency_profile_arg_intact };
+enum enum_latency_profile { latency_profile__NULL = -1, latency_profile_arg_responsive = 0, latency_profile_arg_gradual, latency_profile_arg_secondMINUS_order, latency_profile_arg_intact };
 enum enum_resampler_backend { resampler_backend__NULL = -1, resampler_backend_arg_auto = 0, resampler_backend_arg_builtin, resampler_backend_arg_speex, resampler_backend_arg_speexdec };
 enum enum_resampler_profile { resampler_profile__NULL = -1, resampler_profile_arg_low = 0, resampler_profile_arg_medium, resampler_profile_arg_high };
 enum enum_prometheus_niq_latency_scale { prometheus_niq_latency_scale__NULL = -1, prometheus_niq_latency_scale_arg_log = 0, prometheus_niq_latency_scale_arg_linear };

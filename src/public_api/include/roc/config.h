@@ -600,7 +600,25 @@ typedef enum roc_latency_tuner_profile {
      * Cons:
      *  - does not allow very low latency and synchronization error
      */
-    ROC_LATENCY_TUNER_PROFILE_GRADUAL = 3
+    ROC_LATENCY_TUNER_PROFILE_GRADUAL = 3,
+
+    /** Model-based latency adjustment.
+     *
+     * Clock speed is adjusted using direct clock drift estimation from
+     * RTP timestamps (feedforward), combined with proportional buffer
+     * error correction (feedback).
+     *
+     * Requires high precision clock adjustment, hence recommended for use with
+     * \ref ROC_RESAMPLER_BACKEND_BUILTIN.
+     *
+     * Pros:
+     *  - optimal linear estimator for clock drift
+     *  - transparent, predictable behavior
+     *
+     * Cons:
+     *  - not yet battle-tested across diverse network environments
+     */
+    ROC_LATENCY_TUNER_PROFILE_SECOND_ORDER = 4
 } roc_latency_tuner_profile;
 
 /** Resampler backend.

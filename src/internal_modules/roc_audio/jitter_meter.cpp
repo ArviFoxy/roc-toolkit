@@ -19,7 +19,8 @@ namespace audio {
 
 bool JitterMeterConfig::deduce_defaults(audio::LatencyTunerProfile latency_profile) {
     if (envelope_resistance_coeff == 0) {
-        if (latency_profile == audio::LatencyTunerProfile_Responsive) {
+        if (latency_profile == audio::LatencyTunerProfile_Responsive
+            || latency_profile == audio::LatencyTunerProfile_SecondOrder) {
             envelope_resistance_coeff = 0.07;
         } else {
             envelope_resistance_coeff = 0.10;

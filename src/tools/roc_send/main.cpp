@@ -244,6 +244,9 @@ bool build_sender_config(const gengetopt_args_info& args,
     case latency_profile_arg_intact:
         sender_config.latency.tuner_profile = audio::LatencyTunerProfile_Intact;
         break;
+    case latency_profile_arg_secondMINUS_order:
+        sender_config.latency.tuner_profile = audio::LatencyTunerProfile_SecondOrder;
+        break;
     default:
         break;
     }
@@ -296,6 +299,9 @@ bool build_sender_config(const gengetopt_args_info& args,
         break;
     case latency_profile_arg_intact:
         sender_config.latency.tuner_profile = audio::LatencyTunerProfile_Intact;
+        break;
+    case latency_profile_arg_secondMINUS_order:
+        sender_config.latency.tuner_profile = audio::LatencyTunerProfile_SecondOrder;
         break;
     default:
         break;
