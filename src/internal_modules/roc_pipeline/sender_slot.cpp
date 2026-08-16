@@ -29,6 +29,7 @@ SenderSlot::SenderSlot(const SenderSinkConfig& sink_config,
     , fanout_(fanout)
     , state_tracker_(state_tracker)
     , session_(sink_config,
+               slot_config,
                processor_map,
                encoding_map,
                packet_factory,

@@ -117,6 +117,16 @@ struct SenderSinkConfig {
 
 //! Parameters of sender slot.
 struct SenderSlotConfig {
+    //! If true, the slot sends only the input tracks selected in `tracks`.
+    //! Requires a sink input_sample_spec with ChanLayout_Multitrack.
+    bool enable_track_selection;
+
+    //! Selected input tracks (layout ChanLayout_Multitrack, order None).
+    //! Indices refer to the input channel set; selected track count must
+    //! equal the channel count of the packet encoding, so the emitted
+    //! stream is wire-identical to a sender without selection.
+    audio::ChannelSet tracks;
+
     //! Initialize config.
     SenderSlotConfig();
 

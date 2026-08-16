@@ -92,6 +92,21 @@ SenderSlot* create_slot(SenderSink& sink) {
     return slot;
 }
 
+SenderSlotConfig make_track_slot_config(size_t first_track, size_t last_track) {
+    SenderSlotConfig slot_config;
+    slot_config.enable_track_selection = true;
+    slot_config.tracks.set_layout(audio::ChanLayout_Multitrack);
+    slot_config.tracks.set_order(audio::ChanOrder_None);
+    slot_config.tracks.set_range(first_track, last_track);
+    return slot_config;
+}
+
+SenderSlot* create_track_slot(SenderSink& sink, size_t track) {
+    SenderSlot* slot = sink.create_slot(make_track_slot_config(track, track));
+    CHECK(slot);
+    return slot;
+}
+
 void create_transport_endpoint(SenderSlot* slot,
                                address::Interface iface,
                                address::Protocol proto,
@@ -199,6 +214,36 @@ TEST_GROUP(sender_sink) {
     void init_with_defaults() {
         init_with_specs(SampleRate, Chans_Stereo, Format_Raw, SampleRate, Chans_Stereo,
                         Format_S16_Be);
+    }
+
+    // Multitrack input with tracks 0..input_tracks-1; packet spec keeps the
+    // channel count of the wire encoding (mono or stereo L16).
+    void init_with_multitrack(size_t input_tracks, int input_sample_rate,
+                              size_t packet_channels, int packet_sample_rate) {
+        input_sample_spec.set_format(audio::Format_Pcm);
+        input_sample_spec.set_pcm_subformat(Format_Raw);
+        input_sample_spec.set_sample_rate((size_t)input_sample_rate);
+        input_sample_spec.channel_set().clear();
+        input_sample_spec.channel_set().set_layout(audio::ChanLayout_Multitrack);
+        input_sample_spec.channel_set().set_order(audio::ChanOrder_None);
+        input_sample_spec.channel_set().set_range(0, input_tracks - 1);
+
+        packet_sample_spec.set_format(audio::Format_Pcm);
+        packet_sample_spec.set_pcm_subformat(Format_S16_Be);
+        packet_sample_spec.set_sample_rate((size_t)packet_sample_rate);
+        packet_sample_spec.channel_set().clear();
+        packet_sample_spec.channel_set().set_layout(audio::ChanLayout_Surround);
+        packet_sample_spec.channel_set().set_order(audio::ChanOrder_Smpte);
+        packet_sample_spec.channel_set().set_mask(packet_channels == 1 ? Chans_Mono
+                                                                       : Chans_Stereo);
+
+        proto = address::Proto_RTP;
+
+        src_addr1 = test::new_address(11);
+        src_addr2 = test::new_address(12);
+
+        dst_addr1 = test::new_address(21);
+        dst_addr2 = test::new_address(22);
     }
 };
 
@@ -948,6 +993,126 @@ TEST(sender_sink, reports_two_receivers) {
             next_report = np + ReportInterval / SamplesPerPacket;
             n_reports++;
         }
+    }
+}
+
+// Multitrack input, two slots, each slot selecting one track: each slot's
+// packet stream carries exactly its track's signal, wire-identical to a
+// mono sender (same payload type, one channel of samples).
+TEST(sender_sink, multitrack_slot_track_selection) {
+    init_with_multitrack(2, SampleRate, 1, SampleRate);
+
+    packet::FifoQueue queue1;
+    packet::FifoQueue queue2;
+
+    SenderSink sender(make_config(), processor_map, encoding_map, packet_pool,
+                      packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
+    LONGS_EQUAL(status::StatusOK, sender.init_status());
+
+    SenderSlot* slot1 = create_track_slot(sender, 0);
+    create_transport_endpoint(slot1, address::Iface_AudioSource, proto, dst_addr1,
+                              queue1);
+
+    SenderSlot* slot2 = create_track_slot(sender, 1);
+    create_transport_endpoint(slot2, address::Iface_AudioSource, proto, dst_addr2,
+                              queue2);
+
+    test::FrameWriter frame_writer(sender, frame_factory);
+
+    for (size_t nf = 0; nf < ManyFrames; nf++) {
+        frame_writer.write_distinct_samples(SamplesPerFrame, input_sample_spec);
+        refresh_sink(sender, frame_writer.refresh_ts());
+    }
+
+    test::PacketReader packet_reader1(arena, queue1, encoding_map, packet_factory,
+                                      dst_addr1, PayloadType_Ch1);
+    packet_reader1.expect_track(0);
+
+    test::PacketReader packet_reader2(arena, queue2, encoding_map, packet_factory,
+                                      dst_addr2, PayloadType_Ch1);
+    packet_reader2.expect_track(1);
+
+    for (size_t np = 0; np < ManyFrames / FramesPerPacket; np++) {
+        packet_reader1.read_distinct_packet(SamplesPerPacket, packet_sample_spec);
+        packet_reader2.read_distinct_packet(SamplesPerPacket, packet_sample_spec);
+    }
+
+    packet_reader1.read_eof();
+    packet_reader2.read_eof();
+}
+
+// Selection of ALL input tracks: channel sets are equal, no mapper is
+// created, and the packets carry all tracks interleaved.
+TEST(sender_sink, multitrack_slot_all_tracks) {
+    init_with_multitrack(2, SampleRate, 2, SampleRate);
+
+    packet::FifoQueue queue;
+
+    SenderSink sender(make_config(), processor_map, encoding_map, packet_pool,
+                      packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
+    LONGS_EQUAL(status::StatusOK, sender.init_status());
+
+    SenderSlot* slot = sender.create_slot(make_track_slot_config(0, 1));
+    CHECK(slot);
+    create_transport_endpoint(slot, address::Iface_AudioSource, proto, dst_addr1, queue);
+
+    test::FrameWriter frame_writer(sender, frame_factory);
+
+    for (size_t nf = 0; nf < ManyFrames; nf++) {
+        frame_writer.write_distinct_samples(SamplesPerFrame, input_sample_spec);
+        refresh_sink(sender, frame_writer.refresh_ts());
+    }
+
+    test::PacketReader packet_reader(arena, queue, encoding_map, packet_factory,
+                                     dst_addr1, PayloadType_Ch2);
+    packet_reader.expect_track(0);
+
+    for (size_t np = 0; np < ManyFrames / FramesPerPacket; np++) {
+        packet_reader.read_distinct_packet(SamplesPerPacket, packet_sample_spec);
+    }
+
+    packet_reader.read_eof();
+}
+
+// Invalid slot configurations are rejected at slot creation.
+TEST(sender_sink, multitrack_slot_validation) {
+    { // track selection with non-multitrack input
+        init_with_defaults();
+
+        SenderSink sender(make_config(), processor_map, encoding_map, packet_pool,
+                          packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
+        LONGS_EQUAL(status::StatusOK, sender.init_status());
+
+        CHECK(!sender.create_slot(make_track_slot_config(0, 0)));
+    }
+    { // selected track outside the input set
+        init_with_multitrack(2, SampleRate, 1, SampleRate);
+
+        SenderSink sender(make_config(), processor_map, encoding_map, packet_pool,
+                          packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
+        LONGS_EQUAL(status::StatusOK, sender.init_status());
+
+        CHECK(!sender.create_slot(make_track_slot_config(5, 5)));
+    }
+    { // selected track count does not match packet encoding channel count
+        init_with_multitrack(3, SampleRate, 1, SampleRate);
+
+        SenderSink sender(make_config(), processor_map, encoding_map, packet_pool,
+                          packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
+        LONGS_EQUAL(status::StatusOK, sender.init_status());
+
+        CHECK(!sender.create_slot(make_track_slot_config(0, 1)));
+    }
+    { // enabled selection with an empty track set
+        init_with_multitrack(2, SampleRate, 1, SampleRate);
+
+        SenderSink sender(make_config(), processor_map, encoding_map, packet_pool,
+                          packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
+        LONGS_EQUAL(status::StatusOK, sender.init_status());
+
+        SenderSlotConfig slot_config;
+        slot_config.enable_track_selection = true;
+        CHECK(!sender.create_slot(slot_config));
     }
 }
 

@@ -45,6 +45,7 @@ public:
         , pt_(pt)
         , offset_(0)
         , abs_offset_(0)
+        , track_(0)
         , first_(true) {
         construct_(arena, encoding_map, pt);
     }
@@ -63,6 +64,38 @@ public:
                 DOUBLES_EQUAL((double)nth_sample(offset_),
                               (double)samples[ns * sample_spec.num_channels() + nc],
                               SampleEpsilon);
+            }
+            offset_++;
+        }
+        abs_offset_ += samples_per_packet;
+    }
+
+    // Expected base channel for read_distinct_packet(): the packets under
+    // test carry source channels (track + nc) of a frame produced by
+    // FrameWriter::write_distinct_samples(), e.g. after per-slot track
+    // selection of a contiguous subset starting at `track`.
+    void expect_track(size_t track) {
+        track_ = track;
+    }
+
+    // Like read_packet(), but expects each channel nc to carry
+    // nth_sample(offset + track + nc), matching
+    // FrameWriter::write_distinct_samples() after selection.
+    void read_distinct_packet(size_t samples_per_packet,
+                              const audio::SampleSpec& sample_spec,
+                              core::nanoseconds_t base_capture_ts = -1) {
+        packet::PacketPtr pp = read_packet_();
+
+        audio::sample_t samples[MaxSamples] = {};
+        parse_packet_(pp->buffer(), samples_per_packet, samples);
+        check_capture_timestamp_(*pp, sample_spec, base_capture_ts);
+
+        for (size_t ns = 0; ns < samples_per_packet; ns++) {
+            for (size_t nc = 0; nc < sample_spec.num_channels(); nc++) {
+                DOUBLES_EQUAL(
+                    (double)nth_sample(uint8_t(offset_ + track_ + nc)),
+                    (double)samples[ns * sample_spec.num_channels() + nc],
+                    SampleEpsilon);
             }
             offset_++;
         }
@@ -205,6 +238,7 @@ private:
     rtp::PayloadType pt_;
 
     uint8_t offset_;
+    size_t track_;
     size_t abs_offset_;
     bool first_;
 };

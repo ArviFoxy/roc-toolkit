@@ -104,6 +104,61 @@ SenderSlot* SenderSink::create_slot(const SenderSlotConfig& slot_config) {
 
     roc_log(LogInfo, "sender sink: adding slot");
 
+    SenderSlotConfig prepared_config = slot_config;
+    if (!prepared_config.deduce_defaults()) {
+        roc_log(LogError, "sender sink: can't create slot: invalid slot configuration");
+        return NULL;
+    }
+
+    if (prepared_config.enable_track_selection) {
+        const audio::ChannelSet& input_chans =
+            sink_config_.input_sample_spec.channel_set();
+
+        if (input_chans.layout() != audio::ChanLayout_Multitrack) {
+            roc_log(LogError,
+                    "sender sink: can't create slot:"
+                    " track selection requires multitrack input, got %s",
+                    audio::channel_layout_to_str(input_chans.layout()));
+            return NULL;
+        }
+
+        for (size_t ch = prepared_config.tracks.first_channel();
+             ch <= prepared_config.tracks.last_channel(); ch++) {
+            if (prepared_config.tracks.has_channel(ch)
+                && !input_chans.has_channel(ch)) {
+                roc_log(LogError,
+                        "sender sink: can't create slot:"
+                        " selected track %lu is not present in input channel set",
+                        (unsigned long)ch);
+                return NULL;
+            }
+        }
+
+        const rtp::Encoding* pkt_encoding =
+            encoding_map_.find_by_pt(sink_config_.payload_type);
+        if (!pkt_encoding) {
+            roc_log(LogError,
+                    "sender sink: can't create slot:"
+                    " no registered encoding for payload id %u",
+                    (unsigned)sink_config_.payload_type);
+            return NULL;
+        }
+
+        // Wire compatibility: the receiver decodes by payload type alone,
+        // so the slot must emit exactly as many channels as the registered
+        // encoding declares.
+        if (prepared_config.tracks.num_channels()
+            != pkt_encoding->sample_spec.num_channels()) {
+            roc_log(LogError,
+                    "sender sink: can't create slot:"
+                    " selected track count %lu does not match"
+                    " packet encoding channel count %lu",
+                    (unsigned long)prepared_config.tracks.num_channels(),
+                    (unsigned long)pkt_encoding->sample_spec.num_channels());
+            return NULL;
+        }
+    }
+
     core::SharedPtr<SenderSlot> slot = new (arena_) SenderSlot(
         sink_config_, slot_config, state_tracker_, processor_map_, encoding_map_,
         *fanout_, packet_factory_, frame_factory_, arena_, dumper_.get());

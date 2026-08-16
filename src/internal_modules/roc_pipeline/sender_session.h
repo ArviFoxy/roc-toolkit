@@ -57,6 +57,7 @@ class SenderSession : public core::NonCopyable<>,
 public:
     //! Initialize.
     SenderSession(const SenderSinkConfig& sink_config,
+                  const SenderSlotConfig& slot_config,
                   audio::ProcessorMap& processor_map,
                   rtp::EncodingMap& encoding_map,
                   packet::PacketFactory& packet_factory,
@@ -139,6 +140,7 @@ private:
     core::IArena& arena_;
 
     const SenderSinkConfig sink_config_;
+    const SenderSlotConfig slot_config_;
 
     audio::ProcessorMap& processor_map_;
     rtp::EncodingMap& encoding_map_;

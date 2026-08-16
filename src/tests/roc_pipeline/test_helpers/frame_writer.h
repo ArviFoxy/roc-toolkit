@@ -61,6 +61,29 @@ public:
         advance_(samples_per_chan, sample_spec, base_capture_ts);
     }
 
+    // Like write_samples(), but each channel carries a distinct signal:
+    // channel nc holds nth_sample(offset + nc), so a channel subset
+    // extracted downstream identifies which source channels it came from
+    // (see PacketReader::read_distinct_packet()).
+    void write_distinct_samples(size_t samples_per_chan,
+                                const audio::SampleSpec& sample_spec,
+                                core::nanoseconds_t base_capture_ts = -1) {
+        audio::FramePtr frame =
+            next_frame_(samples_per_chan, sample_spec, base_capture_ts);
+
+        for (size_t ns = 0; ns < samples_per_chan; ns++) {
+            for (size_t nc = 0; nc < sample_spec.num_channels(); nc++) {
+                frame->raw_samples()[ns * sample_spec.num_channels() + nc] =
+                    nth_sample(uint8_t(offset_ + nc));
+            }
+            offset_++;
+        }
+
+        LONGS_EQUAL(status::StatusOK, sink_.write(*frame));
+
+        advance_(samples_per_chan, sample_spec, base_capture_ts);
+    }
+
     // Int16 version of write_samples().
     void write_s16_samples(size_t samples_per_chan,
                            const audio::SampleSpec& sample_spec,

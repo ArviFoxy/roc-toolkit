@@ -43,10 +43,20 @@ bool SenderSinkConfig::deduce_defaults(audio::ProcessorMap& processor_map) {
 
 // SenderSlotConfig
 
-SenderSlotConfig::SenderSlotConfig() {
+SenderSlotConfig::SenderSlotConfig()
+    : enable_track_selection(false) {
 }
 
 bool SenderSlotConfig::deduce_defaults() {
+    if (enable_track_selection) {
+        if (tracks.layout() != audio::ChanLayout_Multitrack || !tracks.is_valid()) {
+            roc_log(LogError,
+                    "sender slot config:"
+                    " track selection requires a valid multitrack channel set");
+            return false;
+        }
+    }
+
     return true;
 }
 

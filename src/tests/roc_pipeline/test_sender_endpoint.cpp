@@ -44,7 +44,8 @@ TEST(sender_endpoint, valid) {
 
     SenderSinkConfig sink_config;
     StateTracker state_tracker;
-    SenderSession session(sink_config, processor_map, encoding_map, packet_factory,
+    SenderSession session(sink_config, SenderSlotConfig(), processor_map,
+                          encoding_map, packet_factory,
                           frame_factory, arena, NULL);
 
     SenderEndpoint endpoint(address::Proto_RTP, state_tracker, session, addr, queue,
@@ -59,7 +60,8 @@ TEST(sender_endpoint, invalid_proto) {
 
     SenderSinkConfig sink_config;
     StateTracker state_tracker;
-    SenderSession session(sink_config, processor_map, encoding_map, packet_factory,
+    SenderSession session(sink_config, SenderSlotConfig(), processor_map,
+                          encoding_map, packet_factory,
                           frame_factory, arena, NULL);
 
     SenderEndpoint endpoint(address::Proto_None, state_tracker, session, addr, queue,
@@ -81,7 +83,8 @@ TEST(sender_endpoint, no_memory) {
 
         SenderSinkConfig sink_config;
         StateTracker state_tracker;
-        SenderSession session(sink_config, processor_map, encoding_map, packet_factory,
+        SenderSession session(sink_config, SenderSlotConfig(), processor_map,
+                          encoding_map, packet_factory,
                               frame_factory, arena, NULL);
 
         SenderEndpoint endpoint(protos[n], state_tracker, session, addr, queue,

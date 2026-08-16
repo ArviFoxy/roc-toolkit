@@ -15,6 +15,7 @@ namespace roc {
 namespace pipeline {
 
 SenderSession::SenderSession(const SenderSinkConfig& sink_config,
+                             const SenderSlotConfig& slot_config,
                              audio::ProcessorMap& processor_map,
                              rtp::EncodingMap& encoding_map,
                              packet::PacketFactory& packet_factory,
@@ -23,6 +24,7 @@ SenderSession::SenderSession(const SenderSinkConfig& sink_config,
                              dbgio::CsvDumper* dumper)
     : arena_(arena)
     , sink_config_(sink_config)
+    , slot_config_(slot_config)
     , processor_map_(processor_map)
     , encoding_map_(encoding_map)
     , packet_factory_(packet_factory)
@@ -60,6 +62,16 @@ SenderSession::create_transport_pipeline(SenderEndpoint* source_endpoint,
                 "sender session: can't find registered encoding for payload id %u",
                 (unsigned)sink_config_.payload_type);
         return status::StatusBadConfig;
+    }
+
+    // The wire encoding is resolved by payload type. With track selection,
+    // the slot's effective packet channel set is the selected input tracks:
+    // the selection keeps the channel count of the registered encoding, so
+    // the emitted stream is indistinguishable from a sender whose input has
+    // only those tracks, and receivers need no awareness of the selection.
+    audio::SampleSpec pkt_spec = pkt_encoding->sample_spec;
+    if (slot_config_.enable_track_selection) {
+        pkt_spec.channel_set() = slot_config_.tracks;
     }
 
     // First part of pipeline: chained packet writers from packetizer to endpoint.
@@ -117,13 +129,13 @@ SenderSession::create_transport_pipeline(SenderEndpoint* source_endpoint,
     }
 
     timestamp_extractor_.reset(new (timestamp_extractor_) rtp::TimestampExtractor(
-        *pkt_writer, pkt_encoding->sample_spec));
+        *pkt_writer, pkt_spec));
     if ((status = timestamp_extractor_->init_status()) != status::StatusOK) {
         return status;
     }
     pkt_writer = timestamp_extractor_.get();
 
-    payload_encoder_.reset(pkt_encoding->new_encoder(pkt_encoding->sample_spec, arena_));
+    payload_encoder_.reset(pkt_encoding->new_encoder(pkt_spec, arena_));
     if (!payload_encoder_) {
         return status::StatusNoMem;
     }
@@ -143,9 +155,8 @@ SenderSession::create_transport_pipeline(SenderEndpoint* source_endpoint,
     audio::IFrameWriter* frm_writer = NULL;
 
     {
-        const audio::SampleSpec in_spec(pkt_encoding->sample_spec.sample_rate(),
-                                        audio::PcmSubformat_Raw,
-                                        pkt_encoding->sample_spec.channel_set());
+        const audio::SampleSpec in_spec(pkt_spec.sample_rate(), audio::PcmSubformat_Raw,
+                                        pkt_spec.channel_set());
 
         packetizer_.reset(new (packetizer_) audio::Packetizer(
             *pkt_writer, source_endpoint->outbound_composer(), *sequencer_,
@@ -156,15 +167,12 @@ SenderSession::create_transport_pipeline(SenderEndpoint* source_endpoint,
         frm_writer = packetizer_.get();
     }
 
-    if (pkt_encoding->sample_spec.channel_set()
-        != sink_config_.input_sample_spec.channel_set()) {
-        const audio::SampleSpec in_spec(pkt_encoding->sample_spec.sample_rate(),
-                                        audio::PcmSubformat_Raw,
+    if (pkt_spec.channel_set() != sink_config_.input_sample_spec.channel_set()) {
+        const audio::SampleSpec in_spec(pkt_spec.sample_rate(), audio::PcmSubformat_Raw,
                                         sink_config_.input_sample_spec.channel_set());
 
-        const audio::SampleSpec out_spec(pkt_encoding->sample_spec.sample_rate(),
-                                         audio::PcmSubformat_Raw,
-                                         pkt_encoding->sample_spec.channel_set());
+        const audio::SampleSpec out_spec(pkt_spec.sample_rate(), audio::PcmSubformat_Raw,
+                                         pkt_spec.channel_set());
 
         channel_mapper_writer_.reset(
             new (channel_mapper_writer_) audio::ChannelMapperWriter(
@@ -176,13 +184,12 @@ SenderSession::create_transport_pipeline(SenderEndpoint* source_endpoint,
     }
 
     if (sink_config_.latency.tuner_profile != audio::LatencyTunerProfile_Intact
-        || pkt_encoding->sample_spec.sample_rate()
-            != sink_config_.input_sample_spec.sample_rate()) {
+        || pkt_spec.sample_rate() != sink_config_.input_sample_spec.sample_rate()) {
         const audio::SampleSpec in_spec(sink_config_.input_sample_spec.sample_rate(),
                                         audio::PcmSubformat_Raw,
                                         sink_config_.input_sample_spec.channel_set());
 
-        const audio::SampleSpec out_spec(pkt_encoding->sample_spec.sample_rate(),
+        const audio::SampleSpec out_spec(pkt_spec.sample_rate(),
                                          audio::PcmSubformat_Raw,
                                          sink_config_.input_sample_spec.channel_set());
 
