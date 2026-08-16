@@ -22,12 +22,17 @@
 #include "roc_core/optional.h"
 #include "roc_core/ref_counted.h"
 #include "roc_dbgio/csv_dumper.h"
+#include "roc_metrics/prometheus.h"
 #include "roc_packet/packet_factory.h"
 #include "roc_pipeline/config.h"
 #include "roc_pipeline/metrics.h"
 #include "roc_pipeline/sender_endpoint.h"
 #include "roc_pipeline/sender_session.h"
 #include "roc_pipeline/state_tracker.h"
+
+#ifdef ROC_TARGET_PROMETHEUS
+#include <prometheus/gauge.h>
+#endif
 
 namespace roc {
 namespace pipeline {
@@ -109,6 +114,10 @@ private:
 
     bool is_broken_;
     status::StatusCode fail_status_;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    prometheus::Gauge* slot_up_gauge_;
+#endif
 
     status::StatusCode init_status_;
 };

@@ -11,6 +11,11 @@
 #include "roc_core/panic.h"
 #include "roc_pipeline/endpoint_helpers.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include <prometheus/family.h>
+#include <prometheus/registry.h>
+#endif
+
 namespace roc {
 namespace pipeline {
 
@@ -38,12 +43,28 @@ SenderSlot::SenderSlot(const SenderSinkConfig& sink_config,
                dumper)
     , is_broken_(false)
     , fail_status_(status::NoStatus)
+#ifdef ROC_TARGET_PROMETHEUS
+    , slot_up_gauge_(NULL)
+#endif
     , init_status_(status::NoStatus) {
     roc_log(LogDebug, "sender slot: initializing");
 
     if ((init_status_ = session_.init_status()) != status::StatusOK) {
         return;
     }
+
+#ifdef ROC_TARGET_PROMETHEUS
+    metrics::MetricsScope metrics_scope;
+    metrics_scope.side = metrics::MetricsScope::Side_Send;
+    metrics_scope.set_slot(slot_config.metrics_label);
+
+    slot_up_gauge_ = &prometheus::BuildGauge()
+                          .Name("roc_send_slot_up")
+                          .Help("1 while the slot is alive, 0 after it broke")
+                          .Register(*metrics::prometheus_registry())
+                          .Add(metrics::scope_labels(metrics_scope));
+    slot_up_gauge_->Set(1.0);
+#endif
 
     init_status_ = status::StatusOK;
 }
@@ -199,6 +220,12 @@ void SenderSlot::break_slot_(status::StatusCode fail_status) {
             "sender slot: failed and detached from pipeline:"
             " status=%s",
             status::code_to_str(fail_status));
+
+#ifdef ROC_TARGET_PROMETHEUS
+    if (slot_up_gauge_) {
+        slot_up_gauge_->Set(0.0);
+    }
+#endif
 
     if (session_.frame_writer() && fanout_.has_output(*session_.frame_writer())) {
         fanout_.remove_output(*session_.frame_writer());

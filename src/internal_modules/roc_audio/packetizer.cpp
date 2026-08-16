@@ -26,7 +26,8 @@ Packetizer::Packetizer(packet::IWriter& writer,
                        IFrameEncoder& payload_encoder,
                        packet::PacketFactory& packet_factory,
                        core::nanoseconds_t packet_length,
-                       const SampleSpec& sample_spec)
+                       const SampleSpec& sample_spec,
+                       const metrics::MetricsScope& metrics_scope)
     : writer_(writer)
     , composer_(composer)
     , sequencer_(sequencer)
@@ -70,13 +71,15 @@ Packetizer::Packetizer(packet::IWriter& writer,
                                     .Name("roc_send_packets_encoded_total")
                                     .Help("Total number of packets encoded by the sender")
                                     .Register(*registry)
-                                    .Add({ });
+                                    .Add(metrics::scope_labels(metrics_scope));
 
     payload_bytes_counter_ = &prometheus::BuildCounter()
                                   .Name("roc_send_payload_bytes_total")
                                   .Help("Total payload bytes encoded by the sender")
                                   .Register(*registry)
-                                  .Add({ });
+                                  .Add(metrics::scope_labels(metrics_scope));
+#else
+    (void)metrics_scope;
 #endif
 
     init_status_ = status::StatusOK;

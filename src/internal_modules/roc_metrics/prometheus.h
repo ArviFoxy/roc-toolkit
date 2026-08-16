@@ -17,6 +17,8 @@
 #include <memory>
 
 #ifdef ROC_TARGET_PROMETHEUS
+#include <map>
+#include <string>
 #include <vector>
 
 namespace prometheus {
@@ -57,9 +59,47 @@ struct HistogramConfig {
     }
 };
 
+//! Identity attached to a component's exported metrics: which peer side the
+//! shared components' metric names should use, and which sender slot (if
+//! any) the series belongs to.
+struct MetricsScope {
+    //! Which name prefix the shared components use.
+    enum Side {
+        //! roc_recv_* names (the default; receiver pipelines).
+        Side_Recv = 0,
+        //! roc_send_* names (sender pipelines).
+        Side_Send
+    };
+
+    //! Side of the peer exporting the metric.
+    Side side;
+
+    //! Value of the "slot" label attached to the series.
+    //! Empty string (default) = no label, one unlabeled series per process.
+    char slot[64];
+
+    MetricsScope()
+        : side(Side_Recv) {
+        slot[0] = '\0';
+    }
+
+    //! Set slot label value (truncated to the buffer size).
+    void set_slot(const char* value) {
+        size_t n = 0;
+        if (value) {
+            while (value[n] != '\0' && n < sizeof(slot) - 1) {
+                slot[n] = value[n];
+                n++;
+            }
+        }
+        slot[n] = '\0';
+    }
+};
+
 //! Prometheus metrics configuration.
 struct PrometheusConfig {
     int port;
+    MetricsScope scope;
     HistogramConfig niq_latency;
     HistogramConfig e2e_latency;
     HistogramConfig jitter;
@@ -77,6 +117,14 @@ struct PrometheusConfig {
 #ifdef ROC_TARGET_PROMETHEUS
 //! Global registry for internal components to register their metrics.
 std::shared_ptr<prometheus::Registry> prometheus_registry();
+
+//! Label set for a scope: empty when scope.slot is empty, otherwise
+//! {{"slot", scope.slot}}.
+std::map<std::string, std::string> scope_labels(const MetricsScope& scope);
+
+//! Metric name for a scope: "roc_send_" or "roc_recv_" + suffix,
+//! depending on scope.side.
+std::string scope_metric_name(const MetricsScope& scope, const char* suffix);
 
 //! Generate histogram bucket boundaries (in seconds)
 //! from a HistogramConfig whose min/max are in nanoseconds.

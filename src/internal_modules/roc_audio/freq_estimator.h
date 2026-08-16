@@ -19,6 +19,7 @@
 #include "roc_core/attributes.h"
 #include "roc_core/noncopyable.h"
 #include "roc_dbgio/csv_dumper.h"
+#include "roc_metrics/prometheus.h"
 #include "roc_packet/units.h"
 
 #ifdef ROC_TARGET_PROMETHEUS
@@ -30,6 +31,9 @@ namespace audio {
 
 //! FreqEstimator tunable parameters.
 struct FreqEstimatorConfig {
+    //! Identity of the exported metrics (name side + slot label).
+    metrics::MetricsScope metrics_scope;
+
     //! Proportional gain of PI-controller.
     double P;
 

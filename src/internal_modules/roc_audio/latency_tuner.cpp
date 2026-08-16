@@ -172,6 +172,7 @@ LatencyTuner::LatencyTuner(const LatencyConfig& latency_config,
         if (enable_latency_adjustment_) {
             if (profile_ == LatencyTunerProfile_SecondOrder) {
                 PreciseFreqEstimatorConfig pfe_config;
+                pfe_config.metrics_scope = latency_config.prometheus.scope;
                 if (latency_config.latency_aggressiveness > 0) {
                     pfe_config.spring_gain = latency_config.latency_aggressiveness;
                 }
@@ -201,46 +202,56 @@ LatencyTuner::LatencyTuner(const LatencyConfig& latency_config,
 #ifdef ROC_TARGET_PROMETHEUS
     auto registry = metrics::prometheus_registry();
 
+    const prometheus::Labels labels =
+        metrics::scope_labels(latency_config.prometheus.scope);
+
     target_latency_gauge_ = &prometheus::BuildGauge()
-                                 .Name("roc_recv_latency_target_seconds")
+                                 .Name(metrics::scope_metric_name(
+                                     latency_config.prometheus.scope,
+                                     "latency_target_seconds"))
                                  .Help("Current target latency in seconds")
                                  .Register(*registry)
-                                 .Add({ });
+                                 .Add(labels);
 
     auto& niq_family = prometheus::BuildHistogram()
-                           .Name("roc_recv_latency_seconds")
+                           .Name(metrics::scope_metric_name(
+                     latency_config.prometheus.scope, "latency_seconds"))
                            .Help("Current network input queue (NIQ) latency in seconds")
                            .Register(*registry);
     niq_latency_histogram_ = &niq_family.Add(
-        { }, metrics::generate_histogram_buckets(latency_config.prometheus.niq_latency));
+        labels, metrics::generate_histogram_buckets(latency_config.prometheus.niq_latency));
 
     obj_error_mean_gauge_ =
         &prometheus::BuildGauge()
-             .Name("roc_recv_controller_error_mean_seconds")
+             .Name(metrics::scope_metric_name(
+                     latency_config.prometheus.scope, "controller_error_mean_seconds"))
              .Help("Smoothed mean queue error in seconds (bias indicator)")
              .Register(*registry)
-             .Add({ });
+             .Add(labels);
 
     obj_error_stddev_gauge_ =
         &prometheus::BuildGauge()
-             .Name("roc_recv_controller_error_stddev_seconds")
+             .Name(metrics::scope_metric_name(
+                     latency_config.prometheus.scope, "controller_error_stddev_seconds"))
              .Help("Smoothed standard deviation of queue error in seconds")
              .Register(*registry)
-             .Add({ });
+             .Add(labels);
 
     obj_warp_deriv_rms_gauge_ =
         &prometheus::BuildGauge()
-             .Name("roc_recv_controller_warp_derivative_rms")
+             .Name(metrics::scope_metric_name(
+                     latency_config.prometheus.scope, "controller_warp_derivative_rms"))
              .Help("RMS of the rate of change of freq_coeff (warp smoothness)")
              .Register(*registry)
-             .Add({ });
+             .Add(labels);
 
     obj_error_skewness_gauge_ =
         &prometheus::BuildGauge()
-             .Name("roc_recv_controller_error_skewness_coeff")
+             .Name(metrics::scope_metric_name(
+                     latency_config.prometheus.scope, "controller_error_skewness_coeff"))
              .Help("Standardized skewness of queue error E[(e-mu)^3]/sigma^3 (dimensionless)")
              .Register(*registry)
-             .Add({ });
+             .Add(labels);
 #endif
 
     init_status_ = status::StatusOK;

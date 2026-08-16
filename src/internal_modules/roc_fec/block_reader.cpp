@@ -12,6 +12,8 @@
 #include "roc_packet/fec_scheme.h"
 #include "roc_status/code_to_str.h"
 
+#include <stdio.h>
+
 #ifdef ROC_TARGET_PROMETHEUS
 #include "roc_metrics/prometheus.h"
 #include <prometheus/counter.h>
@@ -974,15 +976,17 @@ void BlockReader::update_fec_histograms_(size_t block_size) {
         buckets[i] = static_cast<double>(i);
     }
 
-    if (fec_missing_histogram_) {
-        fec_missing_family_->Remove(fec_missing_histogram_);
-    }
-    fec_missing_histogram_ = &fec_missing_family_->Add({ }, buckets);
+    // Metrics with identical name and labels are shared: another session
+    // observing the same block size gets the same histogram object, so
+    // histograms are never removed - removal would free an object another
+    // session may still hold.
+    char block_size_label[32] = {};
+    snprintf(block_size_label, sizeof(block_size_label), "%lu",
+             (unsigned long)block_size);
+    const prometheus::Labels labels = { { "block_size", block_size_label } };
 
-    if (fec_recovered_histogram_) {
-        fec_recovered_family_->Remove(fec_recovered_histogram_);
-    }
-    fec_recovered_histogram_ = &fec_recovered_family_->Add({ }, buckets);
+    fec_missing_histogram_ = &fec_missing_family_->Add(labels, buckets);
+    fec_recovered_histogram_ = &fec_recovered_family_->Add(labels, buckets);
 
     fec_histogram_block_size_ = block_size;
 

@@ -18,6 +18,7 @@
 #include "roc_audio/sample_spec.h"
 #include "roc_core/noncopyable.h"
 #include "roc_core/time.h"
+#include "roc_metrics/prometheus.h"
 #include "roc_packet/icomposer.h"
 #include "roc_packet/isequencer.h"
 #include "roc_packet/iwriter.h"
@@ -60,7 +61,8 @@ public:
                IFrameEncoder& payload_encoder,
                packet::PacketFactory& packet_factory,
                core::nanoseconds_t packet_length,
-               const SampleSpec& sample_spec);
+               const SampleSpec& sample_spec,
+               const metrics::MetricsScope& metrics_scope = metrics::MetricsScope());
 
     //! Check if the object was successfully constructed.
     status::StatusCode init_status() const;

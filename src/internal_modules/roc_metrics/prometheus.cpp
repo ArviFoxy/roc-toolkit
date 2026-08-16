@@ -52,6 +52,20 @@ std::shared_ptr<prometheus::Registry> prometheus_registry() {
     return instance;
 }
 
+std::map<std::string, std::string> scope_labels(const MetricsScope& scope) {
+    std::map<std::string, std::string> labels;
+    if (scope.slot[0] != '\0') {
+        labels["slot"] = scope.slot;
+    }
+    return labels;
+}
+
+std::string scope_metric_name(const MetricsScope& scope, const char* suffix) {
+    std::string name(scope.side == MetricsScope::Side_Send ? "roc_send_" : "roc_recv_");
+    name += suffix;
+    return name;
+}
+
 class PrometheusExporter::Impl {
 public:
     Impl(const PrometheusConfig& config) {

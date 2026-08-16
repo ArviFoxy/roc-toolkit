@@ -127,6 +127,11 @@ struct SenderSlotConfig {
     //! stream is wire-identical to a sender without selection.
     audio::ChannelSet tracks;
 
+    //! Value of the "slot" label attached to this slot's exported metrics.
+    //! Empty string (default) = no label; with multiple slots per sender,
+    //! unlabeled series of different slots merge into one.
+    char metrics_label[64];
+
     //! Initialize config.
     SenderSlotConfig();
 

@@ -132,18 +132,25 @@ FreqEstimator::FreqEstimator(const FreqEstimatorConfig& config,
 
 #ifdef ROC_TARGET_PROMETHEUS
     auto registry = metrics::prometheus_registry();
-    coeff_gauge_ = &prometheus::BuildGauge()
-                        .Name("roc_recv_freq_estimator_coeff")
-                        .Help("Frequency estimator compensation coefficient")
-                        .Register(*registry)
-                        .Add({ });
+    const prometheus::Labels labels = metrics::scope_labels(config.metrics_scope);
+
+    coeff_gauge_ =
+        &prometheus::BuildGauge()
+             .Name(metrics::scope_metric_name(config.metrics_scope,
+                                              "freq_estimator_coeff"))
+             .Help("Frequency estimator compensation coefficient"
+                   " (fluctuates around 1.0)")
+             .Register(*registry)
+             .Add(labels);
 
     stable_gauge_ =
         &prometheus::BuildGauge()
-             .Name("roc_recv_freq_estimator_stable")
-             .Help("Frequency estimator stability status (1 if stable, 0 otherwise)")
+             .Name(metrics::scope_metric_name(config.metrics_scope,
+                                              "freq_estimator_stable"))
+             .Help("Frequency estimator convergence status"
+                   " (1 if converged, 0 otherwise)")
              .Register(*registry)
-             .Add({ });
+             .Add(labels);
 
     stable_gauge_->Set(stable_ ? 1.0 : 0.0);
     coeff_gauge_->Set(coeff_);

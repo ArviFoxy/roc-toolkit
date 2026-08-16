@@ -74,6 +74,12 @@ SenderSession::create_transport_pipeline(SenderEndpoint* source_endpoint,
         pkt_spec.channel_set() = slot_config_.tracks;
     }
 
+    // Metrics exported by this slot's components carry sender-side names
+    // and the slot's label, so slots of one session produce distinct series.
+    metrics::MetricsScope metrics_scope;
+    metrics_scope.side = metrics::MetricsScope::Side_Send;
+    metrics_scope.set_slot(slot_config_.metrics_label);
+
     // First part of pipeline: chained packet writers from packetizer to endpoint.
     // Packetizer writes packet to this pipeline, and it the end it writes
     // packets into endpoint outbound writers.
@@ -160,7 +166,8 @@ SenderSession::create_transport_pipeline(SenderEndpoint* source_endpoint,
 
         packetizer_.reset(new (packetizer_) audio::Packetizer(
             *pkt_writer, source_endpoint->outbound_composer(), *sequencer_,
-            *payload_encoder_, packet_factory_, sink_config_.packet_length, in_spec));
+            *payload_encoder_, packet_factory_, sink_config_.packet_length, in_spec,
+            metrics_scope));
         if ((status = packetizer_->init_status()) != status::StatusOK) {
             return status;
         }
@@ -220,9 +227,15 @@ SenderSession::create_transport_pipeline(SenderEndpoint* source_endpoint,
                                            audio::PcmSubformat_Raw,
                                            sink_config_.input_sample_spec.channel_set());
 
+        audio::LatencyConfig latency_config = sink_config_.latency;
+        latency_config.prometheus.scope = metrics_scope;
+
+        audio::FreqEstimatorConfig freq_est_config = sink_config_.freq_est;
+        freq_est_config.metrics_scope = metrics_scope;
+
         feedback_monitor_.reset(new (feedback_monitor_) audio::FeedbackMonitor(
             *frm_writer, *packetizer_, resampler_writer_.get(), sink_config_.feedback,
-            sink_config_.latency, sink_config_.freq_est, inout_spec, dumper_));
+            latency_config, freq_est_config, inout_spec, dumper_));
         if ((status = feedback_monitor_->init_status()) != status::StatusOK) {
             return status;
         }

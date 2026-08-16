@@ -45,6 +45,7 @@ bool SenderSinkConfig::deduce_defaults(audio::ProcessorMap& processor_map) {
 
 SenderSlotConfig::SenderSlotConfig()
     : enable_track_selection(false) {
+    metrics_label[0] = '\0';
 }
 
 bool SenderSlotConfig::deduce_defaults() {

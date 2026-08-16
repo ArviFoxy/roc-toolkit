@@ -56,38 +56,41 @@ FeedbackMonitor::FeedbackMonitor(IFrameWriter& writer,
 #ifdef ROC_TARGET_PROMETHEUS
     auto registry = metrics::prometheus_registry();
 
+    const prometheus::Labels labels =
+        metrics::scope_labels(latency_config.prometheus.scope);
+
     auto& e2e_fam = prometheus::BuildHistogram()
                         .Name("roc_send_e2e_latency_seconds")
                         .Help("End-to-end latency reported by receiver, in seconds")
                         .Register(*registry);
     send_e2e_latency_histogram_ = &e2e_fam.Add(
-        { }, metrics::generate_histogram_buckets(latency_config.prometheus.e2e_latency));
+        labels, metrics::generate_histogram_buckets(latency_config.prometheus.e2e_latency));
 
     auto& niq_fam = prometheus::BuildHistogram()
                         .Name("roc_send_niq_latency_seconds")
                         .Help("NIQ latency reported by receiver, in seconds")
                         .Register(*registry);
     send_niq_latency_histogram_ = &niq_fam.Add(
-        { }, metrics::generate_histogram_buckets(latency_config.prometheus.niq_latency));
+        labels, metrics::generate_histogram_buckets(latency_config.prometheus.niq_latency));
 
     send_jitter_gauge_ = &prometheus::BuildGauge()
                               .Name("roc_send_jitter_mean_seconds")
                               .Help("Mean jitter reported by receiver, in seconds")
                               .Register(*registry)
-                              .Add({ });
+                              .Add(labels);
 
     auto& rtt_fam = prometheus::BuildHistogram()
                         .Name("roc_send_rtt_seconds")
                         .Help("Round-trip time distribution in seconds")
                         .Register(*registry);
     send_rtt_histogram_ = &rtt_fam.Add(
-        { }, metrics::generate_histogram_buckets(latency_config.prometheus.rtt));
+        labels, metrics::generate_histogram_buckets(latency_config.prometheus.rtt));
 
     send_lost_packets_counter_ = &prometheus::BuildCounter()
                                       .Name("roc_send_packets_lost_total")
                                       .Help("Total packets lost as reported by receiver")
                                       .Register(*registry)
-                                      .Add({ });
+                                      .Add(labels);
 #endif
 
     init_status_ = status::StatusOK;

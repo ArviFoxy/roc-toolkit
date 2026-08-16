@@ -71,19 +71,28 @@ PreciseFreqEstimator::PreciseFreqEstimator(const PreciseFreqEstimatorConfig& con
 #ifdef ROC_TARGET_PROMETHEUS
     auto registry = metrics::prometheus_registry();
 
+    // Same family names as FreqEstimator's: the two estimators are
+    // alternatives within one process, and prometheus-cpp requires
+    // identical help strings when a family is registered twice.
+    const prometheus::Labels labels = metrics::scope_labels(config.metrics_scope);
+
     freq_coeff_gauge_ =
         &prometheus::BuildGauge()
-             .Name("roc_recv_freq_estimator_coeff")
-             .Help("Frequency compensation coefficient (fluctuates around 1.0)")
+             .Name(metrics::scope_metric_name(config.metrics_scope,
+                                              "freq_estimator_coeff"))
+             .Help("Frequency estimator compensation coefficient"
+                   " (fluctuates around 1.0)")
              .Register(*registry)
-             .Add({ });
+             .Add(labels);
 
     stable_gauge_ =
         &prometheus::BuildGauge()
-             .Name("roc_recv_freq_estimator_stable")
-             .Help("Whether the estimator has converged (0 or 1)")
+             .Name(metrics::scope_metric_name(config.metrics_scope,
+                                              "freq_estimator_stable"))
+             .Help("Frequency estimator convergence status"
+                   " (1 if converged, 0 otherwise)")
              .Register(*registry)
-             .Add({ });
+             .Add(labels);
 #endif
 }
 

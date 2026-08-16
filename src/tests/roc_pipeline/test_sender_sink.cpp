@@ -19,6 +19,13 @@
 #include "roc_pipeline/sender_sink.h"
 #include "roc_rtp/encoding_map.h"
 
+#ifdef ROC_TARGET_PROMETHEUS
+#include "roc_metrics/prometheus.h"
+#include <prometheus/metric_family.h>
+#include <prometheus/registry.h>
+#include <string.h>
+#endif
+
 // This file contains tests for SenderSink. SenderSink can be seen as a big
 // composite processor (consisting of chained smaller processors) that transforms
 // audio frames into network packets. Typically, sound card thread writes frames
@@ -137,6 +144,34 @@ packet::IWriter* create_control_endpoint(SenderSlot* slot,
 void refresh_sink(SenderSink& sender_sink, core::nanoseconds_t refresh_ts) {
     LONGS_EQUAL(status::StatusOK, sender_sink.refresh(refresh_ts, NULL));
 }
+
+#ifdef ROC_TARGET_PROMETHEUS
+// Looks up a series by family name + slot label in registry Collect()
+// output. Tolerant of unrelated series: the registry is process-global
+// and shared with every other test in this binary.
+bool find_slot_series(const std::vector<prometheus::MetricFamily>& families,
+                      const char* family_name,
+                      const char* slot_label,
+                      double* gauge_value) {
+    for (size_t nf = 0; nf < families.size(); nf++) {
+        if (families[nf].name != family_name) {
+            continue;
+        }
+        for (size_t nm = 0; nm < families[nf].metric.size(); nm++) {
+            const prometheus::ClientMetric& m = families[nf].metric[nm];
+            for (size_t nl = 0; nl < m.label.size(); nl++) {
+                if (m.label[nl].name == "slot" && m.label[nl].value == slot_label) {
+                    if (gauge_value) {
+                        *gauge_value = m.gauge.value;
+                    }
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+#endif // ROC_TARGET_PROMETHEUS
 
 // Forwards packets to the inner writer until armed to fail, then returns
 // the injected status. Used to break one slot mid-stream.
@@ -1271,6 +1306,71 @@ TEST(sender_sink, slot_failure_last_slot) {
     LONGS_EQUAL(status::StatusBadState,
                 sender.refresh(frame_writer.refresh_ts(), NULL));
 }
+
+#ifdef ROC_TARGET_PROMETHEUS
+// Slots with metrics labels export distinct per-slot series, and the
+// liveness gauge follows slot failure.
+TEST(sender_sink, slot_metrics_labels) {
+    init_with_multitrack(2, SampleRate, 1, SampleRate);
+
+    packet::FifoQueue queue1;
+    packet::FifoQueue queue2;
+    FailingWriter failing_writer(queue2);
+
+    SenderSink sender(make_config(), processor_map, encoding_map, packet_pool,
+                      packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
+    LONGS_EQUAL(status::StatusOK, sender.init_status());
+
+    SenderSlotConfig slot_config1 = make_track_slot_config(0, 0);
+    strcpy(slot_config1.metrics_label, "leg_a");
+    SenderSlot* slot1 = sender.create_slot(slot_config1);
+    CHECK(slot1);
+    create_transport_endpoint(slot1, address::Iface_AudioSource, proto, dst_addr1,
+                              queue1);
+
+    SenderSlotConfig slot_config2 = make_track_slot_config(1, 1);
+    strcpy(slot_config2.metrics_label, "leg_b");
+    SenderSlot* slot2 = sender.create_slot(slot_config2);
+    CHECK(slot2);
+    create_transport_endpoint(slot2, address::Iface_AudioSource, proto, dst_addr2,
+                              failing_writer);
+
+    test::FrameWriter frame_writer(sender, frame_factory);
+
+    for (size_t nf = 0; nf < ManyFrames; nf++) {
+        frame_writer.write_distinct_samples(SamplesPerFrame, input_sample_spec);
+        refresh_sink(sender, frame_writer.refresh_ts());
+    }
+
+    std::vector<prometheus::MetricFamily> families =
+        metrics::prometheus_registry()->Collect();
+
+    // Each slot has its own packetizer counter series.
+    CHECK(find_slot_series(families, "roc_send_packets_encoded_total", "leg_a", NULL));
+    CHECK(find_slot_series(families, "roc_send_packets_encoded_total", "leg_b", NULL));
+
+    // Both slots alive.
+    double up = -1;
+    CHECK(find_slot_series(families, "roc_send_slot_up", "leg_a", &up));
+    DOUBLES_EQUAL(1.0, up, 0.0);
+    CHECK(find_slot_series(families, "roc_send_slot_up", "leg_b", &up));
+    DOUBLES_EQUAL(1.0, up, 0.0);
+
+    // Break leg_b and check its liveness gauge drops while leg_a's holds.
+    failing_writer.arm();
+    for (size_t nf = 0; nf < FramesPerPacket * 2; nf++) {
+        frame_writer.write_distinct_samples(SamplesPerFrame, input_sample_spec);
+        refresh_sink(sender, frame_writer.refresh_ts());
+    }
+
+    families = metrics::prometheus_registry()->Collect();
+
+    CHECK(find_slot_series(families, "roc_send_slot_up", "leg_a", &up));
+    DOUBLES_EQUAL(1.0, up, 0.0);
+    CHECK(find_slot_series(families, "roc_send_slot_up", "leg_b", &up));
+    DOUBLES_EQUAL(0.0, up, 0.0);
+}
+#endif // ROC_TARGET_PROMETHEUS
 
 // Invalid slot configurations are rejected at slot creation.
 TEST(sender_sink, multitrack_slot_validation) {

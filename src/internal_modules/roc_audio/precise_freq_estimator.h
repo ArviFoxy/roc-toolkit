@@ -16,6 +16,7 @@
 #include "roc_core/noncopyable.h"
 #include "roc_core/time.h"
 #include "roc_dbgio/csv_dumper.h"
+#include "roc_metrics/prometheus.h"
 
 #include "roc_packet/units.h"
 
@@ -28,6 +29,9 @@ namespace audio {
 
 //! Precise frequency estimator config.
 struct PreciseFreqEstimatorConfig {
+    //! Identity of the exported metrics (name side + slot label).
+    metrics::MetricsScope metrics_scope;
+
     //! Spring gain (K1): restoring force proportional to queue error.
     //! Controls natural frequency of the damped oscillator:
     //!   omega_n = sqrt(Fs * K1)
