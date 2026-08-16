@@ -211,6 +211,19 @@ def execute_cmake(ctx, src_dir, args=None, flags=None):
             '-DCMAKE_OSX_DEPLOYMENT_TARGET=' + quote(ctx.macos_platform),
         ]
 
+        # Off a non-macOS host, CMake defaults CMAKE_SYSTEM_NAME to the host,
+        # so dependencies take their non-Apple code paths even though the
+        # compiler targets Darwin. libuv is the one that bites: its Linux
+        # branch defines _GNU_SOURCE/_POSIX_C_SOURCE, and the SDK headers then
+        # hide the BSD types its own Darwin sources use, so the build dies on
+        # "unknown type name 'u_int'" and undeclared IP_TTL / IP_MULTICAST_*.
+        # Only set this when cross-compiling: on a real Mac it would put CMake
+        # into cross mode and disable try_run for no reason.
+        if sys.platform != 'darwin':
+            args += [
+                '-DCMAKE_SYSTEM_NAME=Darwin',
+            ]
+
         if ctx.macos_arch:
             args += [
                 '-DCMAKE_OSX_ARCHITECTURES=' + quote(';'.join(ctx.macos_arch)),
