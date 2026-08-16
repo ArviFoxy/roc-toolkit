@@ -270,6 +270,9 @@ def ComposeStaticLibraries(env, dst_lib, src_libs):
         '--in', ' '.join([quote(env.File(lib).path) for lib in src_libs]),
         ]
 
+    if env['ROC_PLATFORM'] == 'macos':
+        cmd += ['--macho']
+
     if env['ROC_PLATFORM'] == 'macos' and env['ROC_MACOS_ARCH']:
         cmd += ['--arch', ' '.join(env['ROC_MACOS_ARCH'])]
 
