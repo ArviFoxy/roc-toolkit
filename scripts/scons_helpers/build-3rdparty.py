@@ -1284,7 +1284,13 @@ if __name__ == '__main__':
             '{ctx.pkg_repo}-{ctx.pkg_ver}.tar.gz',
             '{ctx.pkg_repo}-{ctx.pkg_ver}')
         changedir(ctx, 'src/{ctx.pkg_repo}-{ctx.pkg_ver}')
-        execute(ctx, './configure --host={host} {vars} {flags} {opts}'.format(
+        execute(ctx, '{configure} --host={host} {vars} {flags} {opts}'.format(
+            configure=' '.join(filter(None, [
+                # workaround for outdated config.sub
+                'ac_cv_host=%s' % ctx.toolchain if ctx.toolchain else '',
+                # configure
+                './configure',
+            ])),
             host=ctx.toolchain,
             vars=format_vars(ctx),
             flags=format_flags(ctx, cflags='-fPIC'),
