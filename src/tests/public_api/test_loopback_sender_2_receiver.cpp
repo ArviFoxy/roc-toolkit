@@ -394,6 +394,64 @@ TEST(loopback_sender_2_receiver, sender_slots) {
     sender.stop_and_join();
 }
 
+// Two slots on one sender, each selecting one track of a 2-track multitrack
+// frame encoding and sending it as a wire-compatible single-track stream to
+// its own receiver over localhost UDP.
+TEST(loopback_sender_2_receiver, sender_slots_tracks) {
+    enum {
+        Flags = test::FlagMultitrack,
+        SampleRate = 44100,
+        FrameChans = 1,
+        PacketChans = 1,
+        EncodingID = 101,
+        Slot1 = 1,
+        Slot2 = 2
+    };
+
+    init_config(Flags, SampleRate, FrameChans, PacketChans, EncodingID);
+
+    // Receivers use single-track frames; the sender's input has two tracks,
+    // one per slot.
+    test::Context context;
+    context.register_multitrack_encoding(EncodingID, SampleRate, PacketChans);
+
+    test::Receiver receiver_1(context, receiver_conf, sample_step, FrameChans,
+                              test::FrameSamples, Flags);
+    receiver_1.bind();
+
+    test::Receiver receiver_2(context, receiver_conf, sample_step, FrameChans,
+                              test::FrameSamples, Flags);
+    receiver_2.bind();
+
+    sender_conf.frame_encoding.tracks = 2;
+
+    test::Sender sender(context, sender_conf, sample_step, 2, test::FrameSamples,
+                        Flags);
+
+    roc_slot_config slot_config;
+    memset(&slot_config, 0, sizeof(slot_config));
+
+    slot_config.track_mask = 1ull << 0;
+    strcpy(slot_config.slot_name, "leg_a");
+    sender.configure_slot(Slot1, &slot_config);
+
+    slot_config.track_mask = 1ull << 1;
+    strcpy(slot_config.slot_name, "leg_b");
+    sender.configure_slot(Slot2, &slot_config);
+
+    sender.connect(receiver_1.source_endpoint(), NULL, NULL, Slot1);
+    sender.connect(receiver_2.source_endpoint(), NULL, NULL, Slot2);
+
+    CHECK(sender.start());
+
+    CHECK(receiver_1.start());
+    CHECK(receiver_2.start());
+    receiver_2.join();
+    receiver_1.join();
+
+    sender.stop_and_join();
+}
+
 TEST(loopback_sender_2_receiver, receiver_slots_sequential) {
     enum {
         Flags = 0,

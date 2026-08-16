@@ -51,6 +51,10 @@ public:
         CHECK(roc_sender_close(sndr_) == 0);
     }
 
+    void configure_slot(roc_slot slot, const roc_slot_config* slot_config) {
+        CHECK(roc_sender_configure_slot(sndr_, slot, slot_config) == 0);
+    }
+
     void connect(const roc_endpoint* receiver_source_endp,
                  const roc_endpoint* receiver_repair_endp,
                  const roc_endpoint* receiver_control_endp,

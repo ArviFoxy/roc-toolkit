@@ -190,6 +190,35 @@ ROC_API int roc_sender_open(roc_context* context,
                             const roc_sender_config* config,
                             roc_sender** result);
 
+/** Set sender slot parameters.
+ *
+ * Sets per-slot parameters (track selection, metrics label) of the specified
+ * slot. Must be called before the first roc_sender_configure() or
+ * roc_sender_connect() call for that slot index: the slot is created by this
+ * call, and configuring an already existing slot is an error.
+ *
+ * Track selection requires a sender frame encoding with
+ * \ref ROC_CHANNEL_LAYOUT_MULTITRACK; the selected track count must equal
+ * the channel count of the packet encoding.
+ *
+ * **Parameters**
+ *  - \p sender should point to an opened sender
+ *  - \p slot specifies the sender slot index
+ *  - \p config should point to an initialized config
+ *
+ * **Returns**
+ *  - returns zero if the slot was successfully created and configured
+ *  - returns a negative value if the arguments are invalid
+ *  - returns a negative value if the slot already exists
+ *
+ * **Ownership**
+ *  - doesn't take or share the ownership of \p config; it may be safely
+ *    deallocated after the function returns
+ */
+ROC_API int roc_sender_configure_slot(roc_sender* sender,
+                                      roc_slot slot,
+                                      const roc_slot_config* config);
+
 /** Set sender interface configuration.
  *
  * Updates configuration of specified interface of specified slot. If called, the

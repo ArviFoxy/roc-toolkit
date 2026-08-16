@@ -47,6 +47,34 @@ typedef unsigned long long roc_slot;
  */
 static const roc_slot ROC_SLOT_DEFAULT = 0;
 
+/** Sender slot parameters.
+ *
+ * Defines per-slot settings of a sender: which input tracks the slot sends,
+ * and how the slot's exported metrics are labeled.
+ *
+ * \see roc_sender_configure_slot()
+ */
+typedef struct roc_slot_config {
+    /** Bitmask of input tracks this slot sends.
+     *
+     * Bit i (1ull << i) selects track i of the sender frame encoding, which
+     * must use \ref ROC_CHANNEL_LAYOUT_MULTITRACK. The number of set bits
+     * must equal the channel count of the packet encoding, so that the
+     * emitted stream is wire-identical to a sender without selection.
+     *
+     * If zero (default), track selection is disabled and the slot sends all
+     * channels. Tracks beyond the first 64 can't be selected via this mask.
+     */
+    unsigned long long track_mask;
+
+    /** Slot name, attached as "slot" label to metrics exported by the slot.
+     *
+     * If empty (default), no label is attached; metrics of multiple
+     * unlabeled slots merge into a single series.
+     */
+    char slot_name[64];
+} roc_slot_config;
+
 /** Network interface.
  *
  * Interface is a way to access the peer (sender or receiver) via network.

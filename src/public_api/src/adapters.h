@@ -33,6 +33,10 @@ bool receiver_config_from_user(node::Context& context,
 
 bool interface_config_from_user(netio::UdpConfig& out, const roc_interface_config& in);
 
+//! Convert public API slot config to internal sender slot config.
+bool sender_slot_config_from_user(pipeline::SenderSlotConfig& out,
+                                  const roc_slot_config& in);
+
 bool sample_spec_from_user(audio::SampleSpec& out, const roc_media_encoding& in);
 bool sample_spec_to_user(roc_media_encoding& out, const audio::SampleSpec& in);
 

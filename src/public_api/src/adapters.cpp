@@ -18,6 +18,8 @@
 #include "roc_core/attributes.h"
 #include "roc_core/log.h"
 
+#include <string.h>
+
 namespace roc {
 namespace api {
 
@@ -303,6 +305,34 @@ ROC_NOSANITIZE bool interface_config_from_user(netio::UdpConfig& out,
     }
 
     out.enable_reuseaddr = (in.reuse_address != 0);
+
+    return true;
+}
+
+bool sender_slot_config_from_user(pipeline::SenderSlotConfig& out,
+                                  const roc_slot_config& in) {
+    if (in.track_mask != 0) {
+        out.enable_track_selection = true;
+        out.tracks.set_layout(audio::ChanLayout_Multitrack);
+        out.tracks.set_order(audio::ChanOrder_None);
+        for (size_t n = 0; n < sizeof(in.track_mask) * 8; n++) {
+            if (in.track_mask & (1ull << n)) {
+                out.tracks.toggle_channel(n, true);
+            }
+        }
+    }
+
+    size_t name_len = 0;
+    while (name_len < sizeof(in.slot_name) && in.slot_name[name_len] != '\0') {
+        name_len++;
+    }
+    if (name_len == sizeof(in.slot_name)) {
+        roc_log(LogError,
+                "bad configuration: invalid roc_slot_config.slot_name:"
+                " should be zero-terminated");
+        return false;
+    }
+    memcpy(out.metrics_label, in.slot_name, name_len + 1);
 
     return true;
 }

@@ -63,6 +63,37 @@ int roc_sender_open(roc_context* context,
     return 0;
 }
 
+int roc_sender_configure_slot(roc_sender* sender,
+                              roc_slot slot,
+                              const roc_slot_config* config) {
+    if (!sender) {
+        roc_log(LogError,
+                "roc_sender_configure_slot(): invalid arguments: sender is null");
+        return -1;
+    }
+
+    node::Sender* imp_sender = (node::Sender*)sender;
+
+    if (!config) {
+        roc_log(LogError,
+                "roc_sender_configure_slot(): invalid arguments: config is null");
+        return -1;
+    }
+
+    pipeline::SenderSlotConfig imp_config;
+    if (!api::sender_slot_config_from_user(imp_config, *config)) {
+        roc_log(LogError, "roc_sender_configure_slot(): invalid arguments: bad config");
+        return -1;
+    }
+
+    if (!imp_sender->configure_slot(slot, imp_config)) {
+        roc_log(LogError, "roc_sender_configure_slot(): operation failed");
+        return -1;
+    }
+
+    return 0;
+}
+
 int roc_sender_configure(roc_sender* sender,
                          roc_slot slot,
                          roc_interface iface,
