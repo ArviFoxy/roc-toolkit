@@ -186,6 +186,16 @@ def SupportsLocalizedObject(env):
     if not env.get('OBJCOPY', None):
         return False
 
+    # objcopy implements neither --localize-hidden nor --strip-unneeded for
+    # Mach-O. Building on a Mac never reaches this, because macOS ships no
+    # objcopy and the check above already fails. Cross-compiling from Linux the
+    # host's objcopy is found, and the GNU check below passes — GNU binutils
+    # and llvm-objcopy both claim GNU compatibility — so the build proceeds and
+    # then dies while linking libroc.a with "file format not recognized" or
+    # "option is not supported for MachO".
+    if env.get('ROC_PLATFORM', None) == 'macos':
+        return False
+
     out = env.GetCommandOutput('{} -V'.format(env['OBJCOPY']))
     return 'GNU' in out
 
