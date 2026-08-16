@@ -319,8 +319,7 @@ bool parse_sample_spec_imp(const char* str, SampleSpec& sample_spec) {
         format = [a-z0-9_]+ >start_token %set_format;
         subformat = [a-z0-9_]+ >start_token %set_subformat;
         rate = [0-9]+ >start_token %set_rate;
-        channels_DISABLED = surround | mtr;
-        channels = ('stereo' | 'mono') >start_token %set_surround_mask %set_surround;
+        channels = surround | mtr;
 
         main := ( ('-' | format ('@' subformat)?) '/' ('-' | rate) '/' ('-' | channels) )
                 %{ success = true; }

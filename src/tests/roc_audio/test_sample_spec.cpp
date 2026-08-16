@@ -471,7 +471,7 @@ TEST(sample_spec, parse_format) {
     }
 }
 
-IGNORE_TEST(sample_spec, parse_channels) {
+TEST(sample_spec, parse_channels) {
     { // surround stereo
         SampleSpec sample_spec;
         CHECK(parse_sample_spec("pcm@s16/48000/stereo", sample_spec));
@@ -567,6 +567,25 @@ IGNORE_TEST(sample_spec, parse_channels) {
         CHECK(sample_spec.channel_set().has_channel(4));
         CHECK(sample_spec.channel_set().has_channel(5));
         CHECK(sample_spec.channel_set().has_channel(7));
+    }
+    { // multitrack range starting at zero (multiroom session input shape)
+        SampleSpec sample_spec;
+        CHECK(parse_sample_spec("pcm@f32/48000/0-6", sample_spec));
+
+        CHECK(sample_spec.is_complete());
+        CHECK_EQUAL(ChanLayout_Multitrack, sample_spec.channel_set().layout());
+        CHECK_EQUAL(7, sample_spec.num_channels());
+        for (size_t ch = 0; ch <= 6; ch++) {
+            CHECK(sample_spec.channel_set().has_channel(ch));
+        }
+    }
+    { // multitrack, channels-only form
+        SampleSpec sample_spec;
+        CHECK(parse_sample_spec("-/-/0-6", sample_spec));
+
+        CHECK(!sample_spec.is_complete());
+        CHECK_EQUAL(ChanLayout_Multitrack, sample_spec.channel_set().layout());
+        CHECK_EQUAL(7, sample_spec.num_channels());
     }
     { // multitrack mask (zero)
         SampleSpec sample_spec;
