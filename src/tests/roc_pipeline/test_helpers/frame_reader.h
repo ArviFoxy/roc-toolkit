@@ -30,6 +30,7 @@ public:
         : source_(source)
         , frame_factory_(frame_factory)
         , sample_offset_(0)
+        , track_(0)
         , abs_offset_(0)
         // By default, we set base_cts_ to some non-zero value, so that if base_capture_ts
         // is never provided to methods, refresh_ts() will still produce valid non-zero
@@ -58,6 +59,38 @@ public:
             for (size_t nc = 0; nc < sample_spec.num_channels(); nc++) {
                 DOUBLES_EQUAL(
                     (double)nth_sample(sample_offset_) * num_sessions,
+                    (double)frame->raw_samples()[ns * sample_spec.num_channels() + nc],
+                    SampleEpsilon);
+            }
+            sample_offset_++;
+        }
+
+        advance_(num_samples, sample_spec, base_capture_ts);
+    }
+
+    // Expected base channel for read_distinct_samples(): the stream under
+    // test carries source channel `track` of a frame produced by
+    // FrameWriter::write_distinct_samples() after per-slot track selection.
+    void expect_track(size_t track) {
+        track_ = track;
+    }
+
+    // Like read_samples() for a single session, but expects each sample to
+    // carry nth_sample(offset + track), matching
+    // FrameWriter::write_distinct_samples() after track selection.
+    void read_distinct_samples(size_t num_samples,
+                               const audio::SampleSpec& sample_spec,
+                               core::nanoseconds_t base_capture_ts = -1) {
+        audio::FramePtr frame =
+            read_frame_(status::StatusOK, num_samples, sample_spec, audio::ModeHard);
+
+        check_duration_(*frame, num_samples, sample_spec);
+        check_timestamp_(*frame, sample_spec, base_capture_ts);
+
+        for (size_t ns = 0; ns < num_samples; ns++) {
+            for (size_t nc = 0; nc < sample_spec.num_channels(); nc++) {
+                DOUBLES_EQUAL(
+                    (double)nth_sample(uint8_t(sample_offset_ + track_ + nc)),
                     (double)frame->raw_samples()[ns * sample_spec.num_channels() + nc],
                     SampleEpsilon);
             }
@@ -324,6 +357,7 @@ private:
     audio::FrameFactory& frame_factory_;
 
     uint8_t sample_offset_;
+    size_t track_;
     size_t abs_offset_;
 
     core::nanoseconds_t base_cts_;
