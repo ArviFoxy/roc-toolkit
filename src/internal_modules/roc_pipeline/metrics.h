@@ -44,10 +44,14 @@ struct SenderSlotMetrics {
     //! Is slot configuration complete (all endpoints bound).
     bool is_complete;
 
+    //! Did slot fail at runtime and detach from the pipeline.
+    bool is_broken;
+
     SenderSlotMetrics()
         : source_id(0)
         , num_participants(0)
-        , is_complete(false) {
+        , is_complete(false)
+        , is_broken(false) {
     }
 };
 

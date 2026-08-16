@@ -36,6 +36,8 @@ SenderSlot::SenderSlot(const SenderSinkConfig& sink_config,
                frame_factory,
                arena,
                dumper)
+    , is_broken_(false)
+    , fail_status_(status::NoStatus)
     , init_status_(status::NoStatus) {
     roc_log(LogDebug, "sender slot: initializing");
 
@@ -140,31 +142,68 @@ status::StatusCode SenderSlot::refresh(core::nanoseconds_t current_time,
                                        core::nanoseconds_t& next_deadline) {
     roc_panic_if(init_status_ != status::StatusOK);
 
+    if (is_broken_) {
+        // The slot is detached from the pipeline and reports no deadline;
+        // the sink keeps serving its other slots.
+        return status::StatusOK;
+    }
+
     status::StatusCode code = status::NoStatus;
 
     if (source_endpoint_) {
         if ((code = source_endpoint_->pull_packets(current_time)) != status::StatusOK) {
-            return code;
+            break_slot_(code);
+            return status::StatusOK;
         }
     }
 
     if (repair_endpoint_) {
         if ((code = repair_endpoint_->pull_packets(current_time)) != status::StatusOK) {
-            return code;
+            break_slot_(code);
+            return status::StatusOK;
         }
     }
 
     if (control_endpoint_) {
         if ((code = control_endpoint_->pull_packets(current_time)) != status::StatusOK) {
-            return code;
+            break_slot_(code);
+            return status::StatusOK;
         }
     }
 
     if ((code = session_.refresh(current_time, next_deadline)) != status::StatusOK) {
-        return code;
+        break_slot_(code);
+        return status::StatusOK;
     }
 
     return status::StatusOK;
+}
+
+bool SenderSlot::is_broken() const {
+    return is_broken_;
+}
+
+status::StatusCode SenderSlot::fail_status() const {
+    return fail_status_;
+}
+
+void SenderSlot::break_slot_(status::StatusCode fail_status) {
+    if (is_broken_) {
+        return;
+    }
+
+    is_broken_ = true;
+    fail_status_ = fail_status;
+
+    roc_log(LogError,
+            "sender slot: failed and detached from pipeline:"
+            " status=%s",
+            status::code_to_str(fail_status));
+
+    if (session_.frame_writer() && fanout_.has_output(*session_.frame_writer())) {
+        fanout_.remove_output(*session_.frame_writer());
+        state_tracker_.unregister_session();
+    }
 }
 
 void SenderSlot::get_metrics(SenderSlotMetrics& slot_metrics,
@@ -173,6 +212,7 @@ void SenderSlot::get_metrics(SenderSlotMetrics& slot_metrics,
     roc_panic_if(init_status_ != status::StatusOK);
 
     session_.get_slot_metrics(slot_metrics);
+    slot_metrics.is_broken = is_broken_;
 
     if (party_metrics || party_count) {
         session_.get_participant_metrics(party_metrics, party_count);

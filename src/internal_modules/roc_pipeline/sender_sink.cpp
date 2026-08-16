@@ -209,16 +209,26 @@ status::StatusCode SenderSink::refresh(core::nanoseconds_t current_time,
                      " expected positive value, got %lld",
                      (long long)current_time);
 
+    size_t n_slots = 0;
+    size_t n_broken = 0;
+    status::StatusCode first_fail = status::NoStatus;
+
     for (core::SharedPtr<SenderSlot> slot = slots_.front(); slot;
          slot = slots_.nextof(*slot)) {
         core::nanoseconds_t slot_deadline = 0;
 
+        // A failing slot breaks and detaches itself and reports StatusOK,
+        // so one bad slot never stops the refresh of the others.
         const status::StatusCode code = slot->refresh(current_time, slot_deadline);
-        if (code != status::StatusOK) {
-            roc_log(LogError, "sender sink: failed to refresh slot: status=%s",
-                    status::code_to_str(code));
-            state_tracker_.set_broken();
-            return code;
+        roc_panic_if(code != status::StatusOK);
+
+        n_slots++;
+        if (slot->is_broken()) {
+            n_broken++;
+            if (first_fail == status::NoStatus) {
+                first_fail = slot->fail_status();
+            }
+            continue;
         }
 
         if (next_deadline && slot_deadline != 0) {
@@ -226,6 +236,14 @@ status::StatusCode SenderSink::refresh(core::nanoseconds_t current_time,
                 ? slot_deadline
                 : std::min(*next_deadline, slot_deadline);
         }
+    }
+
+    if (n_slots > 0 && n_broken == n_slots) {
+        roc_log(LogError,
+                "sender sink: all %lu slots broken, marking sender broken: status=%s",
+                (unsigned long)n_slots, status::code_to_str(first_fail));
+        state_tracker_.set_broken();
+        return first_fail;
     }
 
     return status::StatusOK;

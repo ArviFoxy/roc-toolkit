@@ -76,7 +76,16 @@ public:
                      SenderParticipantMetrics* party_metrics,
                      size_t* party_count) const;
 
+    //! True if the slot failed at runtime and was detached from the pipeline.
+    //! A broken slot stays inert; other slots of the sink continue working.
+    bool is_broken() const;
+
+    //! First error that broke the slot (NoStatus while the slot is alive).
+    status::StatusCode fail_status() const;
+
 private:
+    void break_slot_(status::StatusCode fail_status);
+
     SenderEndpoint* create_source_endpoint_(address::Protocol proto,
                                             const address::SocketAddr& outbound_address,
                                             packet::IWriter& outbound_writer);
@@ -97,6 +106,9 @@ private:
 
     StateTracker& state_tracker_;
     SenderSession session_;
+
+    bool is_broken_;
+    status::StatusCode fail_status_;
 
     status::StatusCode init_status_;
 };

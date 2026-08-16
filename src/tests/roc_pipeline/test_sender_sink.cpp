@@ -138,6 +138,31 @@ void refresh_sink(SenderSink& sender_sink, core::nanoseconds_t refresh_ts) {
     LONGS_EQUAL(status::StatusOK, sender_sink.refresh(refresh_ts, NULL));
 }
 
+// Forwards packets to the inner writer until armed to fail, then returns
+// the injected status. Used to break one slot mid-stream.
+class FailingWriter : public packet::IWriter {
+public:
+    explicit FailingWriter(packet::IWriter& inner)
+        : inner_(inner)
+        , fail_(false) {
+    }
+
+    void arm() {
+        fail_ = true;
+    }
+
+    virtual ROC_NODISCARD status::StatusCode write(const packet::PacketPtr& pp) {
+        if (fail_) {
+            return status::StatusErrDevice;
+        }
+        return inner_.write(pp);
+    }
+
+private:
+    packet::IWriter& inner_;
+    bool fail_;
+};
+
 } // namespace
 
 TEST_GROUP(sender_sink) {
@@ -1141,6 +1166,110 @@ TEST(sender_sink, multitrack_slot_track_selection_resampled) {
         packet_reader1.read_constant_packet(SamplesPerPacket, packet_sample_spec, 0.01);
         packet_reader2.read_constant_packet(SamplesPerPacket, packet_sample_spec, 0.01);
     }
+}
+
+// One slot failing at runtime breaks and detaches only that slot: the sink
+// keeps refreshing, the surviving slot keeps producing correct packets, and
+// the broken slot is visible in slot metrics.
+TEST(sender_sink, slot_failure_isolation) {
+    enum { FramesBeforeFailure = ManyFrames / 2 };
+
+    init_with_multitrack(2, SampleRate, 1, SampleRate);
+
+    packet::FifoQueue queue1;
+    packet::FifoQueue queue2;
+    FailingWriter failing_writer(queue2);
+
+    SenderSink sender(make_config(), processor_map, encoding_map, packet_pool,
+                      packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
+    LONGS_EQUAL(status::StatusOK, sender.init_status());
+
+    SenderSlot* slot1 = create_track_slot(sender, 0);
+    create_transport_endpoint(slot1, address::Iface_AudioSource, proto, dst_addr1,
+                              queue1);
+
+    SenderSlot* slot2 = create_track_slot(sender, 1);
+    create_transport_endpoint(slot2, address::Iface_AudioSource, proto, dst_addr2,
+                              failing_writer);
+
+    test::FrameWriter frame_writer(sender, frame_factory);
+
+    for (size_t nf = 0; nf < FramesBeforeFailure; nf++) {
+        frame_writer.write_distinct_samples(SamplesPerFrame, input_sample_spec);
+        refresh_sink(sender, frame_writer.refresh_ts());
+    }
+
+    failing_writer.arm();
+
+    // The sink keeps accepting frames and refreshing after slot 2 fails.
+    for (size_t nf = FramesBeforeFailure; nf < ManyFrames; nf++) {
+        frame_writer.write_distinct_samples(SamplesPerFrame, input_sample_spec);
+        refresh_sink(sender, frame_writer.refresh_ts());
+    }
+
+    SenderSlotMetrics slot_metrics;
+    slot1->get_metrics(slot_metrics, NULL, NULL);
+    CHECK(!slot_metrics.is_broken);
+    slot2->get_metrics(slot_metrics, NULL, NULL);
+    CHECK(slot_metrics.is_broken);
+
+    // The surviving slot produced the full correct stream.
+    test::PacketReader packet_reader1(arena, queue1, encoding_map, packet_factory,
+                                      dst_addr1, PayloadType_Ch1);
+    packet_reader1.expect_track(0);
+
+    for (size_t np = 0; np < ManyFrames / FramesPerPacket; np++) {
+        packet_reader1.read_distinct_packet(SamplesPerPacket, packet_sample_spec);
+    }
+    packet_reader1.read_eof();
+
+    // The broken slot produced packets only until it failed.
+    test::PacketReader packet_reader2(arena, queue2, encoding_map, packet_factory,
+                                      dst_addr2, PayloadType_Ch1);
+    packet_reader2.expect_track(1);
+
+    for (size_t np = 0; np < FramesBeforeFailure / FramesPerPacket; np++) {
+        packet_reader2.read_distinct_packet(SamplesPerPacket, packet_sample_spec);
+    }
+    packet_reader2.read_eof();
+}
+
+// When the last alive slot breaks, the sink reports the failure and
+// becomes broken (single-slot senders keep their old behavior).
+TEST(sender_sink, slot_failure_last_slot) {
+    init_with_multitrack(2, SampleRate, 1, SampleRate);
+
+    packet::FifoQueue queue;
+    FailingWriter failing_writer(queue);
+
+    SenderSink sender(make_config(), processor_map, encoding_map, packet_pool,
+                      packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
+    LONGS_EQUAL(status::StatusOK, sender.init_status());
+
+    SenderSlot* slot = create_track_slot(sender, 0);
+    create_transport_endpoint(slot, address::Iface_AudioSource, proto, dst_addr1,
+                              failing_writer);
+
+    test::FrameWriter frame_writer(sender, frame_factory);
+
+    for (size_t nf = 0; nf < FramesPerPacket; nf++) {
+        frame_writer.write_distinct_samples(SamplesPerFrame, input_sample_spec);
+        refresh_sink(sender, frame_writer.refresh_ts());
+    }
+
+    failing_writer.arm();
+
+    // Enough frames to emit a packet into the failing writer.
+    for (size_t nf = 0; nf < FramesPerPacket; nf++) {
+        frame_writer.write_distinct_samples(SamplesPerFrame, input_sample_spec);
+    }
+
+    // The failure surfaces on refresh; with no slots left alive, the sink
+    // reports the slot's failure and becomes unusable.
+    LONGS_EQUAL(status::StatusErrDevice,
+                sender.refresh(frame_writer.refresh_ts(), NULL));
+    LONGS_EQUAL(status::StatusBadState,
+                sender.refresh(frame_writer.refresh_ts(), NULL));
 }
 
 // Invalid slot configurations are rejected at slot creation.
