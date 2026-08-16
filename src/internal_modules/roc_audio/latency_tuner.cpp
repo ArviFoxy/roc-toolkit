@@ -175,6 +175,14 @@ LatencyTuner::LatencyTuner(const LatencyConfig& latency_config,
                 if (latency_config.latency_aggressiveness > 0) {
                     pfe_config.spring_gain = latency_config.latency_aggressiveness;
                 }
+                if (latency_config.scaling_tolerance > 0) {
+                    // The estimator's internal warp clamp gates its integrator
+                    // anti-windup, so it must match the freq_coeff bound the
+                    // tuner enforces after reading the estimator; a wider
+                    // internal bound would let the integrator wind up in the
+                    // gap between the two clamps.
+                    pfe_config.max_correction = latency_config.scaling_tolerance;
+                }
                 pfe_.reset(new (pfe_) PreciseFreqEstimator(
                     pfe_config,
                     (packet::stream_timestamp_t)cur_target_latency_,

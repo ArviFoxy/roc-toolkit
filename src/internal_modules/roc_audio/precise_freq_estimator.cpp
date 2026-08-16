@@ -55,8 +55,10 @@ PreciseFreqEstimator::PreciseFreqEstimator(const PreciseFreqEstimatorConfig& con
     // This averages over ~2 settling time constants for good bias estimation.
     const double tau_c = 1.0 / (zeta * omega_n);
     ema_alpha_ = epoch_duration_ / (2.0 * tau_c);
-    // Clamp to sane range: not too sluggish, not too noisy.
-    if (ema_alpha_ < 0.001) ema_alpha_ = 0.001;
+    // Guard rails for degenerate configurations only: the tau_c-derived value
+    // is authoritative and must lie inside this range for any realistic gain.
+    // The floor bounds the averaging horizon to ~8 min at 5 ms epochs.
+    if (ema_alpha_ < 1e-5) ema_alpha_ = 1e-5;
     if (ema_alpha_ > 0.1) ema_alpha_ = 0.1;
 
     roc_log(LogDebug,
