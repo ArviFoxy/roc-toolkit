@@ -46,6 +46,13 @@ public:
     //! Check if the node was successfully constructed.
     status::StatusCode init_status() const;
 
+    //! Set slot parameters.
+    //! Must be called before the slot is created implicitly by the first
+    //! configure() or connect() on that slot index; the slot is created
+    //! eagerly so configuration errors surface synchronously.
+    ROC_NODISCARD bool configure_slot(slot_index_t slot_index,
+                                      const pipeline::SenderSlotConfig& slot_config);
+
     //! Set interface config.
     ROC_NODISCARD bool configure(slot_index_t slot_index,
                                  address::Interface iface,
@@ -136,7 +143,10 @@ private:
     bool check_compatibility_(address::Interface iface, const address::NetworkUri& uri);
     void update_compatibility_(address::Interface iface, const address::NetworkUri& uri);
 
-    core::SharedPtr<Slot> get_slot_(slot_index_t slot_index, bool auto_create);
+    core::SharedPtr<Slot>
+    get_slot_(slot_index_t slot_index,
+              bool auto_create,
+              const pipeline::SenderSlotConfig* explicit_config = NULL);
     void cleanup_slot_(Slot& slot);
     void break_slot_(Slot& slot);
 

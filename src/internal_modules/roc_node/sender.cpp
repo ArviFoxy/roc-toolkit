@@ -64,6 +64,25 @@ status::StatusCode Sender::init_status() const {
     return init_status_;
 }
 
+bool Sender::configure_slot(slot_index_t slot_index,
+                            const pipeline::SenderSlotConfig& slot_config) {
+    core::Mutex::Lock lock(control_mutex_);
+
+    roc_panic_if(init_status_ != status::StatusOK);
+
+    roc_log(LogInfo, "sender node: configuring slot %lu", (unsigned long)slot_index);
+
+    if (slot_map_.find(slot_index)) {
+        roc_log(LogError,
+                "sender node:"
+                " can't configure slot %lu: slot already in use",
+                (unsigned long)slot_index);
+        return false;
+    }
+
+    return get_slot_(slot_index, true, &slot_config) != NULL;
+}
+
 bool Sender::configure(slot_index_t slot_index,
                        address::Interface iface,
                        const netio::UdpConfig& config) {
@@ -431,13 +450,18 @@ void Sender::update_compatibility_(address::Interface iface,
     used_protocols_[iface] = uri.proto();
 }
 
-core::SharedPtr<Sender::Slot> Sender::get_slot_(slot_index_t slot_index,
-                                                bool auto_create) {
+core::SharedPtr<Sender::Slot>
+Sender::get_slot_(slot_index_t slot_index,
+                  bool auto_create,
+                  const pipeline::SenderSlotConfig* explicit_config) {
     core::SharedPtr<Slot> slot = slot_map_.find(slot_index);
 
     if (!slot) {
         if (auto_create) {
             pipeline::SenderSlotConfig slot_config;
+            if (explicit_config) {
+                slot_config = *explicit_config;
+            }
 
             pipeline::SenderLoop::Tasks::CreateSlot slot_task(slot_config);
             if (!pipeline_.schedule_and_wait(slot_task)) {

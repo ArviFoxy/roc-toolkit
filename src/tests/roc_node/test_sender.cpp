@@ -56,6 +56,69 @@ TEST(sender, sink) {
                 sender.sink().sample_spec().sample_rate());
 }
 
+TEST(sender, configure_slot) {
+    { // configure then connect
+        Context context(context_config, arena);
+        LONGS_EQUAL(status::StatusOK, context.init_status());
+
+        pipeline::SenderSinkConfig config = sender_config;
+        config.input_sample_spec.channel_set().clear();
+        config.input_sample_spec.channel_set().set_layout(
+            audio::ChanLayout_Multitrack);
+        config.input_sample_spec.channel_set().set_order(audio::ChanOrder_None);
+        config.input_sample_spec.channel_set().set_range(0, 1);
+
+        Sender sender(context, config);
+        LONGS_EQUAL(status::StatusOK, sender.init_status());
+
+        // Two selected tracks, matching the default stereo packet encoding.
+        pipeline::SenderSlotConfig slot_config;
+        slot_config.enable_track_selection = true;
+        slot_config.tracks.set_layout(audio::ChanLayout_Multitrack);
+        slot_config.tracks.set_order(audio::ChanOrder_None);
+        slot_config.tracks.set_range(0, 1);
+
+        CHECK(sender.configure_slot(DefaultSlot, slot_config));
+
+        // The slot exists now; configuring it again is an error.
+        CHECK(!sender.configure_slot(DefaultSlot, slot_config));
+
+        address::NetworkUri source_endp(arena);
+        parse_uri(source_endp, "rtp://127.0.0.1:1000");
+        CHECK(sender.connect(DefaultSlot, address::Iface_AudioSource, source_endp));
+    }
+    { // configure after implicit slot creation
+        Context context(context_config, arena);
+        LONGS_EQUAL(status::StatusOK, context.init_status());
+
+        Sender sender(context, sender_config);
+        LONGS_EQUAL(status::StatusOK, sender.init_status());
+
+        address::NetworkUri source_endp(arena);
+        parse_uri(source_endp, "rtp://127.0.0.1:1000");
+        CHECK(sender.connect(DefaultSlot, address::Iface_AudioSource, source_endp));
+
+        pipeline::SenderSlotConfig slot_config;
+        CHECK(!sender.configure_slot(DefaultSlot, slot_config));
+    }
+    { // invalid slot config is rejected synchronously
+        Context context(context_config, arena);
+        LONGS_EQUAL(status::StatusOK, context.init_status());
+
+        // Input is not multitrack, so track selection can't be used.
+        Sender sender(context, sender_config);
+        LONGS_EQUAL(status::StatusOK, sender.init_status());
+
+        pipeline::SenderSlotConfig slot_config;
+        slot_config.enable_track_selection = true;
+        slot_config.tracks.set_layout(audio::ChanLayout_Multitrack);
+        slot_config.tracks.set_order(audio::ChanOrder_None);
+        slot_config.tracks.set_range(0, 0);
+
+        CHECK(!sender.configure_slot(DefaultSlot, slot_config));
+    }
+}
+
 TEST(sender, connect) {
     { // one slot
         Context context(context_config, arena);
