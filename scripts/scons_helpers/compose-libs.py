@@ -62,6 +62,9 @@ parser.add_argument('--arch', dest='arch', type=str, nargs='*',
 parser.add_argument('--tools', dest='tools', type=str, nargs='*',
                     help='paths to tools')
 
+parser.add_argument('--macho', dest='macho', action='store_true',
+                    help='target object format is Mach-O')
+
 parser.add_argument('--verbose', dest='verbose', action='store_true',
                     help='enable verbose output')
 
@@ -84,7 +87,14 @@ for exe in ['ar', 'objcopy', 'lipo']:
     if not tools.get(exe.upper(), None):
         tools[exe.upper()] = exe
 
-have_gnu_objcopy = is_gnu_tool(tools['OBJCOPY'])
+# objcopy implements --localize-hidden and --strip-unneeded for ELF but not
+# for Mach-O, and is_gnu_tool cannot tell the difference: GNU binutils and
+# llvm-objcopy both report GNU compatibility regardless of the target format.
+# On a Mac this never comes up, because macOS ships no objcopy; cross-compiling
+# from Linux the host's is found and then fails with "file format not
+# recognized" or "option is not supported for MachO". Without it the objects
+# are simply not localized, which is what a native macOS build already does.
+have_gnu_objcopy = is_gnu_tool(tools['OBJCOPY']) and not args.macho
 
 try:
     temp_dir = tempfile.mkdtemp()
