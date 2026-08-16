@@ -167,31 +167,18 @@ SenderSession::create_transport_pipeline(SenderEndpoint* source_endpoint,
         frm_writer = packetizer_.get();
     }
 
-    if (pkt_spec.channel_set() != sink_config_.input_sample_spec.channel_set()) {
-        const audio::SampleSpec in_spec(pkt_spec.sample_rate(), audio::PcmSubformat_Raw,
-                                        sink_config_.input_sample_spec.channel_set());
-
-        const audio::SampleSpec out_spec(pkt_spec.sample_rate(), audio::PcmSubformat_Raw,
-                                         pkt_spec.channel_set());
-
-        channel_mapper_writer_.reset(
-            new (channel_mapper_writer_) audio::ChannelMapperWriter(
-                *frm_writer, frame_factory_, in_spec, out_spec));
-        if ((status = channel_mapper_writer_->init_status()) != status::StatusOK) {
-            return status;
-        }
-        frm_writer = channel_mapper_writer_.get();
-    }
-
+    // The resampler sits below the channel mapper (i.e. after it in frame
+    // flow), so it processes only the slot's channel set: with per-slot
+    // track selection each slot resamples one track instead of the whole
+    // multitrack input.
     if (sink_config_.latency.tuner_profile != audio::LatencyTunerProfile_Intact
         || pkt_spec.sample_rate() != sink_config_.input_sample_spec.sample_rate()) {
         const audio::SampleSpec in_spec(sink_config_.input_sample_spec.sample_rate(),
-                                        audio::PcmSubformat_Raw,
-                                        sink_config_.input_sample_spec.channel_set());
+                                        audio::PcmSubformat_Raw, pkt_spec.channel_set());
 
         const audio::SampleSpec out_spec(pkt_spec.sample_rate(),
                                          audio::PcmSubformat_Raw,
-                                         sink_config_.input_sample_spec.channel_set());
+                                         pkt_spec.channel_set());
 
         resampler_.reset(processor_map_.new_resampler(sink_config_.resampler, in_spec,
                                                       out_spec, frame_factory_, arena_));
@@ -209,6 +196,23 @@ SenderSession::create_transport_pipeline(SenderEndpoint* source_endpoint,
             return status;
         }
         frm_writer = resampler_writer_.get();
+    }
+
+    if (pkt_spec.channel_set() != sink_config_.input_sample_spec.channel_set()) {
+        const audio::SampleSpec in_spec(sink_config_.input_sample_spec.sample_rate(),
+                                        audio::PcmSubformat_Raw,
+                                        sink_config_.input_sample_spec.channel_set());
+
+        const audio::SampleSpec out_spec(sink_config_.input_sample_spec.sample_rate(),
+                                         audio::PcmSubformat_Raw, pkt_spec.channel_set());
+
+        channel_mapper_writer_.reset(
+            new (channel_mapper_writer_) audio::ChannelMapperWriter(
+                *frm_writer, frame_factory_, in_spec, out_spec));
+        if ((status = channel_mapper_writer_->init_status()) != status::StatusOK) {
+            return status;
+        }
+        frm_writer = channel_mapper_writer_.get();
     }
 
     {

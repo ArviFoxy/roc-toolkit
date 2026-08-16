@@ -102,6 +102,27 @@ public:
         abs_offset_ += samples_per_packet;
     }
 
+    // Expects every sample of channel nc to be within epsilon of
+    // channel_constant(track + nc), matching
+    // FrameWriter::write_channel_constants() after track selection.
+    void read_constant_packet(size_t samples_per_packet,
+                              const audio::SampleSpec& sample_spec,
+                              double epsilon) {
+        packet::PacketPtr pp = read_packet_();
+
+        audio::sample_t samples[MaxSamples] = {};
+        parse_packet_(pp->buffer(), samples_per_packet, samples);
+
+        for (size_t ns = 0; ns < samples_per_packet; ns++) {
+            for (size_t nc = 0; nc < sample_spec.num_channels(); nc++) {
+                DOUBLES_EQUAL((double)channel_constant(track_ + nc),
+                              (double)samples[ns * sample_spec.num_channels() + nc],
+                              epsilon);
+            }
+        }
+        abs_offset_ += samples_per_packet;
+    }
+
     void read_nonzero_packet(size_t samples_per_packet,
                              const audio::SampleSpec& sample_spec,
                              core::nanoseconds_t base_capture_ts = -1) {

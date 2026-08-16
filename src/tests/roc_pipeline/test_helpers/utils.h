@@ -27,6 +27,12 @@ const double SampleEpsilon = 0.00001;
 
 const size_t TimestampEpsilonSmpls = 1;
 
+// Constant sample value identifying channel nc, for tests that must verify
+// track identity across a resampler, where sample-exact ramps don't survive.
+inline audio::sample_t channel_constant(size_t nc) {
+    return audio::sample_t(0.1) * (audio::sample_t)(nc + 1);
+}
+
 inline audio::sample_t nth_sample(uint8_t n) {
     return audio::sample_t(n) / 1024;
 }

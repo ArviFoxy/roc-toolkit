@@ -84,6 +84,28 @@ public:
         advance_(samples_per_chan, sample_spec, base_capture_ts);
     }
 
+    // Writes frames where every sample of channel nc is the constant
+    // channel_constant(nc). Constants survive resampling (after filter
+    // warm-up), so track identity can be verified across a resampler.
+    void write_channel_constants(size_t samples_per_chan,
+                                 const audio::SampleSpec& sample_spec,
+                                 core::nanoseconds_t base_capture_ts = -1) {
+        audio::FramePtr frame =
+            next_frame_(samples_per_chan, sample_spec, base_capture_ts);
+
+        for (size_t ns = 0; ns < samples_per_chan; ns++) {
+            for (size_t nc = 0; nc < sample_spec.num_channels(); nc++) {
+                frame->raw_samples()[ns * sample_spec.num_channels() + nc] =
+                    channel_constant(nc);
+            }
+            offset_++;
+        }
+
+        LONGS_EQUAL(status::StatusOK, sink_.write(*frame));
+
+        advance_(samples_per_chan, sample_spec, base_capture_ts);
+    }
+
     // Int16 version of write_samples().
     void write_s16_samples(size_t samples_per_chan,
                            const audio::SampleSpec& sample_spec,

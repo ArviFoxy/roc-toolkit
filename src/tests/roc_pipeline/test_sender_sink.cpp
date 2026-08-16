@@ -1074,6 +1074,75 @@ TEST(sender_sink, multitrack_slot_all_tracks) {
     packet_reader.read_eof();
 }
 
+// Track selection with a resampler in the slot pipeline: input at 44100,
+// wire encoding at 48000. The channel mapper runs above the resampler, so
+// each slot resamples only its selected track. Per-track constants verify
+// track identity across the rate conversion (exact ramps don't survive it).
+TEST(sender_sink, multitrack_slot_track_selection_resampled) {
+    enum {
+        PayloadType_Custom48k = 100,
+        PacketRate = 48000,
+        WarmupPackets = 4,
+        CheckedPackets = 10
+    };
+
+    init_with_multitrack(2, SampleRate, 1, PacketRate);
+
+    static bool encoding_registered = false;
+    if (!encoding_registered) {
+        rtp::Encoding enc;
+        enc.payload_type = (unsigned int)PayloadType_Custom48k;
+        enc.sample_spec = packet_sample_spec;
+        enc.packet_flags = packet::Packet::FlagAudio;
+        LONGS_EQUAL(status::StatusOK, encoding_map.register_encoding(enc));
+        encoding_registered = true;
+    }
+
+    SenderSinkConfig config = make_config();
+    config.payload_type = PayloadType_Custom48k;
+
+    packet::FifoQueue queue1;
+    packet::FifoQueue queue2;
+
+    SenderSink sender(config, processor_map, encoding_map, packet_pool,
+                      packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
+    LONGS_EQUAL(status::StatusOK, sender.init_status());
+
+    SenderSlot* slot1 = create_track_slot(sender, 0);
+    create_transport_endpoint(slot1, address::Iface_AudioSource, proto, dst_addr1,
+                              queue1);
+
+    SenderSlot* slot2 = create_track_slot(sender, 1);
+    create_transport_endpoint(slot2, address::Iface_AudioSource, proto, dst_addr2,
+                              queue2);
+
+    test::FrameWriter frame_writer(sender, frame_factory);
+
+    for (size_t nf = 0; nf < ManyFrames; nf++) {
+        frame_writer.write_channel_constants(SamplesPerFrame, input_sample_spec);
+        refresh_sink(sender, frame_writer.refresh_ts());
+    }
+
+    test::PacketReader packet_reader1(arena, queue1, encoding_map, packet_factory,
+                                      dst_addr1,
+                                      (rtp::PayloadType)PayloadType_Custom48k);
+    packet_reader1.expect_track(0);
+
+    test::PacketReader packet_reader2(arena, queue2, encoding_map, packet_factory,
+                                      dst_addr2,
+                                      (rtp::PayloadType)PayloadType_Custom48k);
+    packet_reader2.expect_track(1);
+
+    for (size_t np = 0; np < WarmupPackets; np++) {
+        packet_reader1.read_nonzero_packet(SamplesPerPacket, packet_sample_spec);
+        packet_reader2.read_nonzero_packet(SamplesPerPacket, packet_sample_spec);
+    }
+    for (size_t np = 0; np < CheckedPackets; np++) {
+        packet_reader1.read_constant_packet(SamplesPerPacket, packet_sample_spec, 0.01);
+        packet_reader2.read_constant_packet(SamplesPerPacket, packet_sample_spec, 0.01);
+    }
+}
+
 // Invalid slot configurations are rejected at slot creation.
 TEST(sender_sink, multitrack_slot_validation) {
     { // track selection with non-multitrack input
