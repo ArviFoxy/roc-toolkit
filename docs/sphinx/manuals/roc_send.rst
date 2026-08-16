@@ -44,6 +44,8 @@ Network options
 -c, --control=NET_URI  Remote control endpoint to connect to
 --miface=IPADDR        IPv4 or IPv6 address of the network interface on which to join the multicast group
 --reuseaddr            Enable SO_REUSEADDR when binding sockets
+--track=TRACKS         Input track(s) sent to the corresponding --source endpoint, e.g. '0', '2', or '0-1' (requires multitrack --io-encoding)
+--slot-name=NAME       Name of the corresponding --source slot, attached as 'slot' label to exported metrics
 
 Encoding options
 ----------------
@@ -328,6 +330,39 @@ You can connect sender to multiple receivers by specifying several sets of endpo
 Each slot has its own ``--source``, ``--repair``, and ``--control`` endpoint and optional ``--miface`` address. All sender slots should have the same set of endpoint types (source, repair, etc). For example, to connect sender to 2 receivers, you'll need to specify 2 groups of ``--source``, ``--repair``, and ``--control`` options. Sender requires all slots to use the same set of protocols.
 
 This feature is useful when you have static and small set of receivers and can't or don't want to configure multicast.
+
+Multiroom (per-slot track selection)
+------------------------------------
+
+When the input has a multitrack encoding, each slot can send its own subset of the
+input tracks instead of the whole input. ``--track`` values align positionally with
+``--source`` endpoints, like ``--repair`` and ``--miface`` do. The selected track
+count of every slot must equal the channel count of the packet encoding, so each
+slot's stream stays wire-compatible with an ordinary sender and receivers need no
+special support.
+
+``--slot-name`` attaches a ``slot`` label to the metrics exported for that slot
+(see :doc:`/tools/prometheus_metrics`); without it, metrics of multiple slots
+merge into a single unlabeled series.
+
+For example, one sender process distributing three tracks of a 3-track input to
+three receivers, one track each::
+
+    roc-send --input pulse://my_source --io-encoding pcm@f32/48000/0-2 \
+        -s rtp+rs8m://spk1:10001 -r rs8m://spk1:10002 -c rtcp://spk1:10003 \
+            --track 0 --slot-name spk1 \
+        -s rtp+rs8m://spk2:10001 -r rs8m://spk2:10002 -c rtcp://spk2:10003 \
+            --track 1 --slot-name spk2 \
+        -s rtp+rs8m://spk3:10001 -r rs8m://spk3:10002 -c rtcp://spk3:10003 \
+            --track 2 --slot-name spk3
+
+All slots share one clock: every leg's packets carry capture timestamps stamped
+from the same input frame, and a slot that fails at runtime is detached and
+reported (``roc_send_slot_up``) while the remaining slots keep streaming.
+
+Note that the default I/O frame length is sized for one or two channels; with a
+many-track input, reduce ``--io-frame-len`` (e.g. ``4ms``) or raise
+``--max-frame-size`` so that a frame (samples x tracks) fits the frame buffer.
 
 SO_REUSEADDR
 ------------

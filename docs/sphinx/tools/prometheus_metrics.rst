@@ -19,6 +19,26 @@ At runtime, pass ``--prometheus-metrics-port`` to ``roc-recv`` or ``roc-send``::
 
 Metrics are served at ``http://<host>:<port>/metrics``.
 
+Labels
+======
+
+By default all metrics are exported without labels, one series per process.
+
+A sender with multiple slots exports per-slot series when slots are given names
+(``roc-send --slot-name``, or ``roc_slot_config.slot_name`` via the C API): the
+name becomes the value of the ``slot`` label on all of that slot's metrics,
+including the per-slot liveness gauge ``roc_send_slot_up`` (1 while the slot is
+alive, 0 after it failed and detached). Without slot names, series of multiple
+slots merge: counters sum and gauges are last-writer-wins.
+
+Components shared between sender and receiver pipelines (latency tuner,
+frequency estimators) export ``roc_send_*`` names on the sender and
+``roc_recv_*`` names on the receiver.
+
+FEC block histograms (``roc_recv_fec_block_missing``,
+``roc_recv_fec_block_recovered``) carry a ``block_size`` label with one series
+per observed FEC block size.
+
 Histogram bucket configuration
 ==============================
 
