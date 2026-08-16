@@ -25,6 +25,8 @@
 
 #include "roc_send/cmdline.h"
 
+#include <ctype.h>
+
 using namespace roc;
 
 namespace {
@@ -501,6 +503,86 @@ bool prepare_sender(const gengetopt_args_info& args,
         return false;
     }
 
+    if (args.track_given != 0 && args.track_given != args.source_given) {
+        roc_log(LogError,
+                "invalid number of --track values: expected either 0 or %d values"
+                " (one per --source), got %d values",
+                (int)args.source_given, (int)args.track_given);
+        return false;
+    }
+
+    if (args.slot_name_given != 0 && args.slot_name_given != args.source_given) {
+        roc_log(LogError,
+                "invalid number of --slot-name values: expected either 0 or %d values"
+                " (one per --source), got %d values",
+                (int)args.source_given, (int)args.slot_name_given);
+        return false;
+    }
+
+    for (size_t slot = 0;
+         (args.track_given != 0 || args.slot_name_given != 0)
+         && slot < (size_t)args.source_given;
+         slot++) {
+        pipeline::SenderSlotConfig slot_config;
+
+        if (args.track_given) {
+            // The track list uses the channels-only form of the encoding
+            // grammar: "-/-/<tracks>".
+            char spec_str[128] = {};
+            if (snprintf(spec_str, sizeof(spec_str), "-/-/%s", args.track_arg[slot])
+                >= (int)sizeof(spec_str)) {
+                roc_log(LogError, "invalid --track \"%s\": string too long",
+                        args.track_arg[slot]);
+                return false;
+            }
+
+            audio::SampleSpec track_spec;
+            if (!audio::parse_sample_spec(spec_str, track_spec)
+                || track_spec.channel_set().layout() != audio::ChanLayout_Multitrack) {
+                roc_log(LogError,
+                        "invalid --track \"%s\":"
+                        " expected track list like '0', '2', or '0-1'",
+                        args.track_arg[slot]);
+                return false;
+            }
+
+            slot_config.enable_track_selection = true;
+            slot_config.tracks = track_spec.channel_set();
+        }
+
+        if (args.slot_name_given) {
+            const char* name = args.slot_name_arg[slot];
+            const size_t name_len = strlen(name);
+
+            if (name_len == 0 || name_len >= sizeof(slot_config.metrics_label)) {
+                roc_log(LogError, "invalid --slot-name \"%s\": bad length", name);
+                return false;
+            }
+            for (size_t n = 0; n < name_len; n++) {
+                if (!isalnum(name[n]) && name[n] != '_' && name[n] != '-') {
+                    roc_log(LogError,
+                            "invalid --slot-name \"%s\":"
+                            " allowed characters are [A-Za-z0-9_-]",
+                            name);
+                    return false;
+                }
+            }
+            for (size_t prev = 0; prev < slot; prev++) {
+                if (strcmp(args.slot_name_arg[prev], name) == 0) {
+                    roc_log(LogError, "duplicate --slot-name \"%s\"", name);
+                    return false;
+                }
+            }
+
+            strcpy(slot_config.metrics_label, name);
+        }
+
+        if (!sender.configure_slot(slot, slot_config)) {
+            roc_log(LogError, "can't configure slot %lu", (unsigned long)slot);
+            return false;
+        }
+    }
+
     for (size_t slot = 0; slot < (size_t)args.source_given; slot++) {
         address::NetworkUri source_endpoint(context.arena());
         if (!address::parse_network_uri(args.source_arg[slot], source_endpoint)) {
@@ -769,6 +851,12 @@ int main(int argc, char** argv) {
 
     core::ScopedPtr<metrics::PrometheusExporter> exporter;
     if (prometheus_config.port > 0) {
+        if (args.source_given > 1 && args.slot_name_given == 0) {
+            roc_log(LogInfo,
+                    "multiple slots and no --slot-name given:"
+                    " per-slot metrics will merge into single unlabeled series;"
+                    " pass --slot-name to separate them");
+        }
         exporter.reset(new (context.arena())
                            metrics::PrometheusExporter(prometheus_config));
     }

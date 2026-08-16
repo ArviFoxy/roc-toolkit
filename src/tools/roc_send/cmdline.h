@@ -89,6 +89,16 @@ struct gengetopt_args_info
   unsigned int miface_max; /**< @brief IPv4 or IPv6 address of the network interface on which to join the multicast group's maximum occurreces */
   const char *miface_help; /**< @brief IPv4 or IPv6 address of the network interface on which to join the multicast group help description.  */
   const char *reuseaddr_help; /**< @brief Enable SO_REUSEADDR when binding sockets help description.  */
+  char ** track_arg;	/**< @brief Input track(s) sent to the corresponding --source endpoint, e.g. '0', '2', or '0-1' (requires multitrack --io-encoding).  */
+  char ** track_orig;	/**< @brief Input track(s) sent to the corresponding --source endpoint, e.g. '0', '2', or '0-1' (requires multitrack --io-encoding) original value given at command line.  */
+  unsigned int track_min; /**< @brief Input track(s) sent to the corresponding --source endpoint, e.g. '0', '2', or '0-1' (requires multitrack --io-encoding)'s minimum occurreces */
+  unsigned int track_max; /**< @brief Input track(s) sent to the corresponding --source endpoint, e.g. '0', '2', or '0-1' (requires multitrack --io-encoding)'s maximum occurreces */
+  const char *track_help; /**< @brief Input track(s) sent to the corresponding --source endpoint, e.g. '0', '2', or '0-1' (requires multitrack --io-encoding) help description.  */
+  char ** slot_name_arg;	/**< @brief Name of the corresponding --source slot, attached as 'slot' label to exported metrics.  */
+  char ** slot_name_orig;	/**< @brief Name of the corresponding --source slot, attached as 'slot' label to exported metrics original value given at command line.  */
+  unsigned int slot_name_min; /**< @brief Name of the corresponding --source slot, attached as 'slot' label to exported metrics's minimum occurreces */
+  unsigned int slot_name_max; /**< @brief Name of the corresponding --source slot, attached as 'slot' label to exported metrics's maximum occurreces */
+  const char *slot_name_help; /**< @brief Name of the corresponding --source slot, attached as 'slot' label to exported metrics help description.  */
   char * packet_encoding_arg;	/**< @brief Custom network packet encoding.  */
   char * packet_encoding_orig;	/**< @brief Custom network packet encoding original value given at command line.  */
   const char *packet_encoding_help; /**< @brief Custom network packet encoding help description.  */
@@ -210,6 +220,8 @@ struct gengetopt_args_info
   unsigned int control_given ;	/**< @brief Whether control was given.  */
   unsigned int miface_given ;	/**< @brief Whether miface was given.  */
   unsigned int reuseaddr_given ;	/**< @brief Whether reuseaddr was given.  */
+  unsigned int track_given ;	/**< @brief Whether track was given.  */
+  unsigned int slot_name_given ;	/**< @brief Whether slot-name was given.  */
   unsigned int packet_encoding_given ;	/**< @brief Whether packet-encoding was given.  */
   unsigned int packet_len_given ;	/**< @brief Whether packet-len was given.  */
   unsigned int fec_encoding_given ;	/**< @brief Whether fec-encoding was given.  */

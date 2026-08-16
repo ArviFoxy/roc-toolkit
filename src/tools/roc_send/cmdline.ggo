@@ -31,6 +31,13 @@ section "Network options"
     option "reuseaddr" -
         "Enable SO_REUSEADDR when binding sockets" optional
 
+    option "track" -
+        "Input track(s) sent to the corresponding --source endpoint, e.g. '0', '2', or '0-1' (requires multitrack --io-encoding)"
+        typestr="TRACKS" string multiple optional
+    option "slot-name" -
+        "Name of the corresponding --source slot, attached as 'slot' label to exported metrics"
+        typestr="NAME" string multiple optional
+
 section "Encoding options"
 
     option "packet-encoding" - "Custom network packet encoding"
