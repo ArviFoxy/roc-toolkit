@@ -91,6 +91,56 @@ struct SendReport {
 //!  This struct accumulates data of SDES, RR and XR packets.
 //!  On receiver, it's queried from pipeline and used to generate RTCP packets.
 //!  On sender, it's filled from RTCP packets and passed to pipeline.
+//! Maximum stream snapshots carried per report.
+static const size_t MaxStreamSnapshots = 4;
+
+//! One stream telemetry snapshot.
+//!
+//! Captured by the receiver when its playback position crossed a grid
+//! point on the sender CTS timeline; grid_index identifies the grid
+//! point and doubles as the idempotency/sequence key. Carried in the
+//! XR Stream Snapshot block.
+struct StreamSnapshot {
+    //! Grid point index: floor(sender CTS / grid period).
+    uint32_t grid_index;
+
+    //! RTP stream timestamp of the read that crossed the grid point.
+    packet::stream_timestamp_t position;
+
+    //! Queue latency at the crossing; negative if unavailable.
+    core::nanoseconds_t niq_instant;
+
+    //! Queue latency averaged over the grid interval; negative if unavailable.
+    core::nanoseconds_t niq_mean;
+
+    //! End-to-end latency at the crossing; negative if unavailable.
+    core::nanoseconds_t e2e_latency;
+
+    //! Whether warp_ppb carries a value.
+    bool has_warp;
+
+    //! Warp: (frequency coefficient - 1) in parts per billion.
+    int32_t warp_ppb;
+
+    //! Target latency at the crossing; negative if unavailable.
+    core::nanoseconds_t target_latency;
+
+    //! Receiver local clock at the crossing (Unix ns); zero if unavailable.
+    core::nanoseconds_t recv_local_time;
+
+    StreamSnapshot()
+        : grid_index(0)
+        , position(0)
+        , niq_instant(-1)
+        , niq_mean(-1)
+        , e2e_latency(-1)
+        , has_warp(false)
+        , warp_ppb(0)
+        , target_latency(-1)
+        , recv_local_time(0) {
+    }
+};
+
 struct RecvReport {
     //! CNAME of receiver.
     //! Should not change.
@@ -170,6 +220,15 @@ struct RecvReport {
     //! it on receiver.
     core::nanoseconds_t rtt;
 
+    //! Grid period of the stream snapshots; zero when snapshots disabled.
+    core::nanoseconds_t snapshot_grid_period;
+
+    //! Number of valid entries in snapshots.
+    size_t n_snapshots;
+
+    //! Stream telemetry snapshots, newest last.
+    StreamSnapshot snapshots[MaxStreamSnapshots];
+
     RecvReport()
         : receiver_cname(NULL)
         , receiver_source_id(0)
@@ -185,7 +244,9 @@ struct RecvReport {
         , niq_stalling(0)
         , e2e_latency(0)
         , clock_offset(0)
-        , rtt(0) {
+        , rtt(0)
+        , snapshot_grid_period(0)
+        , n_snapshots(0) {
     }
 };
 

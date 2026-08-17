@@ -143,6 +143,10 @@ public:
                                      const header::XrDelayMetricsBlock& blk);
 
     //! Process XR Queue Metrics block (extended receiver report).
+    //! Process XR Stream Snapshot block.
+    void process_stream_snapshot_block(const header::XrPacket& xr,
+                                       const header::XrStreamSnapshotBlock& blk);
+
     void process_queue_metrics_block(const header::XrPacket& xr,
                                      const header::XrQueueMetricsBlock& blk);
 
@@ -226,6 +230,18 @@ public:
     void generate_queue_metrics_block(size_t addr_index,
                                       size_t stream_index,
                                       header::XrQueueMetricsBlock& blk);
+
+    //! Generate XR Stream Snapshot block (extended receiver report).
+    //! Fills the fixed part into @p blk and up to MaxStreamSnapshots
+    //! entries into @p entries; returns the entry count via @p n_entries
+    //! (zero when the stream has no snapshots to report).
+    //! @p addr_index should be in range [0; num_dest_addresses()-1].
+    //! @p stream_index should be in range [0; num_receiving_streams()-1].
+    void generate_stream_snapshot_block(size_t addr_index,
+                                        size_t stream_index,
+                                        header::XrStreamSnapshotBlock& blk,
+                                        header::XrStreamSnapshotEntry* entries,
+                                        size_t& n_entries);
 
     //! Check if BYE message should be included.
     bool need_goodbye() const;

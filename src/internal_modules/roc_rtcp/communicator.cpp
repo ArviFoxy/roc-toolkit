@@ -318,6 +318,12 @@ void Communicator::process_extended_report_(const XrTraverser& xr) {
             reporter_.process_queue_metrics_block(xr.packet(), iter.get_queue_metrics());
         } break;
 
+        case XrTraverser::Iterator::STREAM_SNAPSHOT_BLOCK: {
+            // Stream Snapshot is extended receiver report.
+            reporter_.process_stream_snapshot_block(xr.packet(),
+                                                    iter.get_stream_snapshot());
+        } break;
+
         default:
             break;
         }
@@ -796,6 +802,17 @@ void Communicator::generate_extended_report_(Builder& bld) {
                                                        qm_blk);
 
                 bld.add_xr_queue_metrics(qm_blk);
+
+                header::XrStreamSnapshotBlock ss_blk;
+                header::XrStreamSnapshotEntry
+                    ss_entries[header::XrStreamSnapshotBlock::MaxEntries];
+                size_t ss_n_entries = 0;
+                reporter_.generate_stream_snapshot_block(
+                    dest_addr_index_, stream_index, ss_blk, ss_entries, ss_n_entries);
+
+                if (ss_n_entries > 0) {
+                    bld.add_xr_stream_snapshot(ss_blk, ss_entries, ss_n_entries);
+                }
             }
         }
 
