@@ -407,6 +407,44 @@ TEST(latency_tuner_init, intact_profile_no_scaling) {
     DOUBLES_EQUAL(0.0, (double)s, 0.0);
 }
 
+TEST(latency_tuner_init, observation_accessors) {
+    // last_freq_coeff() / last_target_latency() are non-consuming
+    // observation accessors: reading them must not affect what the next
+    // fetch_scaling() returns.
+    LatencyConfig config =
+        make_niq_config(LatencyTunerProfile_Responsive, 40 * Ms, 40 * Ms);
+    TestTuner tuner(config);
+    CHECK(tuner.is_valid());
+
+    // Before any scaling was computed.
+    DOUBLES_EQUAL(0.0, (double)tuner.tuner->last_freq_coeff(), 0.0);
+    LONGLONGS_EQUAL(40 * Ms, tuner.tuner->last_target_latency());
+
+    // Feed steady off-target latency until a scaling is computed, but
+    // observe BEFORE fetching.
+    float observed = 0;
+    float fetched = 0;
+    for (size_t i = 0; i < 1000; i++) {
+        step_niq(tuner, 50 * Ms);
+        observed = tuner.tuner->last_freq_coeff();
+        fetched = tuner.fetch_scaling();
+        if (fetched != 0) {
+            break;
+        }
+    }
+
+    // A scaling arrived, and the observation accessor saw the same value
+    // without consuming it.
+    CHECK(fetched != 0);
+    DOUBLES_EQUAL((double)fetched, (double)observed, 1e-9);
+
+    // Repeated observation returns the same value.
+    DOUBLES_EQUAL((double)observed, (double)tuner.tuner->last_freq_coeff(), 0.0);
+
+    // Target latency stays reported in ns.
+    LONGLONGS_EQUAL(40 * Ms, tuner.tuner->last_target_latency());
+}
+
 TEST(latency_tuner_init, valid_configs) {
     // Every backend × profile combination should initialize successfully.
     const LatencyTunerBackend backends[] = {

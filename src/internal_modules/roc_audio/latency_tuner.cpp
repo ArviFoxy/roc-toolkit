@@ -344,6 +344,14 @@ float LatencyTuner::fetch_scaling() {
     return freq_coeff_;
 }
 
+float LatencyTuner::last_freq_coeff() const {
+    return freq_coeff_;
+}
+
+core::nanoseconds_t LatencyTuner::last_target_latency() const {
+    return sample_spec_.stream_timestamp_delta_2_ns(cur_target_latency_);
+}
+
 bool LatencyTuner::measure_actual_latency_(packet::stream_timestamp_diff_t& result) {
     switch (backend_) {
     case LatencyTunerBackend_Niq:

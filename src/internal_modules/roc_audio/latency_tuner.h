@@ -93,6 +93,16 @@ public:
     //!  Returned value is close to 1.0.
     float fetch_scaling();
 
+    //! Get last computed frequency coefficient.
+    //! Non-consuming observation accessor: unlike fetch_scaling(), does
+    //! not affect what the next fetch_scaling() call returns.
+    //! Returns zero until the first scaling was computed.
+    float last_freq_coeff() const;
+
+    //! Get current target latency in nanoseconds.
+    //! Non-consuming observation accessor.
+    core::nanoseconds_t last_target_latency() const;
+
 private:
     bool measure_actual_latency_(packet::stream_timestamp_diff_t& result);
 
