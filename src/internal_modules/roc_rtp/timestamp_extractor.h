@@ -43,6 +43,12 @@ public:
     //!  has_mapping() should return true, otherwise it will panic.
     packet::stream_timestamp_t get_mapping(core::nanoseconds_t capture_ts);
 
+    //! Get capture timestamp mapped to given rtp timestamp.
+    //! Inverse of get_mapping() (up to sample-rate rounding).
+    //! @pre
+    //!  has_mapping() should return true, otherwise it will panic.
+    core::nanoseconds_t rtp_2_capture(packet::stream_timestamp_t rtp_ts);
+
 private:
     packet::IWriter& writer_;
 

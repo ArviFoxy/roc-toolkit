@@ -86,5 +86,16 @@ TimestampExtractor::get_mapping(core::nanoseconds_t capture_ts) {
     return rtp_ts;
 }
 
+core::nanoseconds_t TimestampExtractor::rtp_2_capture(packet::stream_timestamp_t rtp_ts) {
+    if (!has_ts_) {
+        roc_panic(
+            "timestamp extractor: attempt to get mapping before it becomes available");
+    }
+
+    return capt_ts_
+        + sample_spec_.stream_timestamp_delta_2_ns(
+              packet::stream_timestamp_diff(rtp_ts, rtp_ts_));
+}
+
 } // namespace rtp
 } // namespace roc

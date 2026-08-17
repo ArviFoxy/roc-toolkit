@@ -79,6 +79,18 @@ TEST(timestamp_extractor, single_write) {
     // get mapping for time in past
     CHECK_TRUE(extractor.has_mapping());
     UNSIGNED_LONGS_EQUAL(rts - 1000, extractor.get_mapping(cts - core::Second));
+
+    // inverse mapping: exact anchor, future, past
+    LONGLONGS_EQUAL(cts, extractor.rtp_2_capture(rts));
+    LONGLONGS_EQUAL(cts + core::Second, extractor.rtp_2_capture(rts + 1000));
+    LONGLONGS_EQUAL(cts - core::Second, extractor.rtp_2_capture(rts - 1000));
+
+    // round-trip consistency: forward then inverse returns the origin
+    for (core::nanoseconds_t delta = -3 * core::Second; delta <= 3 * core::Second;
+         delta += core::Second / 2) {
+        const packet::stream_timestamp_t mapped = extractor.get_mapping(cts + delta);
+        LONGLONGS_EQUAL(cts + delta, extractor.rtp_2_capture(mapped));
+    }
 }
 
 TEST(timestamp_extractor, forward_error) {
