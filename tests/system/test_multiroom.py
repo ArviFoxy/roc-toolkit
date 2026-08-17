@@ -35,9 +35,12 @@ def test_track_per_leg(pw, roc_send, roc_recv, tmp_path, num_legs):
     recvs = [
         RocProc(pw, roc_recv, [
             "-s", f"rtp://127.0.0.1:{leg_port(leg)}",
+            "-c", f"rtcp://127.0.0.1:{leg_port(leg) + 2}",
             "--packet-encoding", PKT_ENCODING,
             "--io-encoding", "pcm@f32/48000/mono",
             "--output", f"pulse://leg{leg}",
+            # Fast grid so skew rows accumulate within the test.
+            "--report-grid", "100ms",
             "--prometheus-metrics-port", str(BASE_METRICS + 1 + leg),
         ], f"roc-recv-{leg}", metrics_port=BASE_METRICS + 1 + leg)
         for leg in range(NUM_LEGS)
@@ -54,6 +57,7 @@ def test_track_per_leg(pw, roc_send, roc_recv, tmp_path, num_legs):
     for leg in range(NUM_LEGS):
         send_args += [
             "-s", f"rtp://127.0.0.1:{leg_port(leg)}",
+            "-c", f"rtcp://127.0.0.1:{leg_port(leg) + 2}",
             "--track", str(leg),
             "--slot-name", f"leg_{leg}",
         ]
@@ -91,7 +95,54 @@ def test_track_per_leg(pw, roc_send, roc_recv, tmp_path, num_legs):
         assert all(c is not None and c > 0 for c in counts), counts
         assert max(counts) - min(counts) <= 0.05 * max(counts), counts
 
-        assert send.alive() and all(r.alive() for r in recvs)
+        # M2 report plane: receiver snapshots reach the session skew
+        # estimator, full rows finalize, and localhost legs are tightly
+        # aligned (clock-free offsets well under 20 ms).
+        for leg in range(NUM_LEGS):
+            send.wait_metric(f'roc_send_playout_offset_seconds{{slot="leg_{leg}"}}',
+                             timeout=15)
+        offsets = [
+            send.metric_value("roc_send_playout_offset_seconds",
+                              f'{{slot="leg_{leg}"}}')
+            for leg in range(NUM_LEGS)
+        ]
+        assert all(o is not None and abs(o) < 0.02 for o in offsets), offsets
+
+        full_rows = send.metric_value("roc_send_snapshot_rows_total",
+                                      '{completeness="full"}')
+        assert full_rows and full_rows > 0
+
+        spread = send.metric_value("roc_send_playout_spread_seconds")
+        assert spread is not None and spread < 0.02, spread
+
+        skew_01 = send.metric_value("roc_send_playout_skew_seconds",
+                                    '{slot_a="leg_0",slot_b="leg_1"}')
+        assert skew_01 is not None and abs(skew_01) < 0.02, skew_01
+
+        # Staleness attribution: kill one receiver; its snapshot clock
+        # freezes while the others keep advancing.
+        victim = NUM_LEGS - 1
+        ts_victim_before = send.metric_value(
+            "roc_send_snapshot_timestamp_seconds", f'{{slot="leg_{victim}"}}')
+        ts_other_before = send.metric_value(
+            "roc_send_snapshot_timestamp_seconds", '{slot="leg_0"}')
+        assert ts_victim_before and ts_other_before
+
+        recvs[victim].stop()
+        time.sleep(3.0)
+
+        ts_victim_after = send.metric_value(
+            "roc_send_snapshot_timestamp_seconds", f'{{slot="leg_{victim}"}}')
+        ts_other_after = send.metric_value(
+            "roc_send_snapshot_timestamp_seconds", '{slot="leg_0"}')
+        assert ts_victim_after == ts_victim_before, (ts_victim_before,
+                                                     ts_victim_after)
+        assert ts_other_after > ts_other_before, (ts_other_before,
+                                                  ts_other_after)
+
+        # The staleness check above deliberately stopped the last receiver.
+        assert send.alive()
+        assert all(r.alive() for r in recvs[:victim])
     finally:
         send.stop()
         for recv in recvs:
