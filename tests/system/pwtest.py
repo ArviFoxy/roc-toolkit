@@ -75,9 +75,16 @@ class PwInstance:
 
     # -- process management --
 
+    @staticmethod
+    def _no_core_dumps():
+        # Crashing test processes must not litter the tree with cores.
+        import resource
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
     def spawn(self, cmd, name):
         log = open(os.path.join(self.dir, "logs", name + ".log"), "wb")
-        proc = subprocess.Popen(cmd, env=self.env, stdout=log, stderr=log)
+        proc = subprocess.Popen(cmd, env=self.env, stdout=log, stderr=log,
+                                preexec_fn=self._no_core_dumps)
         self.procs.append((name, proc, log))
         self.logs[name] = log.name
         return proc

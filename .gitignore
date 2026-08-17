@@ -63,3 +63,6 @@ TODO.org
 /Makefile
 .justfile
 .unisonignore
+
+# Core dumps from crashed test processes
+core.*
