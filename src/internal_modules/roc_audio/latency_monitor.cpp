@@ -32,6 +32,7 @@ LatencyMonitor::LatencyMonitor(IFrameReader& frame_reader,
                                const SampleSpec& frame_sample_spec,
                                dbgio::CsvDumper* dumper)
     : tuner_(latency_config, fe_config, frame_sample_spec, dumper)
+    , snapshot_sampler_(packet_sample_spec, latency_config.snapshot_grid)
     , frame_reader_(frame_reader)
     , incoming_queue_(incoming_queue)
     , depacketizer_(depacketizer)
@@ -90,6 +91,12 @@ const LatencyMetrics& LatencyMonitor::metrics() const {
     return latency_metrics_;
 }
 
+StreamSnapshotSampler& LatencyMonitor::snapshot_sampler() {
+    roc_panic_if(init_status_ != status::StatusOK);
+
+    return snapshot_sampler_;
+}
+
 status::StatusCode LatencyMonitor::read(Frame& frame,
                                         packet::stream_timestamp_t duration,
                                         FrameReadMode mode) {
@@ -97,6 +104,15 @@ status::StatusCode LatencyMonitor::read(Frame& frame,
 
     compute_niq_latency_();
     query_metrics_();
+
+    if (snapshot_sampler_.is_enabled() && depacketizer_.is_started()) {
+        // e2e is zero until the first reclock: report unavailable then.
+        snapshot_sampler_.process_read(
+            depacketizer_.next_timestamp(), latency_metrics_.niq_latency,
+            latency_metrics_.e2e_latency != 0 ? latency_metrics_.e2e_latency : -1,
+            tuner_.last_freq_coeff(), tuner_.last_target_latency(),
+            core::timestamp(core::ClockUnix));
+    }
 
     if (!pre_read_()) {
         return status::StatusAbort;

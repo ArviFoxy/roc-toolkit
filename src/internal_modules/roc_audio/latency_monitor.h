@@ -18,6 +18,7 @@
 #include "roc_audio/latency_tuner.h"
 #include "roc_audio/resampler_reader.h"
 #include "roc_audio/sample_spec.h"
+#include "roc_audio/stream_snapshot_sampler.h"
 #include "roc_core/attributes.h"
 #include "roc_core/noncopyable.h"
 #include "roc_core/optional.h"
@@ -84,6 +85,11 @@ public:
     //! Get metrics.
     const LatencyMetrics& metrics() const;
 
+    //! Get stream snapshot sampler.
+    //! Pipeline pushes the RTCP SR mapping into it and drains snapshots
+    //! when generating reports.
+    StreamSnapshotSampler& snapshot_sampler();
+
     //! Read audio frame from a pipeline.
     //! @remarks
     //!  Forwards frame from underlying reader as-is.
@@ -108,6 +114,8 @@ private:
     bool update_scaling_();
 
     LatencyTuner tuner_;
+
+    StreamSnapshotSampler snapshot_sampler_;
 
     LatencyMetrics latency_metrics_;
     packet::LinkMetrics link_metrics_;

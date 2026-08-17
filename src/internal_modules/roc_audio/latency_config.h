@@ -185,6 +185,13 @@ struct LatencyConfig {
     //! Prometheus configuration for metrics bounds
     metrics::PrometheusConfig prometheus;
 
+    //! Stream snapshot grid period on the sender CTS timeline.
+    //! Receiver-only. When non-zero, the receiver samples telemetry
+    //! snapshots each time playback crosses a grid point and reports
+    //! them to the sender via RTCP (XR Stream Snapshot).
+    //! Zero disables snapshot sampling.
+    core::nanoseconds_t snapshot_grid;
+
     //! Initialize.
     LatencyConfig()
         : tuner_backend(LatencyTunerBackend_Auto)
@@ -203,7 +210,8 @@ struct LatencyConfig {
         , cooldown_dec_timeout(5 * core::Second)
         , cooldown_inc_timeout(15 * core::Second)
         , max_jitter_overhead(1.2f)
-        , mean_jitter_overhead(3.00f) {
+        , mean_jitter_overhead(3.00f)
+        , snapshot_grid(500 * core::Millisecond) {
     }
 
     //! Automatically fill missing settings.
