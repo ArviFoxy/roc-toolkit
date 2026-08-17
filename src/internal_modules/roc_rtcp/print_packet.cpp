@@ -212,9 +212,7 @@ void print_xr_stream_snapshot(core::Printer& p,
     p.writef("|-- block body:\n");
     p.writef("|--- version: %u\n", (unsigned)blk.version());
     p.writef("|--- ssrc: %lu\n", (unsigned long)blk.ssrc());
-    p.writef("|--- grid_period: %016llx (unix %lld)\n",
-             (unsigned long long)blk.grid_period(),
-             (long long)packet::ntp_2_nanoseconds(blk.grid_period()));
+    p.writef("|--- grid_period_ns: %lu\n", (unsigned long)blk.grid_period_ns());
     p.writef("|--- entry_words: %lu n_entries: %lu\n", (unsigned long)blk.entry_words(),
              (unsigned long)blk.n_entries());
 

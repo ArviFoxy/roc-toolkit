@@ -310,6 +310,8 @@ ReceiverSourceConfig make_receiver_config(audio::PcmSubformat frame_format,
     config.session_defaults.latency.tuner_backend = audio::LatencyTunerBackend_Niq;
     config.session_defaults.latency.tuner_profile = audio::LatencyTunerProfile_Intact;
     config.session_defaults.latency.target_latency = Latency * core::Second / SampleRate;
+    // Tiny snapshot grid so crossings fit in the short simulated stream.
+    config.session_defaults.latency.snapshot_grid = 10 * core::Millisecond;
     config.session_defaults.watchdog.no_playback_timeout =
         Timeout * core::Second / SampleRate;
 
@@ -642,6 +644,20 @@ void send_receive(int flags,
         CHECK(proxy.n_control() > 0);
     } else {
         CHECK(proxy.n_control() == 0);
+    }
+
+    if ((flags & FlagRTCP) != 0 && (flags & FlagCTS) != 0 && num_sessions == 1) {
+        // Receiver stream snapshots crossed the backchannel and reached
+        // the sender-side skew estimator (single slot: rows finalize
+        // late and count as partial; cross-slot stats need >= 2 slots).
+        SessionSkewEstimator::SlotStats slot_stats;
+        CHECK(sender.skew_estimator().slot_stats(0, slot_stats));
+        CHECK(slot_stats.last_update > 0);
+
+        SessionSkewEstimator::FleetStats fleet_stats;
+        sender.skew_estimator().fleet_stats(fleet_stats);
+        CHECK_EQUAL(0, fleet_stats.rejected);
+        CHECK(fleet_stats.partial_rows > 0);
     }
 }
 

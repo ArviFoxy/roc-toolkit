@@ -25,6 +25,8 @@ SenderSession::SenderSession(const SenderSinkConfig& sink_config,
     : arena_(arena)
     , sink_config_(sink_config)
     , slot_config_(slot_config)
+    , skew_estimator_(NULL)
+    , skew_slot_index_(0)
     , processor_map_(processor_map)
     , encoding_map_(encoding_map)
     , packet_factory_(packet_factory)
@@ -412,6 +414,12 @@ rtcp::SendReport SenderSession::query_send_stream(core::nanoseconds_t report_tim
     return report;
 }
 
+void SenderSession::set_skew_estimator(SessionSkewEstimator* estimator,
+                                       size_t slot_index) {
+    skew_estimator_ = estimator;
+    skew_slot_index_ = slot_index;
+}
+
 status::StatusCode
 SenderSession::notify_send_stream(packet::stream_source_t recv_source_id,
                                   const rtcp::RecvReport& recv_report) {
@@ -433,6 +441,45 @@ SenderSession::notify_send_stream(packet::stream_source_t recv_source_id,
 
         feedback_monitor_->process_feedback(recv_source_id, latency_metrics,
                                             link_metrics);
+    }
+
+    // Forward stream snapshots to the session skew estimator. Same
+    // unicast-only gate as feedback monitoring: with multicast there
+    // would be multiple receivers per slot and rows would collide.
+    if (skew_estimator_ && recv_report.n_snapshots > 0
+        && recv_report.snapshot_grid_period > 0 && feedback_monitor_
+        && feedback_monitor_->is_started() && timestamp_extractor_
+        && timestamp_extractor_->has_mapping()) {
+        const core::nanoseconds_t arrival_time = core::timestamp(core::ClockUnix);
+        const core::nanoseconds_t period = recv_report.snapshot_grid_period;
+
+        for (size_t n = 0; n < recv_report.n_snapshots; n++) {
+            const rtcp::StreamSnapshot& snap = recv_report.snapshots[n];
+
+            // Slot-local RTP position -> common sender CTS timeline.
+            const core::nanoseconds_t cts =
+                timestamp_extractor_->rtp_2_capture(snap.position);
+
+            // Reconstruct the full grid index near the CTS estimate; the
+            // 32-bit index on the wire supplies the exact low bits (and
+            // acts as a consistency check via the estimator's delta gate).
+            const int64_t k_est = (cts + period / 2) / period;
+            const int64_t k_full =
+                k_est + (int32_t)(snap.grid_index - (uint32_t)k_est);
+            const core::nanoseconds_t grid_cts = (core::nanoseconds_t)k_full * period;
+
+            SessionSkewEstimator::SlotSample sample;
+            sample.niq_instant = snap.niq_instant;
+            sample.niq_mean = snap.niq_mean;
+            sample.e2e_latency = snap.e2e_latency;
+            sample.has_warp = snap.has_warp;
+            sample.warp_ppb = snap.warp_ppb;
+            sample.target_latency = snap.target_latency;
+            sample.recv_local_time = snap.recv_local_time;
+
+            skew_estimator_->process_snapshot(skew_slot_index_, grid_cts, period,
+                                              sample, cts - grid_cts, arrival_time);
+        }
     }
 
     return status::StatusOK;

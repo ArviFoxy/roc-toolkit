@@ -43,6 +43,8 @@ SenderSlot::SenderSlot(const SenderSinkConfig& sink_config,
                dumper)
     , is_broken_(false)
     , fail_status_(status::NoStatus)
+    , skew_estimator_(NULL)
+    , skew_slot_index_(0)
 #ifdef ROC_TARGET_PROMETHEUS
     , slot_up_gauge_(NULL)
 #endif
@@ -70,6 +72,10 @@ SenderSlot::SenderSlot(const SenderSinkConfig& sink_config,
 }
 
 SenderSlot::~SenderSlot() {
+    if (skew_estimator_) {
+        skew_estimator_->unregister_slot(skew_slot_index_);
+    }
+
     if (session_.frame_writer() && fanout_.has_output(*session_.frame_writer())) {
         fanout_.remove_output(*session_.frame_writer());
         state_tracker_.unregister_session();
@@ -78,6 +84,22 @@ SenderSlot::~SenderSlot() {
 
 status::StatusCode SenderSlot::init_status() const {
     return init_status_;
+}
+
+void SenderSlot::attach_skew_estimator(SessionSkewEstimator& estimator,
+                                       const char* label) {
+    roc_panic_if_msg(skew_estimator_, "sender slot: skew estimator already attached");
+
+    const ssize_t slot_index = estimator.register_slot(label);
+    if (slot_index < 0) {
+        // Estimator table full; slot simply stays unattached.
+        return;
+    }
+
+    skew_estimator_ = &estimator;
+    skew_slot_index_ = (size_t)slot_index;
+
+    session_.set_skew_estimator(&estimator, (size_t)slot_index);
 }
 
 SenderEndpoint* SenderSlot::add_endpoint(address::Interface iface,

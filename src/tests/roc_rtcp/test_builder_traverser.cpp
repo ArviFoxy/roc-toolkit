@@ -387,7 +387,7 @@ TEST(builder_traverser, rr_sdes_xr) {
     queue_metrics.set_niq_stalling(0xA200000);
     header::XrStreamSnapshotBlock stream_snapshot;
     stream_snapshot.set_ssrc(1111);
-    stream_snapshot.set_grid_period(0xB100000);
+    stream_snapshot.set_grid_period_ns(500000000);
     header::XrStreamSnapshotEntry snapshot_entries[2];
     snapshot_entries[0].set_grid_index(4001);
     snapshot_entries[0].set_position(0xB2000001);
@@ -536,7 +536,7 @@ TEST(builder_traverser, rr_sdes_xr) {
     CHECK_EQUAL(header::XrStreamSnapshotBlock::Version,
                 xr_it.get_stream_snapshot().version());
     CHECK_EQUAL(1111, xr_it.get_stream_snapshot().ssrc());
-    CHECK_EQUAL(0xB100000, xr_it.get_stream_snapshot().grid_period());
+    CHECK_EQUAL(500000000, xr_it.get_stream_snapshot().grid_period_ns());
     CHECK_EQUAL(2, xr_it.get_stream_snapshot().n_entries());
     CHECK_EQUAL(4001, xr_it.get_stream_snapshot().entry(0).grid_index());
     CHECK_EQUAL(0xB2000001, xr_it.get_stream_snapshot().entry(0).position());
@@ -860,18 +860,18 @@ TEST(builder_traverser, xr_stream_snapshot_batches) {
 
     header::XrStreamSnapshotBlock snap_0;
     snap_0.set_ssrc(701);
-    snap_0.set_grid_period(0xC100000);
+    snap_0.set_grid_period_ns(10000000);
 
     header::XrStreamSnapshotBlock snap_1;
     snap_1.set_ssrc(702);
-    snap_1.set_grid_period(0xC200000);
+    snap_1.set_grid_period_ns(20000000);
     header::XrStreamSnapshotEntry entries_1[1];
     entries_1[0].set_grid_index(9001);
     entries_1[0].set_niq_instant(0xC300000);
 
     header::XrStreamSnapshotBlock snap_4;
     snap_4.set_ssrc(703);
-    snap_4.set_grid_period(0xC400000);
+    snap_4.set_grid_period_ns(40000000);
     header::XrStreamSnapshotEntry entries_4[header::XrStreamSnapshotBlock::MaxEntries];
     for (size_t n = 0; n < header::XrStreamSnapshotBlock::MaxEntries; n++) {
         entries_4[n].set_grid_index(9100 + (uint32_t)n);
@@ -990,7 +990,7 @@ TEST(builder_traverser, xr_stream_snapshot_forward_compat) {
 
     header::XrStreamSnapshotBlock grown;
     grown.set_ssrc(801);
-    grown.set_grid_period(0xD100000);
+    grown.set_grid_period_ns(50000000);
     grown.set_entry_words(grown_entry_words);
     grown.set_n_entries(1);
     grown.header().set_len_bytes(grown_size);

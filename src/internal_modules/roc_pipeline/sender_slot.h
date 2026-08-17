@@ -27,6 +27,7 @@
 #include "roc_pipeline/config.h"
 #include "roc_pipeline/metrics.h"
 #include "roc_pipeline/sender_endpoint.h"
+#include "roc_pipeline/session_skew_estimator.h"
 #include "roc_pipeline/sender_session.h"
 #include "roc_pipeline/state_tracker.h"
 
@@ -61,6 +62,11 @@ public:
 
     //! Check if the pipeline was successfully constructed.
     status::StatusCode init_status() const;
+
+    //! Attach the session-level skew estimator.
+    //! Registers this slot under @p label and forwards receiver stream
+    //! snapshots into the estimator; unregisters on destruction.
+    void attach_skew_estimator(SessionSkewEstimator& estimator, const char* label);
 
     //! Add endpoint.
     SenderEndpoint* add_endpoint(address::Interface iface,
@@ -111,6 +117,9 @@ private:
 
     StateTracker& state_tracker_;
     SenderSession session_;
+
+    SessionSkewEstimator* skew_estimator_;
+    size_t skew_slot_index_;
 
     bool is_broken_;
     status::StatusCode fail_status_;

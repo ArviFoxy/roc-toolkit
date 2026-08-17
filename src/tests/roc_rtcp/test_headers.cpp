@@ -427,8 +427,8 @@ TEST(headers, stream_snapshot) {
         blk.set_ssrc(0xAABBCCDD);
         CHECK_EQUAL(0xAABBCCDD, blk.ssrc());
 
-        blk.set_grid_period(0x0000AABBCCDD0000);
-        CHECK_EQUAL(0x0000AABBCCDD0000, blk.grid_period());
+        blk.set_grid_period_ns(500000000);
+        CHECK_EQUAL(500000000, blk.grid_period_ns());
 
         blk.set_version(3);
         CHECK_EQUAL(3, blk.version());

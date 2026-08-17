@@ -583,7 +583,7 @@ void Reporter::process_stream_snapshot_block(const header::XrPacket& xr,
 
     RecvReport& report = stream->remote_recv_report;
 
-    report.snapshot_grid_period = packet::ntp_2_nanoseconds(blk.grid_period());
+    report.snapshot_grid_period = (core::nanoseconds_t)blk.grid_period_ns();
 
     size_t n_out = 0;
     for (size_t n = 0; n < blk.n_entries() && n_out < MaxStreamSnapshots; n++) {
@@ -945,7 +945,10 @@ void Reporter::generate_stream_snapshot_block(size_t addr_index,
 
     blk.reset();
     blk.set_ssrc(stream->source_id);
-    blk.set_grid_period(packet::nanoseconds_2_ntp(report.snapshot_grid_period));
+    if (report.snapshot_grid_period > 0
+        && report.snapshot_grid_period <= (core::nanoseconds_t)UINT32_MAX) {
+        blk.set_grid_period_ns((uint32_t)report.snapshot_grid_period);
+    }
 
     n_entries = 0;
     for (size_t n = 0; n < report.n_snapshots && n < MaxStreamSnapshots; n++) {

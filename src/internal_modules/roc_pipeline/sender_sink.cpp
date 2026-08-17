@@ -30,6 +30,7 @@ SenderSink::SenderSink(const SenderSinkConfig& sink_config,
     , packet_factory_(packet_pool, packet_buffer_pool)
     , frame_factory_(frame_pool, frame_buffer_pool)
     , arena_(arena)
+    , skew_estimator_(SessionSkewEstimatorConfig())
     , frame_writer_(NULL)
     , init_status_(status::NoStatus) {
     if (!sink_config_.deduce_defaults(processor_map)) {
@@ -177,6 +178,8 @@ SenderSlot* SenderSink::create_slot(const SenderSlotConfig& slot_config) {
         return NULL;
     }
 
+    slot->attach_skew_estimator(skew_estimator_, prepared_config.metrics_label);
+
     slots_.push_back(*slot);
 
     return slot.get();
@@ -194,6 +197,12 @@ size_t SenderSink::num_sessions() const {
     roc_panic_if(init_status_ != status::StatusOK);
 
     return state_tracker_.num_sessions();
+}
+
+SessionSkewEstimator& SenderSink::skew_estimator() {
+    roc_panic_if(init_status_ != status::StatusOK);
+
+    return skew_estimator_;
 }
 
 status::StatusCode SenderSink::refresh(core::nanoseconds_t current_time,

@@ -1949,7 +1949,7 @@ public:
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //! |                        SSRC of Source                         |
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//! |                      Grid Period (NTP32)                      |
+//! |                    Grid Period (nanoseconds)                  |
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //! |  Entry Words  |   N Entries   |           reserved            |
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -1966,7 +1966,7 @@ private:
     XrBlockHeader header_;
 
     uint32_t ssrc_;
-    NtpTimestamp32 grid_period_;
+    uint32_t grid_period_ns_;
     uint8_t entry_words_;
     uint8_t n_entries_;
     uint16_t reserved_;
@@ -1989,7 +1989,7 @@ public:
     void reset() {
         header_.reset(XR_STREAM_SNAPSHOT);
         ssrc_ = 0;
-        grid_period_.set_value(0);
+        grid_period_ns_ = 0;
         entry_words_ = (uint8_t)EntryWords;
         n_entries_ = 0;
         reserved_ = 0;
@@ -2036,14 +2036,17 @@ public:
         ssrc_ = core::hton32u(ssrc);
     }
 
-    //! Get grid period.
-    packet::ntp_timestamp_t grid_period() const {
-        return grid_period_.value();
+    //! Get grid period in nanoseconds.
+    //! Exact on purpose: the sender reconstructs grid positions as
+    //! index * period with indices ~1e8, so NTP32 quantization of the
+    //! period would amplify into an unbounded absolute error.
+    uint32_t grid_period_ns() const {
+        return core::ntoh32u(grid_period_ns_);
     }
 
-    //! Set grid period.
-    void set_grid_period(const packet::ntp_timestamp_t t) {
-        grid_period_.set_value(ntp_clamp_32(t, MetricUnavail_32 - 1));
+    //! Set grid period in nanoseconds (maximum ~4.29 s).
+    void set_grid_period_ns(const uint32_t ns) {
+        grid_period_ns_ = core::hton32u(ns);
     }
 
     //! Get on-wire entry size in 32-bit words.

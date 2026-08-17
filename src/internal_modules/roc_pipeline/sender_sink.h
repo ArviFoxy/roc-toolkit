@@ -26,6 +26,7 @@
 #include "roc_pipeline/config.h"
 #include "roc_pipeline/sender_endpoint.h"
 #include "roc_pipeline/sender_slot.h"
+#include "roc_pipeline/session_skew_estimator.h"
 #include "roc_pipeline/state_tracker.h"
 #include "roc_rtp/encoding_map.h"
 #include "roc_sndio/isink.h"
@@ -66,6 +67,10 @@ public:
 
     //! Get number of active sessions.
     size_t num_sessions() const;
+
+    //! Get session skew estimator.
+    //! Aggregates receiver stream snapshots across all slots.
+    SessionSkewEstimator& skew_estimator();
 
     //! Pull packets and refresh pipeline according to current time.
     //! @remarks
@@ -140,6 +145,10 @@ private:
     core::Optional<audio::Fanout> fanout_;
     core::Optional<audio::ProfilingWriter> profiler_;
     core::Optional<audio::PcmMapperWriter> pcm_mapper_;
+
+    // Declared before slots_: slots unregister themselves from the
+    // estimator on destruction.
+    SessionSkewEstimator skew_estimator_;
 
     core::List<SenderSlot> slots_;
 

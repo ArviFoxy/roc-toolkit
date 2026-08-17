@@ -443,8 +443,7 @@ void expect_recv_report(const RecvReport& report,
         expect_timestamp("e2e_latency", seed * 7000, report.e2e_latency,
                          TimestampEpsilon);
         CHECK(report.rtt >= 0);
-        expect_timestamp("snapshot_grid_period", 500 * core::Millisecond,
-                         report.snapshot_grid_period, TimestampEpsilon);
+        LONGLONGS_EQUAL(500 * core::Millisecond, report.snapshot_grid_period);
         CHECK_EQUAL(2, report.n_snapshots);
         for (size_t n = 0; n < report.n_snapshots; n++) {
             const StreamSnapshot& snap = report.snapshots[n];

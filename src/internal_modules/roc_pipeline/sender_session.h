@@ -33,6 +33,7 @@
 #include "roc_packet/router.h"
 #include "roc_pipeline/config.h"
 #include "roc_pipeline/metrics.h"
+#include "roc_pipeline/session_skew_estimator.h"
 #include "roc_pipeline/sender_endpoint.h"
 #include "roc_rtcp/communicator.h"
 #include "roc_rtcp/composer.h"
@@ -67,6 +68,11 @@ public:
 
     //! Check if the pipeline was successfully constructed.
     status::StatusCode init_status() const;
+
+    //! Attach the session-level skew estimator.
+    //! The session forwards receiver stream snapshots into it under
+    //! @p slot_index. Optional; unicast sessions only.
+    void set_skew_estimator(SessionSkewEstimator* estimator, size_t slot_index);
 
     //! Create transport sub-pipeline.
     ROC_NODISCARD status::StatusCode
@@ -167,6 +173,9 @@ private:
     core::SharedPtr<audio::IResampler> resampler_;
 
     core::Optional<audio::FeedbackMonitor> feedback_monitor_;
+
+    SessionSkewEstimator* skew_estimator_;
+    size_t skew_slot_index_;
 
     core::Optional<rtcp::Communicator> rtcp_communicator_;
     address::SocketAddr rtcp_outbound_addr_;
