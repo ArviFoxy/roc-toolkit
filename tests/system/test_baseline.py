@@ -4,7 +4,7 @@ localhost UDP, with real processes and real clocks."""
 
 import os
 
-from pwtest import RocProc, assert_single_tone, write_tone_wav
+from pwtest import RocProc, assert_single_tone, write_tone_raw
 
 TONE_HZ = 440.0
 OTHER_HZ = [1000.0, 2200.0]
@@ -33,8 +33,8 @@ def test_mono_loopback(pw, roc_send, roc_recv, tmp_path):
     ], "roc-send", metrics_port=31901)
 
     try:
-        wav = write_tone_wav(str(tmp_path / "tone.wav"), [TONE_HZ])
-        pw.play("src0", wav)
+        wav = write_tone_raw(str(tmp_path / "tone.raw"), [TONE_HZ])
+        pw.play("src0", wav, channels=1)
 
         send.wait_metric("roc_send_packets_encoded_total")
         recv.wait_metric("roc_recv_packets_decoded_total")

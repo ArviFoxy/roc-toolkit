@@ -192,6 +192,8 @@ private:
     core::nanoseconds_t timer_deadline_ns_;
 
     pa_sample_spec stream_spec_;
+    pa_channel_map stream_map_;
+    bool have_stream_map_;
     pa_buffer_attr buff_attrs_;
 
     core::RateLimiter rate_limiter_;

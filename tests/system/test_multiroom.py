@@ -6,10 +6,11 @@ and the per-slot metrics."""
 
 import time
 
-from pwtest import RocProc, assert_single_tone, write_tone_wav
+import pytest
 
-TRACK_HZ = [440.0, 1000.0, 2200.0]
-NUM_LEGS = len(TRACK_HZ)
+from pwtest import RocProc, assert_single_tone, write_tone_raw
+
+ALL_TRACK_HZ = [440.0, 700.0, 1000.0, 1400.0, 2200.0, 3100.0, 4200.0]
 
 PKT_ENCODING = "101:pcm@s16/48000/mono"
 
@@ -21,7 +22,12 @@ def leg_port(leg):
     return BASE_PORT + leg * 10
 
 
-def test_track_per_leg(pw, roc_send, roc_recv, tmp_path):
+# 7 legs is the production shape (and a channel count for which libpulse
+# has no default positional map at all - the AUX map path must work).
+@pytest.mark.parametrize("num_legs", [3, 7])
+def test_track_per_leg(pw, roc_send, roc_recv, tmp_path, num_legs):
+    TRACK_HZ = ALL_TRACK_HZ[:num_legs]
+    NUM_LEGS = num_legs
     pw.load_null_sink("mroom_src", NUM_LEGS)
     for leg in range(NUM_LEGS):
         pw.load_null_sink(f"leg{leg}", 1)
@@ -41,6 +47,7 @@ def test_track_per_leg(pw, roc_send, roc_recv, tmp_path):
         "--input", "pulse://mroom_src.monitor",
         "--io-encoding", f"pcm@f32/48000/0-{NUM_LEGS - 1}",
         "--io-frame-len", "4ms",
+        "--max-frame-size", "65536",
         "--packet-encoding", PKT_ENCODING,
         "--prometheus-metrics-port", str(BASE_METRICS),
     ]
@@ -54,7 +61,7 @@ def test_track_per_leg(pw, roc_send, roc_recv, tmp_path):
     send = RocProc(pw, roc_send, send_args, "roc-send", metrics_port=BASE_METRICS)
 
     try:
-        wav = write_tone_wav(str(tmp_path / "tones.wav"), TRACK_HZ)
+        wav = write_tone_raw(str(tmp_path / "tones.raw"), TRACK_HZ)
         pw.play("mroom_src", wav, channels=NUM_LEGS)
 
         # All slots alive and producing labeled series.
@@ -73,14 +80,16 @@ def test_track_per_leg(pw, roc_send, roc_recv, tmp_path):
             others = [f for f in TRACK_HZ if f != TRACK_HZ[leg]]
             assert_single_tone(capture, TRACK_HZ[leg], others)
 
-        # One clock for the session: per-slot packet counters stay equal.
+        # One clock for the session: per-slot packet counters advance in
+        # lockstep. Counters keep incrementing while the registry collect
+        # walks the families, so allow a few percent of scrape skew.
         counts = [
             send.metric_value("roc_send_packets_encoded_total",
                               f'{{slot="leg_{leg}"}}')
             for leg in range(NUM_LEGS)
         ]
         assert all(c is not None and c > 0 for c in counts), counts
-        assert max(counts) - min(counts) <= 2, counts
+        assert max(counts) - min(counts) <= 0.05 * max(counts), counts
 
         assert send.alive() and all(r.alive() for r in recvs)
     finally:

@@ -135,22 +135,30 @@ class PwInstance:
 
     # -- graph objects --
 
-    # Positional channel maps matching what libpulse negotiates by default
-    # for N-channel streams (this is what roc's pulse:// endpoints use).
-    # Sink, player and roc must agree on positions, or pipewire's channelmix
-    # remixes on each hop: tracks smear together and LFE-mapped channels
-    # vanish entirely.
-    PULSE_DEFAULT_MAPS = {
-        1: ("mono", "MONO"),
-        2: ("front-left,front-right", "FL,FR"),
-        3: ("front-left,front-right,front-center", "FL,FR,FC"),
-    }
+    # Channel maps agreeing with what roc's pulse:// endpoints negotiate:
+    # AUX for multitrack streams (positionless tracks; exists for any
+    # count), MONO for mono. Sink, player and roc must agree on positions,
+    # or pipewire's channelmix remixes on each hop: tracks smear together
+    # and LFE-mapped channels vanish entirely.
+    # The two tools spell channel names differently: pactl wants pulse
+    # names (lowercase), pw-cat wants pipewire names (uppercase).
+    @staticmethod
+    def chmap_pulse(channels):
+        if channels == 1:
+            return "mono"
+        return ",".join(f"aux{i}" for i in range(channels))
+
+    @staticmethod
+    def chmap_pw(channels):
+        if channels == 1:
+            return "MONO"
+        return ",".join(f"AUX{i}" for i in range(channels))
 
     def load_null_sink(self, name, channels):
-        chmap = self.PULSE_DEFAULT_MAPS[channels][0]
         self.run([
             "pactl", "load-module", "module-null-sink",
-            f"sink_name={name}", f"channels={channels}", f"channel_map={chmap}",
+            f"sink_name={name}", f"channels={channels}",
+            f"channel_map={self.chmap_pulse(channels)}",
         ])
         wait_for(lambda: name in self.node_names(), timeout=5,
                  what=f"null sink {name}")
@@ -171,12 +179,18 @@ class PwInstance:
                 return props["object.serial"]
         raise AssertionError(f"node {name!r} not found")
 
-    def play(self, sink, wav_path, channels=1):
-        """Starts playback into a sink; runs until stopped or file ends."""
+    def play(self, sink, raw_path, channels=1, rate=48000):
+        """Starts playback of raw f32 samples into a sink.
+
+        Raw on purpose: a wav file carries positional channel meanings that
+        pw-play maps onto the stream positions, remixing multichannel
+        signals; raw samples are copied 1:1 into the declared channels.
+        """
         target = str(self.node_serial(sink))
-        chmap = self.PULSE_DEFAULT_MAPS[channels][1]
-        return self.spawn(["pw-play", "-P", f"target.object={target}",
-                           "--channel-map", chmap, wav_path],
+        return self.spawn(["pw-play", "--raw", "--format=f32",
+                           "--rate", str(rate), "--channels", str(channels),
+                           "--channel-map", self.chmap_pw(channels),
+                           "-P", f"target.object={target}", raw_path],
                           f"pw-play-{sink}")
 
     def capture(self, sinks, seconds):
@@ -243,6 +257,16 @@ class RocProc:
 
 
 # -- signal generation and analysis --
+
+def write_tone_raw(path, freqs, rate=48000, seconds=30, amplitude=0.5):
+    """Raw interleaved f32 where channel i carries a pure tone at freqs[i]."""
+    t = np.arange(int(rate * seconds)) / rate
+    chans = [amplitude * np.sin(2 * np.pi * f * t) for f in freqs]
+    data = np.stack(chans, axis=1).astype("<f4")
+    with open(path, "wb") as f:
+        f.write(data.tobytes())
+    return path
+
 
 def write_tone_wav(path, freqs, rate=48000, seconds=30, amplitude=0.5):
     """Multichannel wav where channel i carries a pure tone at freqs[i]."""

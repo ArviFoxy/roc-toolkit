@@ -41,8 +41,13 @@ dir (`/tmp/pytest-of-<user>/...`).
 - Streams are routed with `target.object` (object serial): WirePlumber
   ignores pw-cat's legacy `--target` node-id property and would silently
   route to the default sink.
-- Sink, player, and roc streams must agree on channel positions (the
-  fixed point is libpulse's default map for N channels); mismatched maps
-  are positionally remixed by pipewire, smearing tracks together.
-- Harness signal I/O uses native `pw-play`/`pw-record`; the pulse layer
-  is exercised by roc itself, which is the code under test.
+- Multitrack roc streams use AUX channel maps (libpulse has no default
+  positional map for every channel count - seven has none at all - and
+  positional maps invite remixing); sinks feeding a multitrack capture
+  must be aux-mapped too, or pipewire's channelmix positionally remixes,
+  smearing tracks together. pactl spells the positions lowercase
+  (`aux0`), pw-cat uppercase (`AUX0`).
+- Harness signal I/O uses native `pw-play`/`pw-record` with RAW samples;
+  the pulse layer is exercised by roc itself, which is the code under
+  test, and wav files carry positional channel meanings that pw-play
+  would remap onto the stream positions.

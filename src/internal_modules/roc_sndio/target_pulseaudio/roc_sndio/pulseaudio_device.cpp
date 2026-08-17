@@ -146,6 +146,7 @@ PulseaudioDevice::PulseaudioDevice(audio::FrameFactory& frame_factory,
     , target_latency_samples_(0)
     , timeout_ns_(0)
     , timeout_samples_(0)
+    , have_stream_map_(false)
     , record_frag_data_(NULL)
     , record_frag_size_(0)
     , record_frag_flag_(false)
@@ -780,6 +781,20 @@ bool PulseaudioDevice::init_stream_params_(const pa_sample_spec& device_spec) {
     roc_panic_if(stream_spec_.rate == 0);
     roc_panic_if(stream_spec_.channels == 0);
 
+    // Multitrack channel sets use the AUX channel map: libpulse has no
+    // default positional map for every channel count (seven, for one, has
+    // none, so stream creation would fail outright), and positional maps
+    // invite channel remixing between the stream and the server graph.
+    // AUX channels are positionless, matching multitrack semantics, and
+    // exist for any channel count. The device the stream connects to must
+    // use AUX positions as well, or the server remixes positionally.
+    have_stream_map_ = false;
+    if (sample_spec_.channel_set().layout() == audio::ChanLayout_Multitrack) {
+        pa_channel_map_init_extend(&stream_map_, stream_spec_.channels,
+                                   PA_CHANNEL_MAP_AUX);
+        have_stream_map_ = true;
+    }
+
     const size_t frame_len_bytes = sample_spec_.stream_timestamp_2_bytes(
         (packet::stream_timestamp_t)frame_len_samples_);
     const size_t target_latency_bytes = sample_spec_.stream_timestamp_2_bytes(
@@ -815,7 +830,8 @@ bool PulseaudioDevice::open_stream_() {
             (unsigned long)sample_spec_.num_channels(),
             (unsigned long)sample_spec_.sample_rate());
 
-    stream_ = pa_stream_new(context_, "Roc", &stream_spec_, NULL);
+    stream_ = pa_stream_new(context_, "Roc", &stream_spec_,
+                            have_stream_map_ ? &stream_map_ : NULL);
     if (!stream_) {
         roc_log(LogError, "pulseaudio %s: pa_stream_new(): %s",
                 device_type_to_str(device_type_),
