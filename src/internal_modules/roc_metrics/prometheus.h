@@ -104,13 +104,15 @@ struct PrometheusConfig {
     HistogramConfig e2e_latency;
     HistogramConfig jitter;
     HistogramConfig rtt;
+    HistogramConfig playout_spread;
 
     PrometheusConfig()
         : port(0)
         , niq_latency(100, 5 * core::Millisecond, 50 * core::Millisecond)
         , e2e_latency(100, 20 * core::Millisecond, 200 * core::Millisecond)
         , jitter(100, 100 * core::Microsecond, 200 * core::Millisecond)
-        , rtt(100, 1 * core::Millisecond, 100 * core::Millisecond) {
+        , rtt(100, 1 * core::Millisecond, 100 * core::Millisecond)
+        , playout_spread(40, 10 * core::Microsecond, 50 * core::Millisecond) {
     }
 };
 
@@ -121,6 +123,9 @@ std::shared_ptr<prometheus::Registry> prometheus_registry();
 //! Label set for a scope: empty when scope.slot is empty, otherwise
 //! {{"slot", scope.slot}}.
 std::map<std::string, std::string> scope_labels(const MetricsScope& scope);
+
+//! Build Prometheus labels for a slot pair (slot_a / slot_b).
+std::map<std::string, std::string> pair_labels(const char* slot_a, const char* slot_b);
 
 //! Metric name for a scope: "roc_send_" or "roc_recv_" + suffix,
 //! depending on scope.side.

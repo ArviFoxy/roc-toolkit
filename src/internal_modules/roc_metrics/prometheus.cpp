@@ -60,6 +60,13 @@ std::map<std::string, std::string> scope_labels(const MetricsScope& scope) {
     return labels;
 }
 
+std::map<std::string, std::string> pair_labels(const char* slot_a, const char* slot_b) {
+    std::map<std::string, std::string> labels;
+    labels["slot_a"] = slot_a;
+    labels["slot_b"] = slot_b;
+    return labels;
+}
+
 std::string scope_metric_name(const MetricsScope& scope, const char* suffix) {
     std::string name(scope.side == MetricsScope::Side_Send ? "roc_send_" : "roc_recv_");
     name += suffix;

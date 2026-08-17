@@ -9,6 +9,7 @@
 #include <CppUTest/TestHarness.h>
 
 #include "roc_core/time.h"
+#include "roc_metrics/prometheus.h"
 #include "roc_pipeline/session_skew_estimator.h"
 
 namespace roc {
@@ -67,7 +68,7 @@ TEST_GROUP(session_skew_estimator) {};
 
 TEST(session_skew_estimator, zero_skew) {
     SessionSkewEstimatorConfig config;
-    Est est(config);
+    Est est(config, metrics::PrometheusConfig());
 
     ssize_t slots[3];
     slots[0] = est.register_slot("a");
@@ -103,7 +104,7 @@ TEST(session_skew_estimator, zero_skew) {
 
 TEST(session_skew_estimator, known_offsets_recovered) {
     SessionSkewEstimatorConfig config;
-    Est est(config);
+    Est est(config, metrics::PrometheusConfig());
 
     ssize_t slots[3];
     slots[0] = est.register_slot("a");
@@ -140,7 +141,7 @@ TEST(session_skew_estimator, covariance_recovery) {
     SessionSkewEstimatorConfig config;
     // Short tau so the EWMA converges within the test.
     config.stats_tau = 10 * core::Second;
-    Est est(config);
+    Est est(config, metrics::PrometheusConfig());
 
     // Five slots: a and b share a dominant fluctuation (1ms), c/d/e are
     // quiet (0.1ms own noise). The shared component must be a MINORITY
@@ -190,7 +191,7 @@ TEST(session_skew_estimator, covariance_recovery) {
 
 TEST(session_skew_estimator, missing_slot_partial_row) {
     SessionSkewEstimatorConfig config;
-    Est est(config);
+    Est est(config, metrics::PrometheusConfig());
 
     ssize_t slots[3];
     slots[0] = est.register_slot("a");
@@ -216,7 +217,7 @@ TEST(session_skew_estimator, missing_slot_partial_row) {
 
 TEST(session_skew_estimator, idempotent_duplicates) {
     SessionSkewEstimatorConfig config;
-    Est est(config);
+    Est est(config, metrics::PrometheusConfig());
 
     ssize_t slots[2];
     slots[0] = est.register_slot("a");
@@ -246,7 +247,7 @@ TEST(session_skew_estimator, idempotent_duplicates) {
 
 TEST(session_skew_estimator, grid_delta_gate) {
     SessionSkewEstimatorConfig config;
-    Est est(config);
+    Est est(config, metrics::PrometheusConfig());
 
     ssize_t slot_a = est.register_slot("a");
     ssize_t slot_b = est.register_slot("b");
@@ -268,7 +269,7 @@ TEST(session_skew_estimator, grid_delta_gate) {
 
 TEST(session_skew_estimator, flinch_detection) {
     SessionSkewEstimatorConfig config;
-    Est est(config);
+    Est est(config, metrics::PrometheusConfig());
 
     ssize_t slots[2];
     slots[0] = est.register_slot("a");
@@ -316,7 +317,7 @@ TEST(session_skew_estimator, flinch_detection) {
 
 TEST(session_skew_estimator, e2e_disagreement) {
     SessionSkewEstimatorConfig config;
-    Est est(config);
+    Est est(config, metrics::PrometheusConfig());
 
     ssize_t slots[3];
     slots[0] = est.register_slot("a");
@@ -344,7 +345,7 @@ TEST(session_skew_estimator, e2e_disagreement) {
 
 TEST(session_skew_estimator, unregister_slot) {
     SessionSkewEstimatorConfig config;
-    Est est(config);
+    Est est(config, metrics::PrometheusConfig());
 
     ssize_t slots[3];
     slots[0] = est.register_slot("a");

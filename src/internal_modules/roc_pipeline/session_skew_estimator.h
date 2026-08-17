@@ -15,6 +15,13 @@
 #include "roc_core/noncopyable.h"
 #include "roc_core/stddefs.h"
 #include "roc_core/time.h"
+#include "roc_metrics/prometheus.h"
+
+#ifdef ROC_TARGET_PROMETHEUS
+#include <prometheus/counter.h>
+#include <prometheus/gauge.h>
+#include <prometheus/histogram.h>
+#endif
 
 namespace roc {
 namespace pipeline {
@@ -176,7 +183,8 @@ public:
         }
     };
 
-    explicit SessionSkewEstimator(const SessionSkewEstimatorConfig& config);
+    SessionSkewEstimator(const SessionSkewEstimatorConfig& config,
+                         const metrics::PrometheusConfig& prometheus_config);
 
     //! Register a slot; returns slot index or -1 if the table is full.
     ssize_t register_slot(const char* name);
@@ -238,7 +246,23 @@ private:
         double flinch_baseline;
         core::nanoseconds_t flinch_start_cts;
         core::nanoseconds_t flinch_hold_ns;
+
+#ifdef ROC_TARGET_PROMETHEUS
+        prometheus::Gauge* offset_gauge;
+        prometheus::Gauge* offset_e2e_gauge;
+        prometheus::Gauge* mapping_error_gauge;
+        prometheus::Gauge* rms_gauge;
+        prometheus::Gauge* warp_gauge;
+        prometheus::Gauge* target_latency_gauge;
+        prometheus::Gauge* snapshot_timestamp_gauge;
+        prometheus::Gauge* flinch_active_gauge;
+        prometheus::Gauge* flinch_magnitude_gauge;
+        prometheus::Counter* flinch_counter;
+#endif
     };
+
+    void register_slot_metrics_(size_t slot_index);
+    void register_pair_metrics_(size_t slot_a, size_t slot_b);
 
     Row* find_or_create_row_(core::nanoseconds_t grid_cts,
                              core::nanoseconds_t grid_period);
@@ -263,6 +287,21 @@ private:
     bool has_common_mode_baseline_;
 
     core::nanoseconds_t newest_grid_cts_;
+
+    const metrics::PrometheusConfig prometheus_config_;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    prometheus::Gauge* pair_skew_gauge_[MaxSlots][MaxSlots];
+    prometheus::Gauge* pair_corr_gauge_[MaxSlots][MaxSlots];
+    prometheus::Gauge* pair_cov_gauge_[MaxSlots][MaxSlots];
+
+    prometheus::Gauge* spread_gauge_;
+    prometheus::Histogram* spread_histogram_;
+    prometheus::Gauge* common_mode_gauge_;
+    prometheus::Counter* rows_full_counter_;
+    prometheus::Counter* rows_partial_counter_;
+    prometheus::Counter* rejected_counter_;
+#endif
 };
 
 } // namespace pipeline
