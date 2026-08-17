@@ -203,6 +203,36 @@ void print_xr_queue_metrics(core::Printer& p, const header::XrQueueMetricsBlock&
              (long long)packet::ntp_2_nanoseconds(blk.niq_stalling()));
 }
 
+void print_xr_stream_snapshot(core::Printer& p,
+                              const header::XrStreamSnapshotBlock& blk) {
+    p.writef("|- stream_snapshot:\n");
+
+    print_xr_block_header(p, blk.header());
+
+    p.writef("|-- block body:\n");
+    p.writef("|--- version: %u\n", (unsigned)blk.version());
+    p.writef("|--- ssrc: %lu\n", (unsigned long)blk.ssrc());
+    p.writef("|--- grid_period: %016llx (unix %lld)\n",
+             (unsigned long long)blk.grid_period(),
+             (long long)packet::ntp_2_nanoseconds(blk.grid_period()));
+    p.writef("|--- entry_words: %lu n_entries: %lu\n", (unsigned long)blk.entry_words(),
+             (unsigned long)blk.n_entries());
+
+    for (size_t n = 0; n < blk.n_entries(); n++) {
+        const header::XrStreamSnapshotEntry& e = blk.entry(n);
+        p.writef("|--- entry %lu:\n", (unsigned long)n);
+        p.writef("|---- grid_index: %lu position: %lu\n", (unsigned long)e.grid_index(),
+                 (unsigned long)e.position());
+        p.writef("|---- niq_instant: %016llx niq_mean: %016llx\n",
+                 (unsigned long long)e.niq_instant(), (unsigned long long)e.niq_mean());
+        p.writef("|---- e2e_latency: %016llx warp_ppb: %ld\n",
+                 (unsigned long long)e.e2e_latency(), (long)e.warp_ppb());
+        p.writef("|---- target_latency: %016llx recv_local_time: %016llx\n",
+                 (unsigned long long)e.target_latency(),
+                 (unsigned long long)e.recv_local_time());
+    }
+}
+
 void print_xr(core::Printer& p, const XrTraverser& xr) {
     p.writef("+ xr:\n");
 
@@ -238,6 +268,10 @@ void print_xr(core::Printer& p, const XrTraverser& xr) {
 
         case XrTraverser::Iterator::QUEUE_METRICS_BLOCK:
             print_xr_queue_metrics(p, iter.get_queue_metrics());
+            break;
+
+        case XrTraverser::Iterator::STREAM_SNAPSHOT_BLOCK:
+            print_xr_stream_snapshot(p, iter.get_stream_snapshot());
             break;
         }
     }

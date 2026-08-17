@@ -385,6 +385,20 @@ TEST(builder_traverser, rr_sdes_xr) {
     queue_metrics.set_ssrc(1010);
     queue_metrics.set_niq_latency(0xA100000);
     queue_metrics.set_niq_stalling(0xA200000);
+    header::XrStreamSnapshotBlock stream_snapshot;
+    stream_snapshot.set_ssrc(1111);
+    stream_snapshot.set_grid_period(0xB100000);
+    header::XrStreamSnapshotEntry snapshot_entries[2];
+    snapshot_entries[0].set_grid_index(4001);
+    snapshot_entries[0].set_position(0xB2000001);
+    snapshot_entries[0].set_niq_instant(0xB300000);
+    snapshot_entries[0].set_niq_mean(0xB400000);
+    snapshot_entries[0].set_e2e_latency(0xB500000);
+    snapshot_entries[0].set_warp_ppb(-4242);
+    snapshot_entries[0].set_target_latency(0xB600000);
+    snapshot_entries[0].set_recv_local_time(0xB700000000000077);
+    snapshot_entries[1].set_grid_index(4002);
+    snapshot_entries[1].set_position(0xB2000002);
 
     // Synthesize part
 
@@ -415,6 +429,7 @@ TEST(builder_traverser, rr_sdes_xr) {
     builder.add_xr_measurement_info(measure_info);
     builder.add_xr_delay_metrics(delay_metrics);
     builder.add_xr_queue_metrics(queue_metrics);
+    builder.add_xr_stream_snapshot(stream_snapshot, snapshot_entries, 2);
     builder.end_xr();
 
     CHECK(builder.is_ok());
@@ -476,7 +491,7 @@ TEST(builder_traverser, rr_sdes_xr) {
     CHECK_EQUAL(Traverser::Iterator::XR, it.next());
     XrTraverser xr_tr = it.get_xr();
     CHECK(xr_tr.parse());
-    CHECK_EQUAL(5, xr_tr.blocks_count());
+    CHECK_EQUAL(6, xr_tr.blocks_count());
     CHECK_EQUAL(555, xr_tr.packet().ssrc());
     XrTraverser::Iterator xr_it = xr_tr.iter();
 
@@ -516,6 +531,26 @@ TEST(builder_traverser, rr_sdes_xr) {
     CHECK_EQUAL(1010, xr_it.get_queue_metrics().ssrc());
     CHECK_EQUAL(0xA100000, xr_it.get_queue_metrics().niq_latency());
     CHECK_EQUAL(0xA200000, xr_it.get_queue_metrics().niq_stalling());
+
+    CHECK_EQUAL(XrTraverser::Iterator::STREAM_SNAPSHOT_BLOCK, xr_it.next());
+    CHECK_EQUAL(header::XrStreamSnapshotBlock::Version,
+                xr_it.get_stream_snapshot().version());
+    CHECK_EQUAL(1111, xr_it.get_stream_snapshot().ssrc());
+    CHECK_EQUAL(0xB100000, xr_it.get_stream_snapshot().grid_period());
+    CHECK_EQUAL(2, xr_it.get_stream_snapshot().n_entries());
+    CHECK_EQUAL(4001, xr_it.get_stream_snapshot().entry(0).grid_index());
+    CHECK_EQUAL(0xB2000001, xr_it.get_stream_snapshot().entry(0).position());
+    CHECK_EQUAL(0xB300000, xr_it.get_stream_snapshot().entry(0).niq_instant());
+    CHECK_EQUAL(0xB400000, xr_it.get_stream_snapshot().entry(0).niq_mean());
+    CHECK_EQUAL(0xB500000, xr_it.get_stream_snapshot().entry(0).e2e_latency());
+    CHECK_EQUAL(-4242, xr_it.get_stream_snapshot().entry(0).warp_ppb());
+    CHECK_EQUAL(0xB600000, xr_it.get_stream_snapshot().entry(0).target_latency());
+    CHECK_EQUAL(0xB700000000000077,
+                xr_it.get_stream_snapshot().entry(0).recv_local_time());
+    CHECK_EQUAL(4002, xr_it.get_stream_snapshot().entry(1).grid_index());
+    CHECK_EQUAL(0xB2000002, xr_it.get_stream_snapshot().entry(1).position());
+    CHECK(!xr_it.get_stream_snapshot().entry(1).has_niq_instant());
+    CHECK(!xr_it.get_stream_snapshot().entry(1).has_warp());
 
     CHECK_EQUAL(XrTraverser::Iterator::END, xr_it.next());
     CHECK_FALSE(xr_it.error());
@@ -805,6 +840,241 @@ TEST(builder_traverser, small_slice) {
     }
 
     CHECK(buff_sz < MaxBufSize);
+}
+
+TEST(builder_traverser, xr_stream_snapshot_batches) {
+    // Round-trip of 0, 1 and MaxEntries-entry snapshot blocks in one XR.
+    core::Slice<uint8_t> buff = new_buffer();
+
+    header::ReceiverReportPacket rr;
+    rr.set_ssrc(111);
+
+    header::XrPacket xr;
+    xr.set_ssrc(555);
+
+    SdesChunk sdes_chunk;
+    sdes_chunk.ssrc = 111;
+    SdesItem sdes_item;
+    sdes_item.type = header::SDES_CNAME;
+    sdes_item.text = "test:cname";
+
+    header::XrStreamSnapshotBlock snap_0;
+    snap_0.set_ssrc(701);
+    snap_0.set_grid_period(0xC100000);
+
+    header::XrStreamSnapshotBlock snap_1;
+    snap_1.set_ssrc(702);
+    snap_1.set_grid_period(0xC200000);
+    header::XrStreamSnapshotEntry entries_1[1];
+    entries_1[0].set_grid_index(9001);
+    entries_1[0].set_niq_instant(0xC300000);
+
+    header::XrStreamSnapshotBlock snap_4;
+    snap_4.set_ssrc(703);
+    snap_4.set_grid_period(0xC400000);
+    header::XrStreamSnapshotEntry entries_4[header::XrStreamSnapshotBlock::MaxEntries];
+    for (size_t n = 0; n < header::XrStreamSnapshotBlock::MaxEntries; n++) {
+        entries_4[n].set_grid_index(9100 + (uint32_t)n);
+        entries_4[n].set_warp_ppb((int32_t)n * 1000 - 2000);
+    }
+
+    Config config;
+    Builder builder(config, buff);
+
+    builder.begin_rr(rr);
+    builder.end_rr();
+
+    builder.begin_sdes();
+    builder.begin_sdes_chunk(sdes_chunk);
+    builder.add_sdes_item(sdes_item);
+    builder.end_sdes_chunk();
+    builder.end_sdes();
+
+    builder.begin_xr(xr);
+    builder.add_xr_stream_snapshot(snap_0, NULL, 0);
+    builder.add_xr_stream_snapshot(snap_1, entries_1, 1);
+    builder.add_xr_stream_snapshot(snap_4, entries_4,
+                                   header::XrStreamSnapshotBlock::MaxEntries);
+    builder.end_xr();
+
+    CHECK(builder.is_ok());
+
+    validate_buffer(buff);
+
+    Traverser traverser(buff);
+    CHECK(traverser.parse());
+
+    Traverser::Iterator it = traverser.iter();
+    CHECK_EQUAL(Traverser::Iterator::RR, it.next());
+    CHECK_EQUAL(Traverser::Iterator::SDES, it.next());
+    CHECK_EQUAL(Traverser::Iterator::XR, it.next());
+
+    XrTraverser pxr = it.get_xr();
+    CHECK(pxr.parse());
+    CHECK_EQUAL(3, pxr.blocks_count());
+
+    XrTraverser::Iterator xr_it = pxr.iter();
+
+    CHECK_EQUAL(XrTraverser::Iterator::STREAM_SNAPSHOT_BLOCK, xr_it.next());
+    CHECK_EQUAL(701, xr_it.get_stream_snapshot().ssrc());
+    CHECK_EQUAL(0, xr_it.get_stream_snapshot().n_entries());
+    CHECK_EQUAL(sizeof(header::XrStreamSnapshotBlock),
+                xr_it.get_stream_snapshot().header().len_bytes());
+
+    CHECK_EQUAL(XrTraverser::Iterator::STREAM_SNAPSHOT_BLOCK, xr_it.next());
+    CHECK_EQUAL(702, xr_it.get_stream_snapshot().ssrc());
+    CHECK_EQUAL(1, xr_it.get_stream_snapshot().n_entries());
+    CHECK_EQUAL(9001, xr_it.get_stream_snapshot().entry(0).grid_index());
+    CHECK_EQUAL(0xC300000, xr_it.get_stream_snapshot().entry(0).niq_instant());
+    CHECK(!xr_it.get_stream_snapshot().entry(0).has_warp());
+
+    CHECK_EQUAL(XrTraverser::Iterator::STREAM_SNAPSHOT_BLOCK, xr_it.next());
+    CHECK_EQUAL(703, xr_it.get_stream_snapshot().ssrc());
+    CHECK_EQUAL(header::XrStreamSnapshotBlock::MaxEntries,
+                xr_it.get_stream_snapshot().n_entries());
+    for (size_t n = 0; n < header::XrStreamSnapshotBlock::MaxEntries; n++) {
+        CHECK_EQUAL(9100 + n, xr_it.get_stream_snapshot().entry(n).grid_index());
+        CHECK_EQUAL((int32_t)n * 1000 - 2000,
+                    xr_it.get_stream_snapshot().entry(n).warp_ppb());
+    }
+
+    CHECK_EQUAL(XrTraverser::Iterator::END, xr_it.next());
+    CHECK_FALSE(xr_it.error());
+
+    CHECK_EQUAL(Traverser::Iterator::END, it.next());
+    CHECK_FALSE(it.error());
+}
+
+TEST(builder_traverser, xr_stream_snapshot_forward_compat) {
+    // A block from a hypothetical newer peer: larger entries (extra
+    // trailing words) must parse, with the known prefix readable; a
+    // higher version nibble must be skipped silently (no error flag).
+    core::Slice<uint8_t> buff = new_buffer();
+
+    header::ReceiverReportPacket rr;
+    rr.set_ssrc(111);
+
+    header::XrPacket xr;
+    xr.set_ssrc(555);
+
+    SdesChunk sdes_chunk;
+    sdes_chunk.ssrc = 111;
+    SdesItem sdes_item;
+    sdes_item.type = header::SDES_CNAME;
+    sdes_item.text = "test:cname";
+
+    header::XrRrtrBlock ref_time;
+    ref_time.set_ntp_timestamp(0xABCDABCDABCDABCD);
+
+    Config config;
+    Builder builder(config, buff);
+
+    builder.begin_rr(rr);
+    builder.end_rr();
+    builder.begin_sdes();
+    builder.begin_sdes_chunk(sdes_chunk);
+    builder.add_sdes_item(sdes_item);
+    builder.end_sdes_chunk();
+    builder.end_sdes();
+
+    builder.begin_xr(xr);
+    builder.add_xr_rrtr(ref_time);
+    builder.end_xr();
+    CHECK(builder.is_ok());
+
+    // Hand-append a grown snapshot block to the XR packet: entry_words=11
+    // (two extra words per entry), one entry.
+    const size_t grown_entry_words = 11;
+    const size_t grown_size =
+        sizeof(header::XrStreamSnapshotBlock) + grown_entry_words * 4;
+
+    header::XrStreamSnapshotBlock grown;
+    grown.set_ssrc(801);
+    grown.set_grid_period(0xD100000);
+    grown.set_entry_words(grown_entry_words);
+    grown.set_n_entries(1);
+    grown.header().set_len_bytes(grown_size);
+
+    header::XrStreamSnapshotEntry grown_entry;
+    grown_entry.set_grid_index(9500);
+    grown_entry.set_niq_mean(0xD200000);
+
+    uint8_t extra_words[8] = { 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE, 0xEE };
+
+    const size_t old_size = buff.size();
+    buff.reslice(0, old_size + grown_size);
+    memcpy(buff.data() + old_size, &grown, sizeof(grown));
+    memcpy(buff.data() + old_size + sizeof(grown), &grown_entry, sizeof(grown_entry));
+    memcpy(buff.data() + old_size + sizeof(grown) + sizeof(grown_entry), extra_words,
+           sizeof(extra_words));
+
+    // Patch the XR packet length to cover the appended block.
+    header::PacketHeader* xr_header = NULL;
+    {
+        size_t offset = 0;
+        for (;;) {
+            header::PacketHeader* ph = (header::PacketHeader*)&buff[offset];
+            if (ph->type() == header::RTCP_XR) {
+                xr_header = ph;
+            }
+            if (offset + ph->len_bytes() >= old_size) {
+                break;
+            }
+            offset += ph->len_bytes();
+        }
+        CHECK(xr_header != NULL);
+        xr_header->set_len_bytes(xr_header->len_bytes() + grown_size);
+    }
+
+    {
+        Traverser traverser(buff);
+        CHECK(traverser.parse());
+
+        Traverser::Iterator it = traverser.iter();
+        CHECK_EQUAL(Traverser::Iterator::RR, it.next());
+        CHECK_EQUAL(Traverser::Iterator::SDES, it.next());
+        CHECK_EQUAL(Traverser::Iterator::XR, it.next());
+
+        XrTraverser pxr = it.get_xr();
+        CHECK(pxr.parse());
+
+        XrTraverser::Iterator xr_it = pxr.iter();
+        CHECK_EQUAL(XrTraverser::Iterator::RRTR_BLOCK, xr_it.next());
+
+        CHECK_EQUAL(XrTraverser::Iterator::STREAM_SNAPSHOT_BLOCK, xr_it.next());
+        CHECK_EQUAL(801, xr_it.get_stream_snapshot().ssrc());
+        CHECK_EQUAL(grown_entry_words, xr_it.get_stream_snapshot().entry_words());
+        CHECK_EQUAL(1, xr_it.get_stream_snapshot().n_entries());
+        CHECK_EQUAL(9500, xr_it.get_stream_snapshot().entry(0).grid_index());
+        CHECK_EQUAL(0xD200000, xr_it.get_stream_snapshot().entry(0).niq_mean());
+
+        CHECK_EQUAL(XrTraverser::Iterator::END, xr_it.next());
+        CHECK_FALSE(xr_it.error());
+    }
+
+    // Bump the version nibble beyond ours: block must be skipped
+    // silently, like an unknown block type.
+    {
+        header::XrStreamSnapshotBlock* on_wire =
+            (header::XrStreamSnapshotBlock*)&buff[old_size];
+        on_wire->set_version(header::XrStreamSnapshotBlock::Version + 1);
+
+        Traverser traverser(buff);
+        CHECK(traverser.parse());
+
+        Traverser::Iterator it = traverser.iter();
+        CHECK_EQUAL(Traverser::Iterator::RR, it.next());
+        CHECK_EQUAL(Traverser::Iterator::SDES, it.next());
+        CHECK_EQUAL(Traverser::Iterator::XR, it.next());
+
+        XrTraverser pxr = it.get_xr();
+        CHECK(pxr.parse());
+
+        XrTraverser::Iterator xr_it = pxr.iter();
+        CHECK_EQUAL(XrTraverser::Iterator::RRTR_BLOCK, xr_it.next());
+        CHECK_EQUAL(XrTraverser::Iterator::END, xr_it.next());
+        CHECK_FALSE(xr_it.error());
+    }
 }
 
 } // namespace rtcp

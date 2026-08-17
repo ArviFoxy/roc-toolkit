@@ -33,6 +33,7 @@ public:
             MEASUREMENT_INFO_BLOCK, //!< Measurement information block.
             DELAY_METRICS_BLOCK,    //!< Delay metrics block.
             QUEUE_METRICS_BLOCK,    //!< Queue metrics block.
+            STREAM_SNAPSHOT_BLOCK,  //!< Stream snapshot block.
             END                     //!< Parsed whole packet.
         };
 
@@ -62,6 +63,10 @@ public:
         //! @pre Can be used if next() returned QUEUE_METRICS_BLOCK
         const header::XrQueueMetricsBlock& get_queue_metrics() const;
 
+        //! Get stream snapshot block.
+        //! @pre Can be used if next() returned STREAM_SNAPSHOT_BLOCK
+        const header::XrStreamSnapshotBlock& get_stream_snapshot() const;
+
     private:
         friend class XrTraverser;
 
@@ -72,6 +77,7 @@ public:
         bool check_measurement_info_();
         bool check_delay_metrics_();
         bool check_queue_metrics_();
+        bool check_stream_snapshot_();
 
         State state_;
         const core::Slice<uint8_t> buf_;

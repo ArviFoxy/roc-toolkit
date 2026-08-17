@@ -101,6 +101,13 @@ public:
     //! Add queue metrics block.to current XR packet.
     void add_xr_queue_metrics(const header::XrQueueMetricsBlock& queue_metrics);
 
+    //! Add stream snapshot block to current XR packet.
+    //! @p snapshot carries the fixed part; entry count and block length
+    //! are derived from @p n_entries by the builder.
+    void add_xr_stream_snapshot(const header::XrStreamSnapshotBlock& snapshot,
+                                const header::XrStreamSnapshotEntry* entries,
+                                size_t n_entries);
+
     //! Finish current DLRR block.
     void end_xr_dlrr();
 

@@ -181,6 +181,20 @@ void XrTraverser::Iterator::next_block_() {
             }
             state_ = QUEUE_METRICS_BLOCK;
             return;
+        case header::XR_STREAM_SNAPSHOT:
+            if (header::XrStreamSnapshotBlock::version_of(*cur_blk_header_)
+                > header::XrStreamSnapshotBlock::Version) {
+                // Future version with possibly changed semantics:
+                // skip silently, like an unknown block type.
+                break;
+            }
+            if (!check_stream_snapshot_()) {
+                // Skipping invalid block.
+                error_ = true;
+                break;
+            }
+            state_ = STREAM_SNAPSHOT_BLOCK;
+            return;
         default:
             // Unknown block.
             break;
@@ -234,6 +248,30 @@ bool XrTraverser::Iterator::check_queue_metrics_() {
     return true;
 }
 
+bool XrTraverser::Iterator::check_stream_snapshot_() {
+    // `<' checks throughout (never `!='): a newer peer may append fields
+    // to the fixed part's tail via larger entries, or new entries; parsers
+    // stride by the on-wire entry size and read only the prefix they know.
+    if (cur_blk_len_ < sizeof(header::XrStreamSnapshotBlock)) {
+        return false;
+    }
+
+    const header::XrStreamSnapshotBlock* blk =
+        (const header::XrStreamSnapshotBlock*)cur_blk_header_;
+
+    if (blk->entry_words() < header::XrStreamSnapshotBlock::EntryWords) {
+        // Entries too small to carry the fields we know.
+        return false;
+    }
+
+    if (cur_blk_len_ < sizeof(header::XrStreamSnapshotBlock)
+            + blk->n_entries() * blk->entry_words() * 4) {
+        return false;
+    }
+
+    return true;
+}
+
 const header::XrRrtrBlock& XrTraverser::Iterator::get_rrtr() const {
     roc_panic_if_msg(state_ != RRTR_BLOCK,
                      "xr traverser: get_rrtr() called in wrong state %d", (int)state_);
@@ -271,6 +309,14 @@ const header::XrQueueMetricsBlock& XrTraverser::Iterator::get_queue_metrics() co
                      (int)state_);
 
     return *(const header::XrQueueMetricsBlock*)cur_blk_header_;
+}
+
+const header::XrStreamSnapshotBlock& XrTraverser::Iterator::get_stream_snapshot() const {
+    roc_panic_if_msg(state_ != STREAM_SNAPSHOT_BLOCK,
+                     "xr traverser: get_stream_snapshot() called in wrong state %d",
+                     (int)state_);
+
+    return *(const header::XrStreamSnapshotBlock*)cur_blk_header_;
 }
 
 } // namespace rtcp

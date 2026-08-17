@@ -1081,7 +1081,8 @@ enum XrBlockType {
     // RFC 6843
     XR_DELAY_METRICS = 16, //!< Delay Metrics Report Block.
     // Non-standard
-    XR_QUEUE_METRICS = 220 //!< Queue Metrics Report Block.
+    XR_QUEUE_METRICS = 220,   //!< Queue Metrics Report Block.
+    XR_STREAM_SNAPSHOT = 221 //!< Stream Snapshot Report Block.
 };
 
 //! XR Block Header.
@@ -1752,6 +1753,325 @@ public:
     //! Set Network Incoming Queue Stalling.
     void set_niq_stalling(const packet::ntp_timestamp_t t) {
         niq_stalling_.set_value(ntp_clamp_32(t, MetricUnavail_32 - 1));
+    }
+} ROC_PACKED_END;
+
+//! Stream Snapshot entry.
+//!
+//! One telemetry snapshot, captured by a receiver when its playback
+//! position crossed a grid point on the sender CTS timeline. Part of
+//! XR Stream Snapshot Report Block.
+//!
+//! Non-standard.
+//!
+//! @code
+//!  0                   1                   2                   3
+//!  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                          Grid Index                           |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                   RTP Timestamp of Crossing                   |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                 Queue Latency at Crossing (NTP32)             |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                Queue Latency Interval Mean (NTP32)            |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                     E2E Latency (NTP32)                       |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |               Warp, parts-per-billion (signed)                |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                    Target Latency (NTP32)                     |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |            Receiver Local Time (NTP64), high word             |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |            Receiver Local Time (NTP64), low word              |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! @endcode
+ROC_PACKED_BEGIN class XrStreamSnapshotEntry {
+private:
+    uint32_t grid_index_;
+    uint32_t position_;
+    NtpTimestamp32 niq_instant_;
+    NtpTimestamp32 niq_mean_;
+    NtpTimestamp32 e2e_latency_;
+    uint32_t warp_ppb_;
+    NtpTimestamp32 target_latency_;
+    NtpTimestamp64 recv_local_time_;
+
+public:
+    //! Sentinel for unavailable warp.
+    static const int32_t WarpUnavail = -2147483647 - 1;
+
+    XrStreamSnapshotEntry() {
+        reset();
+    }
+
+    //! Reset to initial state (all metrics unavailable).
+    void reset() {
+        grid_index_ = 0;
+        position_ = 0;
+        niq_instant_.set_value(MetricUnavail_32);
+        niq_mean_.set_value(MetricUnavail_32);
+        e2e_latency_.set_value(MetricUnavail_32);
+        warp_ppb_ = core::hton32u((uint32_t)WarpUnavail);
+        target_latency_.set_value(MetricUnavail_32);
+        recv_local_time_.set_value(MetricUnavail_64);
+    }
+
+    //! Get grid index (snapshot sequence number on the sender CTS grid).
+    uint32_t grid_index() const {
+        return core::ntoh32u(grid_index_);
+    }
+
+    //! Set grid index.
+    void set_grid_index(const uint32_t index) {
+        grid_index_ = core::hton32u(index);
+    }
+
+    //! Get RTP timestamp at which the grid point was crossed.
+    packet::stream_timestamp_t position() const {
+        return core::ntoh32u(position_);
+    }
+
+    //! Set RTP timestamp of the crossing.
+    void set_position(const packet::stream_timestamp_t pos) {
+        position_ = core::hton32u(pos);
+    }
+
+    //! Check if instantaneous queue latency is set.
+    bool has_niq_instant() const {
+        return niq_instant_.value() != MetricUnavail_32;
+    }
+
+    //! Get instantaneous queue latency at the crossing.
+    packet::ntp_timestamp_t niq_instant() const {
+        return niq_instant_.value();
+    }
+
+    //! Set instantaneous queue latency.
+    void set_niq_instant(const packet::ntp_timestamp_t t) {
+        niq_instant_.set_value(ntp_clamp_32(t, MetricUnavail_32 - 1));
+    }
+
+    //! Check if interval-mean queue latency is set.
+    bool has_niq_mean() const {
+        return niq_mean_.value() != MetricUnavail_32;
+    }
+
+    //! Get queue latency averaged over the grid interval.
+    packet::ntp_timestamp_t niq_mean() const {
+        return niq_mean_.value();
+    }
+
+    //! Set interval-mean queue latency.
+    void set_niq_mean(const packet::ntp_timestamp_t t) {
+        niq_mean_.set_value(ntp_clamp_32(t, MetricUnavail_32 - 1));
+    }
+
+    //! Check if end-to-end latency is set.
+    bool has_e2e_latency() const {
+        return e2e_latency_.value() != MetricUnavail_32;
+    }
+
+    //! Get end-to-end latency at the crossing.
+    packet::ntp_timestamp_t e2e_latency() const {
+        return e2e_latency_.value();
+    }
+
+    //! Set end-to-end latency.
+    void set_e2e_latency(const packet::ntp_timestamp_t t) {
+        e2e_latency_.set_value(ntp_clamp_32(t, MetricUnavail_32 - 1));
+    }
+
+    //! Check if warp is set.
+    bool has_warp() const {
+        return warp_ppb() != WarpUnavail;
+    }
+
+    //! Get warp: (frequency coefficient - 1) in parts per billion.
+    int32_t warp_ppb() const {
+        return (int32_t)core::ntoh32u(warp_ppb_);
+    }
+
+    //! Set warp in parts per billion.
+    void set_warp_ppb(const int32_t warp) {
+        warp_ppb_ = core::hton32u((uint32_t)warp);
+    }
+
+    //! Check if target latency is set.
+    bool has_target_latency() const {
+        return target_latency_.value() != MetricUnavail_32;
+    }
+
+    //! Get target latency at the crossing.
+    packet::ntp_timestamp_t target_latency() const {
+        return target_latency_.value();
+    }
+
+    //! Set target latency.
+    void set_target_latency(const packet::ntp_timestamp_t t) {
+        target_latency_.set_value(ntp_clamp_32(t, MetricUnavail_32 - 1));
+    }
+
+    //! Check if receiver local time is set.
+    bool has_recv_local_time() const {
+        return recv_local_time_.value() != MetricUnavail_64;
+    }
+
+    //! Get receiver local clock at the crossing (NTP).
+    packet::ntp_timestamp_t recv_local_time() const {
+        return recv_local_time_.value();
+    }
+
+    //! Set receiver local time.
+    void set_recv_local_time(const packet::ntp_timestamp_t t) {
+        recv_local_time_.set_value(ntp_clamp_64(t, MetricUnavail_64 - 1));
+    }
+} ROC_PACKED_END;
+
+//! XR Stream Snapshot Report Block.
+//!
+//! Non-standard. Carries a batch of telemetry snapshots, each captured
+//! when the receiver's playback position crossed a grid point on the
+//! sender CTS timeline (grid index = floor(CTS / grid period)). Entries
+//! are idempotent by grid index and re-sent in consecutive reports for
+//! loss robustness.
+//!
+//! Versioning: the low 4 bits of type-specific carry the block version
+//! (currently 1). Entries may grow in later versions: parsers must
+//! stride by the on-wire entry size and read only the prefix they know.
+//!
+//! @code
+//!  0                   1                   2                   3
+//!  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |    BT=221     | resv  |  ver  |         block length          |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                        SSRC of Source                         |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                      Grid Period (NTP32)                      |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |  Entry Words  |   N Entries   |           reserved            |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! :          N Entries x (Entry Words x 32-bit words)             :
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! @endcode
+ROC_PACKED_BEGIN class XrStreamSnapshotBlock {
+private:
+    enum {
+        Version_shift = 0,
+        Version_mask = 0x0F,
+    };
+
+    XrBlockHeader header_;
+
+    uint32_t ssrc_;
+    NtpTimestamp32 grid_period_;
+    uint8_t entry_words_;
+    uint8_t n_entries_;
+    uint16_t reserved_;
+
+public:
+    //! Current block version.
+    static const uint8_t Version = 1;
+
+    //! Number of 32-bit words per entry written by this implementation.
+    static const size_t EntryWords = sizeof(XrStreamSnapshotEntry) / 4;
+
+    //! Maximum entries carried in one block.
+    static const size_t MaxEntries = 4;
+
+    XrStreamSnapshotBlock() {
+        reset();
+    }
+
+    //! Reset to initial state.
+    void reset() {
+        header_.reset(XR_STREAM_SNAPSHOT);
+        ssrc_ = 0;
+        grid_period_.set_value(0);
+        entry_words_ = (uint8_t)EntryWords;
+        n_entries_ = 0;
+        reserved_ = 0;
+        set_version(Version);
+    }
+
+    //! Get common block header.
+    const XrBlockHeader& header() const {
+        return header_;
+    }
+
+    //! Get common block header.
+    XrBlockHeader& header() {
+        return header_;
+    }
+
+    //! Get block version.
+    uint8_t version() const {
+        return version_of(header_);
+    }
+
+    //! Get block version from a bare block header.
+    //! Usable before length validation: the version lives in the
+    //! always-present type-specific byte.
+    static uint8_t version_of(const XrBlockHeader& header) {
+        return get_bit_field<uint8_t>(header.type_specific(), Version_shift,
+                                      Version_mask);
+    }
+
+    //! Set block version.
+    void set_version(const uint8_t v) {
+        uint8_t t = header_.type_specific();
+        set_bit_field<uint8_t>(t, v, Version_shift, Version_mask);
+        header_.set_type_specific(t);
+    }
+
+    //! Get SSRC of source being reported.
+    packet::stream_source_t ssrc() const {
+        return core::ntoh32u(ssrc_);
+    }
+
+    //! Set SSRC of source being reported.
+    void set_ssrc(const packet::stream_source_t ssrc) {
+        ssrc_ = core::hton32u(ssrc);
+    }
+
+    //! Get grid period.
+    packet::ntp_timestamp_t grid_period() const {
+        return grid_period_.value();
+    }
+
+    //! Set grid period.
+    void set_grid_period(const packet::ntp_timestamp_t t) {
+        grid_period_.set_value(ntp_clamp_32(t, MetricUnavail_32 - 1));
+    }
+
+    //! Get on-wire entry size in 32-bit words.
+    size_t entry_words() const {
+        return entry_words_;
+    }
+
+    //! Set on-wire entry size in words.
+    void set_entry_words(const size_t words) {
+        entry_words_ = (uint8_t)words;
+    }
+
+    //! Get number of entries.
+    size_t n_entries() const {
+        return n_entries_;
+    }
+
+    //! Set number of entries.
+    void set_n_entries(const size_t n) {
+        n_entries_ = (uint8_t)n;
+    }
+
+    //! Get entry by index.
+    //! Strides by the on-wire entry size, which may exceed
+    //! sizeof(XrStreamSnapshotEntry) if the peer runs a newer version.
+    const XrStreamSnapshotEntry& entry(const size_t index) const {
+        return *(const XrStreamSnapshotEntry*)((const char*)this + sizeof(*this)
+                                               + index * entry_words() * 4);
     }
 } ROC_PACKED_END;
 

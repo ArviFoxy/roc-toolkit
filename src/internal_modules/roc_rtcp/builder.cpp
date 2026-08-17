@@ -418,6 +418,32 @@ void Builder::add_xr_queue_metrics(const header::XrQueueMetricsBlock& queue_metr
     cur_xr_block_header_->set_len_bytes(sizeof(queue_metrics));
 }
 
+void Builder::add_xr_stream_snapshot(const header::XrStreamSnapshotBlock& snapshot,
+                                     const header::XrStreamSnapshotEntry* entries,
+                                     size_t n_entries) {
+    roc_panic_if_msg(state_ != XR_HEAD, "rtcp builder: wrong call order");
+    roc_panic_if_msg(n_entries > header::XrStreamSnapshotBlock::MaxEntries,
+                     "rtcp builder: too many stream snapshot entries");
+
+    const size_t total_size =
+        sizeof(snapshot) + n_entries * sizeof(header::XrStreamSnapshotEntry);
+
+    header::XrStreamSnapshotBlock* p =
+        (header::XrStreamSnapshotBlock*)add_block_(total_size);
+    if (!p) {
+        return;
+    }
+    memcpy(p, &snapshot, sizeof(snapshot));
+    memcpy((char*)p + sizeof(snapshot), entries,
+           n_entries * sizeof(header::XrStreamSnapshotEntry));
+
+    p->set_entry_words(header::XrStreamSnapshotBlock::EntryWords);
+    p->set_n_entries(n_entries);
+
+    cur_xr_block_header_ = &p->header();
+    cur_xr_block_header_->set_len_bytes(total_size);
+}
+
 void Builder::end_xr() {
     roc_panic_if_msg(state_ != XR_HEAD, "rtcp builder: wrong call order");
 
