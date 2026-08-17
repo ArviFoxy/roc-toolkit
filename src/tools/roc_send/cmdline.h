@@ -31,7 +31,7 @@ extern "C" {
 
 #ifndef CMDLINE_PARSER_VERSION
 /** @brief the program version */
-#define CMDLINE_PARSER_VERSION VERSION
+#define CMDLINE_PARSER_VERSION "0.4.0"
 #endif
 
 enum enum_color { color__NULL = -1, color_arg_auto = 0, color_arg_always, color_arg_never };
@@ -48,6 +48,7 @@ enum enum_prometheus_rtt_scale { prometheus_rtt_scale__NULL = -1, prometheus_rtt
 struct gengetopt_args_info
 {
   const char *help_help; /**< @brief Print help and exit help description.  */
+  const char *version_help; /**< @brief Print version and exit help description.  */
   unsigned int verbose_min; /**< @brief Increase verbosity level (may be used multiple times)'s minimum occurreces */
   unsigned int verbose_max; /**< @brief Increase verbosity level (may be used multiple times)'s maximum occurreces */
   const char *verbose_help; /**< @brief Increase verbosity level (may be used multiple times) help description.  */
@@ -215,6 +216,7 @@ struct gengetopt_args_info
   const char *dump_help; /**< @brief Dump run-time metrics to specified CSV file help description.  */
   
   unsigned int help_given ;	/**< @brief Whether help was given.  */
+  unsigned int version_given ;	/**< @brief Whether version was given.  */
   unsigned int verbose_given ;	/**< @brief Whether verbose was given.  */
   unsigned int color_given ;	/**< @brief Whether color was given.  */
   unsigned int list_supported_given ;	/**< @brief Whether list-supported was given.  */
