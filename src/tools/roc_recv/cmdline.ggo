@@ -85,6 +85,8 @@ section "Timeout options"
         typestr="TIME" string optional
 
 section "Metrics options"
+    option "report-grid" - "Telemetry snapshot grid period on the sender clock timeline (0 to disable)"
+        typestr="TIME" string default="500ms" optional
 
     option "prometheus-metrics-port" - "Port for prometheus metrics HTTP exposer"
         int default="0" optional

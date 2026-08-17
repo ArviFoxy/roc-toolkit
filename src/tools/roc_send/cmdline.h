@@ -31,7 +31,7 @@ extern "C" {
 
 #ifndef CMDLINE_PARSER_VERSION
 /** @brief the program version */
-#define CMDLINE_PARSER_VERSION "0.4.0 (205ff68d52)"
+#define CMDLINE_PARSER_VERSION VERSION
 #endif
 
 enum enum_color { color__NULL = -1, color_arg_auto = 0, color_arg_always, color_arg_never };
@@ -48,7 +48,6 @@ enum enum_prometheus_rtt_scale { prometheus_rtt_scale__NULL = -1, prometheus_rtt
 struct gengetopt_args_info
 {
   const char *help_help; /**< @brief Print help and exit help description.  */
-  const char *version_help; /**< @brief Print version and exit help description.  */
   unsigned int verbose_min; /**< @brief Increase verbosity level (may be used multiple times)'s minimum occurreces */
   unsigned int verbose_max; /**< @brief Increase verbosity level (may be used multiple times)'s maximum occurreces */
   const char *verbose_help; /**< @brief Increase verbosity level (may be used multiple times) help description.  */
@@ -194,6 +193,15 @@ struct gengetopt_args_info
   enum enum_prometheus_rtt_scale prometheus_rtt_scale_arg;	/**< @brief Bucket spacing for RTT histogram (default='log').  */
   char * prometheus_rtt_scale_orig;	/**< @brief Bucket spacing for RTT histogram original value given at command line.  */
   const char *prometheus_rtt_scale_help; /**< @brief Bucket spacing for RTT histogram help description.  */
+  int prometheus_playout_spread_buckets_arg;	/**< @brief Number of histogram buckets for playout spread metric (default='40').  */
+  char * prometheus_playout_spread_buckets_orig;	/**< @brief Number of histogram buckets for playout spread metric original value given at command line.  */
+  const char *prometheus_playout_spread_buckets_help; /**< @brief Number of histogram buckets for playout spread metric help description.  */
+  char * prometheus_playout_spread_min_arg;	/**< @brief Minimum playout spread bucket boundary, TIME units (default='10us').  */
+  char * prometheus_playout_spread_min_orig;	/**< @brief Minimum playout spread bucket boundary, TIME units original value given at command line.  */
+  const char *prometheus_playout_spread_min_help; /**< @brief Minimum playout spread bucket boundary, TIME units help description.  */
+  char * prometheus_playout_spread_max_arg;	/**< @brief Maximum playout spread bucket boundary, TIME units (default='50ms').  */
+  char * prometheus_playout_spread_max_orig;	/**< @brief Maximum playout spread bucket boundary, TIME units original value given at command line.  */
+  const char *prometheus_playout_spread_max_help; /**< @brief Maximum playout spread bucket boundary, TIME units help description.  */
   char * max_packet_size_arg;	/**< @brief Maximum network packet size, SIZE units.  */
   char * max_packet_size_orig;	/**< @brief Maximum network packet size, SIZE units original value given at command line.  */
   const char *max_packet_size_help; /**< @brief Maximum network packet size, SIZE units help description.  */
@@ -207,7 +215,6 @@ struct gengetopt_args_info
   const char *dump_help; /**< @brief Dump run-time metrics to specified CSV file help description.  */
   
   unsigned int help_given ;	/**< @brief Whether help was given.  */
-  unsigned int version_given ;	/**< @brief Whether version was given.  */
   unsigned int verbose_given ;	/**< @brief Whether verbose was given.  */
   unsigned int color_given ;	/**< @brief Whether color was given.  */
   unsigned int list_supported_given ;	/**< @brief Whether list-supported was given.  */
@@ -254,6 +261,9 @@ struct gengetopt_args_info
   unsigned int prometheus_rtt_min_given ;	/**< @brief Whether prometheus-rtt-min was given.  */
   unsigned int prometheus_rtt_max_given ;	/**< @brief Whether prometheus-rtt-max was given.  */
   unsigned int prometheus_rtt_scale_given ;	/**< @brief Whether prometheus-rtt-scale was given.  */
+  unsigned int prometheus_playout_spread_buckets_given ;	/**< @brief Whether prometheus-playout-spread-buckets was given.  */
+  unsigned int prometheus_playout_spread_min_given ;	/**< @brief Whether prometheus-playout-spread-min was given.  */
+  unsigned int prometheus_playout_spread_max_given ;	/**< @brief Whether prometheus-playout-spread-max was given.  */
   unsigned int max_packet_size_given ;	/**< @brief Whether max-packet-size was given.  */
   unsigned int max_frame_size_given ;	/**< @brief Whether max-frame-size was given.  */
   unsigned int prof_given ;	/**< @brief Whether prof was given.  */

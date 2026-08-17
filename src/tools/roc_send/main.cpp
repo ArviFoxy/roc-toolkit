@@ -830,6 +830,24 @@ int main(int argc, char** argv) {
             prometheus_config.rtt.scale = metrics::HistogramScale_Log;
         }
     }
+    if (args.prometheus_playout_spread_buckets_given) {
+        prometheus_config.playout_spread.buckets =
+            args.prometheus_playout_spread_buckets_arg;
+    }
+    if (args.prometheus_playout_spread_min_given) {
+        if (!core::parse_duration(args.prometheus_playout_spread_min_arg,
+                                  prometheus_config.playout_spread.min)) {
+            roc_log(LogError, "invalid --prometheus-playout-spread-min: bad format");
+            return 1;
+        }
+    }
+    if (args.prometheus_playout_spread_max_given) {
+        if (!core::parse_duration(args.prometheus_playout_spread_max_arg,
+                                  prometheus_config.playout_spread.max)) {
+            roc_log(LogError, "invalid --prometheus-playout-spread-max: bad format");
+            return 1;
+        }
+    }
 
     pipeline::SenderSinkConfig sender_config;
     if (!build_sender_config(args, sender_config, context, *input_source)) {

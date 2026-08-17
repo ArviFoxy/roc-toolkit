@@ -31,7 +31,7 @@ extern "C" {
 
 #ifndef CMDLINE_PARSER_VERSION
 /** @brief the program version */
-#define CMDLINE_PARSER_VERSION "0.4.0 (205ff68d52)"
+#define CMDLINE_PARSER_VERSION VERSION
 #endif
 
 enum enum_color { color__NULL = -1, color_arg_auto = 0, color_arg_always, color_arg_never };
@@ -49,7 +49,6 @@ enum enum_prometheus_rtt_scale { prometheus_rtt_scale__NULL = -1, prometheus_rtt
 struct gengetopt_args_info
 {
   const char *help_help; /**< @brief Print help and exit help description.  */
-  const char *version_help; /**< @brief Print version and exit help description.  */
   unsigned int verbose_min; /**< @brief Increase verbosity level (may be used multiple times)'s minimum occurreces */
   unsigned int verbose_max; /**< @brief Increase verbosity level (may be used multiple times)'s maximum occurreces */
   const char *verbose_help; /**< @brief Increase verbosity level (may be used multiple times) help description.  */
@@ -139,6 +138,9 @@ struct gengetopt_args_info
   char * choppy_play_timeout_arg;	/**< @brief Choppy playback timeout, TIME units.  */
   char * choppy_play_timeout_orig;	/**< @brief Choppy playback timeout, TIME units original value given at command line.  */
   const char *choppy_play_timeout_help; /**< @brief Choppy playback timeout, TIME units help description.  */
+  char * report_grid_arg;	/**< @brief Telemetry snapshot grid period on the sender clock timeline (0 to disable) (default='500ms').  */
+  char * report_grid_orig;	/**< @brief Telemetry snapshot grid period on the sender clock timeline (0 to disable) original value given at command line.  */
+  const char *report_grid_help; /**< @brief Telemetry snapshot grid period on the sender clock timeline (0 to disable) help description.  */
   int prometheus_metrics_port_arg;	/**< @brief Port for prometheus metrics HTTP exposer (default='0').  */
   char * prometheus_metrics_port_orig;	/**< @brief Port for prometheus metrics HTTP exposer original value given at command line.  */
   const char *prometheus_metrics_port_help; /**< @brief Port for prometheus metrics HTTP exposer help description.  */
@@ -203,7 +205,6 @@ struct gengetopt_args_info
   const char *dump_help; /**< @brief Dump run-time metrics to specified CSV file help description.  */
   
   unsigned int help_given ;	/**< @brief Whether help was given.  */
-  unsigned int version_given ;	/**< @brief Whether version was given.  */
   unsigned int verbose_given ;	/**< @brief Whether verbose was given.  */
   unsigned int color_given ;	/**< @brief Whether color was given.  */
   unsigned int list_supported_given ;	/**< @brief Whether list-supported was given.  */
@@ -232,6 +233,7 @@ struct gengetopt_args_info
   unsigned int max_latency_given ;	/**< @brief Whether max-latency was given.  */
   unsigned int no_play_timeout_given ;	/**< @brief Whether no-play-timeout was given.  */
   unsigned int choppy_play_timeout_given ;	/**< @brief Whether choppy-play-timeout was given.  */
+  unsigned int report_grid_given ;	/**< @brief Whether report-grid was given.  */
   unsigned int prometheus_metrics_port_given ;	/**< @brief Whether prometheus-metrics-port was given.  */
   unsigned int prometheus_niq_latency_buckets_given ;	/**< @brief Whether prometheus-niq-latency-buckets was given.  */
   unsigned int prometheus_niq_latency_min_given ;	/**< @brief Whether prometheus-niq-latency-min was given.  */

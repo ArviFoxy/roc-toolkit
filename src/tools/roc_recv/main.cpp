@@ -224,6 +224,19 @@ bool build_receiver_config(const gengetopt_args_info& args,
         break;
     }
 
+    if (args.report_grid_given) {
+        if (!core::parse_duration(args.report_grid_arg,
+                                  receiver_config.session_defaults.latency
+                                      .snapshot_grid)) {
+            roc_log(LogError, "invalid --report-grid: bad format");
+            return false;
+        }
+        if (receiver_config.session_defaults.latency.snapshot_grid < 0) {
+            roc_log(LogError, "invalid --report-grid: should not be negative");
+            return false;
+        }
+    }
+
     if (args.latency_aggressiveness_given) {
         receiver_config.session_defaults.latency.latency_aggressiveness =
             args.latency_aggressiveness_arg;

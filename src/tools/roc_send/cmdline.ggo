@@ -122,6 +122,13 @@ section "Metrics options"
     option "prometheus-rtt-scale" - "Bucket spacing for RTT histogram"
         values="log","linear" default="log" enum optional
 
+    option "prometheus-playout-spread-buckets" - "Number of histogram buckets for playout spread metric"
+        int default="40" optional
+    option "prometheus-playout-spread-min" - "Minimum playout spread bucket boundary, TIME units"
+        typestr="TIME" string default="10us" optional
+    option "prometheus-playout-spread-max" - "Maximum playout spread bucket boundary, TIME units"
+        typestr="TIME" string default="50ms" optional
+
 section "Memory options"
 
     option "max-packet-size" - "Maximum network packet size, SIZE units"
