@@ -337,6 +337,94 @@ FeedbackMonitor
      - Histogram
      - Round-trip time distribution from RTCP timestamp exchange
 
+Session sync metrics (report plane)
+===================================
+
+When receivers run with a non-zero ``--report-grid`` (default 500ms), they
+sample telemetry snapshots each time playback crosses a grid point on the
+sender clock timeline and report them via the non-standard XR Stream
+Snapshot block (BT=221). The session sender's skew estimator turns them
+into cross-receiver statistics, exported per slot (``slot=`` label,
+one series per leg), per pair (``slot_a``/``slot_b``), and fleet-wide.
+
+The clock-free offsets derive from queue depths at a common stream
+position: emission is common (one sender clock), so receiver i plays a
+position at approximately arrival + queue_i, and differences of queue
+depths at the same position measure playout skew without any wall-clock
+agreement. The e2e-based offsets inherit the NTP error of the RTCP clock
+mapping; the per-slot difference of the two IS the differential mapping
+error. Note the clock-free offset measures the decode point: constant
+per-receiver device buffering shows only in the e2e view.
+
+SessionSkewEstimator
+--------------------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 12 43
+
+   * - Metric
+     - Type
+     - Description
+   * - ``roc_send_playout_offset_seconds{slot=...}``
+     - Gauge
+     - Clock-free playout offset vs fleet median
+   * - ``roc_send_playout_offset_e2e_seconds{slot=...}``
+     - Gauge
+     - E2E-based playout offset vs fleet median (inherits NTP error)
+   * - ``roc_send_clock_mapping_error_seconds{slot=...}``
+     - Gauge
+     - Clock-free minus e2e offset: the differential mapping error
+   * - ``roc_send_playout_offset_rms_seconds{slot=...}``
+     - Gauge
+     - EWMA RMS of offset fluctuations (60s time constant)
+   * - ``roc_send_recv_warp{slot=...}``
+     - Gauge
+     - Receiver-reported warp (frequency coefficient - 1)
+   * - ``roc_send_recv_target_latency_seconds{slot=...}``
+     - Gauge
+     - Receiver-reported target latency
+   * - ``roc_send_snapshot_timestamp_seconds{slot=...}``
+     - Gauge
+     - Unix time of last snapshot; age = time() - value
+   * - ``roc_send_flinch_active{slot=...}``
+     - Gauge
+     - 1 while a playout offset event is in progress
+   * - ``roc_send_flinch_magnitude_seconds{slot=...}``
+     - Gauge
+     - Peak offset excursion of the last flinch event
+   * - ``roc_send_flinch_total{slot=...}``
+     - Counter
+     - Playout offset events per slot (who flinched)
+   * - ``roc_send_playout_skew_seconds{slot_a=...,slot_b=...}``
+     - Gauge
+     - Clock-free playout skew between two slots
+   * - ``roc_send_playout_corr{slot_a=...,slot_b=...}``
+     - Gauge
+     - EWMA correlation of offset fluctuations (fast-band correlation)
+   * - ``roc_send_playout_cov_seconds2{slot_a=...,slot_b=...}``
+     - Gauge
+     - EWMA covariance of offset fluctuations
+   * - ``roc_send_playout_spread_seconds``
+     - Gauge
+     - Max-min clock-free skew across the fleet
+   * - ``roc_send_playout_spread``
+     - Histogram
+     - Distribution of fleet spread (``--prometheus-playout-spread-*``)
+   * - ``roc_send_playout_common_mode_seconds``
+     - Gauge
+     - Fleet mean queue depth minus its slow baseline
+   * - ``roc_send_snapshot_rows_total{completeness="full|partial"}``
+     - Counter
+     - Finalized snapshot grid rows
+   * - ``roc_send_snapshot_rejected_total``
+     - Counter
+     - Snapshots rejected (grid delta gate, unusable fields)
+
+Mixed versions are safe in both directions: an old sender skips the
+unknown XR block, and an old receiver simply never sends it (the
+sender's snapshot timestamps go stale, which is itself visible).
+
 IO metrics
 ==========
 
