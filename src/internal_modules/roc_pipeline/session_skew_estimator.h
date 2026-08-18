@@ -202,6 +202,12 @@ private:
         double ewma_mean;
         bool has_ewma;
 
+        // EWMA of the raw queue depth: the centering base for the
+        // covariance/correlation. No fleet reference enters that path,
+        // so pair correlation is a pure two-slot measurement.
+        double q_ewma_mean;
+        bool has_q_ewma;
+
         // Jump state.
         double jump_baseline;
         core::nanoseconds_t jump_start_cts;
