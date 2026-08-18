@@ -80,12 +80,12 @@ public:
     size_t get_snapshots(packet::StreamSnapshot* snapshots, size_t max_snapshots) const;
 
 private:
-    void emit_(packet::stream_timestamp_t position,
-               core::nanoseconds_t niq_latency,
+    void emit_(core::nanoseconds_t niq_latency,
                core::nanoseconds_t e2e_latency,
                double freq_coeff,
                core::nanoseconds_t target_latency);
     void resync_(core::nanoseconds_t cts_now);
+    void update_rtp_cursor_();
     void reset_accum_();
 
     const SampleSpec sample_spec_;
@@ -97,6 +97,11 @@ private:
 
     bool synced_;
     core::nanoseconds_t next_grid_cts_;
+    packet::stream_timestamp_t next_grid_rtp_;
+    bool has_prev_cts_;
+    core::nanoseconds_t prev_cts_;
+    core::nanoseconds_t last_step_;
+    core::nanoseconds_t candidate_step_;
 
     // niq accumulation over the current grid interval.
     core::nanoseconds_t niq_accum_;

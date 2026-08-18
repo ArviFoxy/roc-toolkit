@@ -15,9 +15,13 @@ namespace audio {
 
 namespace {
 
-// Beyond this many grid periods of discontinuity the sampler resyncs
-// instead of emitting stale crossings (seek, mapping jump, restart).
-const core::nanoseconds_t MaxLagPeriods = 2;
+// Beyond this many grid periods (or read steps, whichever is larger)
+// of discontinuity the sampler resyncs instead of emitting stale
+// crossings (seek, mapping jump, restart). The read-step term matters
+// when the grid period is smaller than the read step: a normal read
+// then advances by several grid periods and must not look like a
+// discontinuity.
+const int64_t MaxLagPeriods = 2;
 
 } // namespace
 
@@ -30,6 +34,11 @@ StreamSnapshotSampler::StreamSnapshotSampler(const SampleSpec& sample_spec,
     , map_rtp_(0)
     , synced_(false)
     , next_grid_cts_(0)
+    , next_grid_rtp_(0)
+    , has_prev_cts_(false)
+    , prev_cts_(0)
+    , last_step_(0)
+    , candidate_step_(0)
     , niq_accum_(0)
     , niq_accum_count_(0)
     , ring_size_(0)
@@ -54,6 +63,10 @@ void StreamSnapshotSampler::update_mapping(core::nanoseconds_t capture_ts,
     has_mapping_ = true;
     map_cts_ = capture_ts;
     map_rtp_ = stream_ts;
+
+    if (synced_) {
+        update_rtp_cursor_();
+    }
 }
 
 void StreamSnapshotSampler::process_read(packet::stream_timestamp_t position,
@@ -62,6 +75,18 @@ void StreamSnapshotSampler::process_read(packet::stream_timestamp_t position,
                                          double freq_coeff,
                                          core::nanoseconds_t target_latency) {
     if (!is_enabled() || !has_mapping_) {
+        return;
+    }
+
+    if (niq_latency >= 0) {
+        niq_accum_ += niq_latency;
+        niq_accum_count_++;
+    }
+
+    // Fast path: no grid point was crossed. A single wrap-safe integer
+    // compare; the nanosecond conversion below runs only on crossings
+    // and on the first read after sync.
+    if (synced_ && packet::stream_timestamp_lt(position, next_grid_rtp_)) {
         return;
     }
 
@@ -74,12 +99,34 @@ void StreamSnapshotSampler::process_read(packet::stream_timestamp_t position,
         return;
     }
 
-    if (!synced_) {
-        resync_(cts_now);
+    // Discontinuity bound: larger of the grid scale and the LAST
+    // ACCEPTED read step. The step term keeps small grids working (a
+    // normal read then advances by several grid periods); using the
+    // last accepted step, not the current one, keeps a genuine jump
+    // detectable.
+    core::nanoseconds_t max_jump = grid_period_ * MaxLagPeriods;
+    if (last_step_ * MaxLagPeriods > max_jump) {
+        max_jump = last_step_ * MaxLagPeriods;
     }
 
-    if (cts_now < next_grid_cts_ - grid_period_ * (MaxLagPeriods + 1)
-        || cts_now >= next_grid_cts_ + grid_period_ * MaxLagPeriods) {
+    // Learn the read cadence: promote a step only when two consecutive
+    // steps are similar. A one-off jump (seek, stall) never repeats,
+    // so it cannot widen the discontinuity bound; a real cadence does.
+    const core::nanoseconds_t step = has_prev_cts_ ? cts_now - prev_cts_ : 0;
+    has_prev_cts_ = true;
+    prev_cts_ = cts_now;
+    if (step > 0) {
+        if (candidate_step_ > 0 && step < candidate_step_ * 2
+            && candidate_step_ < step * 2) {
+            last_step_ = step;
+        }
+        candidate_step_ = step;
+    }
+
+    if (!synced_) {
+        resync_(cts_now);
+    } else if (cts_now < next_grid_cts_ - max_jump - grid_period_
+               || cts_now >= next_grid_cts_ + max_jump) {
         // Discontinuity (seek, mapping jump, long stall): don't emit
         // stale crossings, restart the grid cursor.
         roc_log(LogDebug,
@@ -88,15 +135,26 @@ void StreamSnapshotSampler::process_read(packet::stream_timestamp_t position,
         resync_(cts_now);
     }
 
-    if (niq_latency >= 0) {
-        niq_accum_ += niq_latency;
-        niq_accum_count_++;
+    // Emit at most one ring's worth of crossings per read; skip the
+    // rest (the ring would overwrite them anyway).
+    const int64_t pending =
+        cts_now < next_grid_cts_ ? 0 : (cts_now - next_grid_cts_) / grid_period_ + 1;
+    if (pending > (int64_t)MaxSnapshots) {
+        next_grid_cts_ += (pending - (int64_t)MaxSnapshots) * grid_period_;
     }
 
     while (cts_now >= next_grid_cts_) {
-        emit_(position, niq_latency, e2e_latency, freq_coeff, target_latency);
+        emit_(niq_latency, e2e_latency, freq_coeff, target_latency);
         next_grid_cts_ += grid_period_;
     }
+
+    if (ring_size_ > 0) {
+        // Accumulation restarts after the read that crossed; crossings
+        // within one read share the same interval mean.
+        reset_accum_();
+    }
+
+    update_rtp_cursor_();
 }
 
 size_t StreamSnapshotSampler::get_snapshots(packet::StreamSnapshot* snapshots,
@@ -114,15 +172,19 @@ size_t StreamSnapshotSampler::get_snapshots(packet::StreamSnapshot* snapshots,
     return n_out;
 }
 
-void StreamSnapshotSampler::emit_(packet::stream_timestamp_t position,
-                                  core::nanoseconds_t niq_latency,
+void StreamSnapshotSampler::emit_(core::nanoseconds_t niq_latency,
                                   core::nanoseconds_t e2e_latency,
                                   double freq_coeff,
                                   core::nanoseconds_t target_latency) {
     packet::StreamSnapshot snap;
 
     snap.grid_index = (uint32_t)(next_grid_cts_ / grid_period_);
-    snap.position = position;
+    // Report the RTP position of the GRID POINT itself, not of the
+    // read that crossed it. The sender validates this position against
+    // the grid, so it must not carry the read-cadence overshoot.
+    snap.position = map_rtp_
+        + (packet::stream_timestamp_t)sample_spec_.ns_2_stream_timestamp_delta(
+              next_grid_cts_ - map_cts_);
     snap.niq_instant = niq_latency >= 0 ? niq_latency : -1;
     if (niq_accum_count_ > 0) {
         snap.niq_mean = niq_accum_ / (core::nanoseconds_t)niq_accum_count_;
@@ -140,14 +202,19 @@ void StreamSnapshotSampler::emit_(packet::stream_timestamp_t position,
     if (ring_size_ < MaxSnapshots) {
         ring_size_++;
     }
-
-    reset_accum_();
 }
 
 void StreamSnapshotSampler::resync_(core::nanoseconds_t cts_now) {
     synced_ = true;
     next_grid_cts_ = (cts_now / grid_period_ + 1) * grid_period_;
     reset_accum_();
+    update_rtp_cursor_();
+}
+
+void StreamSnapshotSampler::update_rtp_cursor_() {
+    next_grid_rtp_ = map_rtp_
+        + (packet::stream_timestamp_t)sample_spec_.ns_2_stream_timestamp_delta(
+              next_grid_cts_ - map_cts_);
 }
 
 void StreamSnapshotSampler::reset_accum_() {

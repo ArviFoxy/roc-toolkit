@@ -90,12 +90,13 @@ TEST(stream_snapshot_sampler, basic_crossings) {
     CHECK_EQUAL(base_index + 1, snaps[0].grid_index);
     CHECK_EQUAL(base_index + 2, snaps[1].grid_index);
 
-    // Consecutive indices, positions ~one grid apart.
+    // Consecutive indices; positions are grid-aligned, so exactly one
+    // grid period apart (the read-cadence overshoot must not leak into
+    // the reported position).
     CHECK_EQUAL(snaps[0].grid_index + 1, snaps[1].grid_index);
     const packet::stream_timestamp_diff_t pos_delta =
         packet::stream_timestamp_diff(snaps[1].position, snaps[0].position);
-    CHECK(pos_delta >= (packet::stream_timestamp_diff_t)GridSamples - ReadSamples);
-    CHECK(pos_delta <= (packet::stream_timestamp_diff_t)GridSamples + ReadSamples);
+    LONGS_EQUAL((packet::stream_timestamp_diff_t)GridSamples, pos_delta);
 
     // Constant niq: instant == mean == fed value.
     LONGLONGS_EQUAL(2 * core::Millisecond, snaps[1].niq_instant);
@@ -253,6 +254,53 @@ TEST(stream_snapshot_sampler, rtp_wraparound) {
     const size_t n = sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots);
     CHECK_EQUAL(2, n);
     CHECK_EQUAL(snaps[0].grid_index + 1, snaps[1].grid_index);
+}
+
+TEST(stream_snapshot_sampler, grid_smaller_than_read) {
+    // Grid period far below the read step: every read crosses several
+    // grid points. The discontinuity guard must not fire, and the ring
+    // fills with the newest crossings.
+    const core::nanoseconds_t SmallGrid = 3 * core::Millisecond;
+    StreamSnapshotSampler sampler(sample_spec, SmallGrid);
+    sampler.update_mapping(MapCts, MapRtp);
+
+    // 10ms reads for 200ms of stream.
+    const packet::stream_timestamp_t BigRead = SampleRate / 100;
+    for (packet::stream_timestamp_t off = 0; off < SampleRate / 5; off += BigRead) {
+        sampler.process_read(MapRtp + off, core::Millisecond, -1, 0, -1);
+    }
+
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    const size_t n = sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots);
+    CHECK_EQUAL(StreamSnapshotSampler::MaxSnapshots, n);
+
+    // Newest snapshots carry consecutive grid indices and valid means.
+    for (size_t i = 1; i < n; i++) {
+        CHECK_EQUAL(snaps[i - 1].grid_index + 1, snaps[i].grid_index);
+    }
+    for (size_t i = 0; i < n; i++) {
+        CHECK(snaps[i].niq_mean >= 0);
+    }
+}
+
+TEST(stream_snapshot_sampler, shared_mean_on_multi_crossing) {
+    // Two grid points crossed by one read: both snapshots carry the
+    // same interval mean; neither is unavailable.
+    const core::nanoseconds_t SmallGrid = 100 * core::Millisecond;
+    StreamSnapshotSampler sampler(sample_spec, SmallGrid);
+    sampler.update_mapping(MapCts, MapRtp);
+
+    sampler.process_read(MapRtp, 2 * core::Millisecond, -1, 0, -1);
+    // One read jumping two grid periods forward.
+    sampler.process_read(MapRtp + SampleRate / 5 + ReadSamples,
+                         2 * core::Millisecond, -1, 0, -1);
+
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    const size_t n = sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots);
+    CHECK(n >= 2);
+    for (size_t i = 0; i < n; i++) {
+        LONGLONGS_EQUAL(2 * core::Millisecond, snaps[i].niq_mean);
+    }
 }
 
 } // namespace audio
