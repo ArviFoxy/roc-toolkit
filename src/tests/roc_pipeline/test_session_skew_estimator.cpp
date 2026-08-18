@@ -254,7 +254,7 @@ TEST(session_skew_estimator, grid_delta_gate) {
 
     est.process_snapshot((size_t)slot_a, BaseCts, Period,
                          make_sample(10 * core::Millisecond),
-                         10 * core::Millisecond /* > max_grid_delta */, BaseCts);
+                         30 * core::Millisecond /* > max_grid_delta */, BaseCts);
 
     Est::FleetStats fleet;
     est.fleet_stats(fleet);
@@ -368,6 +368,75 @@ TEST(session_skew_estimator, unregister_slot) {
 
     Est::SlotStats stats;
     CHECK(!est.slot_stats((size_t)slots[2], stats));
+}
+
+TEST(session_skew_estimator, future_grid_gate) {
+    // A grid point far in the future of the arrival clock is rejected
+    // and must not advance the newest-row cursor: later normal rows
+    // still finalize.
+    SessionSkewEstimatorConfig config;
+    Est est(config, metrics::PrometheusConfig());
+
+    ssize_t slots[2];
+    slots[0] = est.register_slot("a");
+    slots[1] = est.register_slot("b");
+
+    est.process_snapshot((size_t)slots[0], BaseCts + 3600 * core::Second, Period,
+                         make_sample(10 * core::Millisecond), 0, BaseCts);
+
+    Est::FleetStats fleet;
+    est.fleet_stats(fleet);
+    CHECK_EQUAL(1, fleet.rejected);
+
+    const core::nanoseconds_t q[2] = { 10 * core::Millisecond, 12 * core::Millisecond };
+    for (size_t row = 0; row < 3; row++) {
+        feed_row(est, slots, q, 2, row);
+    }
+
+    est.fleet_stats(fleet);
+    CHECK_EQUAL(3, fleet.full_rows);
+}
+
+TEST(session_skew_estimator, mean_required) {
+    // A snapshot without an interval mean is rejected: rows never mix
+    // interval means with instantaneous values.
+    SessionSkewEstimatorConfig config;
+    Est est(config, metrics::PrometheusConfig());
+
+    ssize_t slot_a = est.register_slot("a");
+    est.register_slot("b");
+
+    packet::StreamSnapshot sample = make_sample(-1);
+    sample.niq_instant = 10 * core::Millisecond;
+    est.process_snapshot((size_t)slot_a, BaseCts, Period, sample, 0, BaseCts);
+
+    Est::FleetStats fleet;
+    est.fleet_stats(fleet);
+    CHECK_EQUAL(1, fleet.rejected);
+    CHECK_EQUAL(0, fleet.full_rows);
+}
+
+TEST(session_skew_estimator, freshness_only_on_accept) {
+    // Rejected snapshots must not refresh the slot's last-update time.
+    SessionSkewEstimatorConfig config;
+    Est est(config, metrics::PrometheusConfig());
+
+    ssize_t slot_a = est.register_slot("a");
+    est.register_slot("b");
+
+    est.process_snapshot((size_t)slot_a, BaseCts, Period,
+                         make_sample(10 * core::Millisecond),
+                         30 * core::Millisecond /* rejected */, BaseCts);
+
+    Est::SlotStats stats;
+    CHECK(est.slot_stats((size_t)slot_a, stats));
+    LONGLONGS_EQUAL(0, stats.last_update);
+
+    est.process_snapshot((size_t)slot_a, BaseCts, Period,
+                         make_sample(10 * core::Millisecond), 0, BaseCts);
+
+    CHECK(est.slot_stats((size_t)slot_a, stats));
+    LONGLONGS_EQUAL(BaseCts, stats.last_update);
 }
 
 } // namespace pipeline

@@ -52,6 +52,10 @@ SessionSkewEstimator::SessionSkewEstimator(
     const SessionSkewEstimatorConfig& config,
     const metrics::PrometheusConfig& prometheus_config)
     : config_(config)
+    , used_mask_(0)
+    , flinch_step_sec_(ns_2_sec(config.flinch_step))
+    , flinch_abs_sec_(ns_2_sec(config.flinch_abs))
+    , flinch_release_sec_(ns_2_sec(config.flinch_release_band))
     , common_mode_baseline_(0)
     , has_common_mode_baseline_(false)
     , newest_grid_cts_(0)
@@ -225,6 +229,7 @@ ssize_t SessionSkewEstimator::register_slot(const char* name) {
             slots_[i].used = true;
             strncpy(slots_[i].name, name, MaxNameLen - 1);
             slots_[i].stats = SlotStats();
+            used_mask_ |= (1u << i);
 
             register_slot_metrics_(i);
             for (size_t j = 0; j < MaxSlots; j++) {
@@ -245,6 +250,7 @@ void SessionSkewEstimator::unregister_slot(size_t slot_index) {
     roc_panic_if(slot_index >= MaxSlots);
 
     slots_[slot_index].used = false;
+    used_mask_ &= ~(1u << slot_index);
 
     for (size_t r = 0; r < MaxRows; r++) {
         rows_[r].present_mask &= ~(1u << slot_index);
@@ -277,13 +283,11 @@ void SessionSkewEstimator::process_snapshot(size_t slot_index,
 
     if (!slots_[slot_index].used) {
         fleet_.rejected++;
+#ifdef ROC_TARGET_PROMETHEUS
+        rejected_counter_->Increment();
+#endif
         return;
     }
-
-    slots_[slot_index].stats.last_update = arrival_time;
-#ifdef ROC_TARGET_PROMETHEUS
-    slots_[slot_index].snapshot_timestamp_gauge->Set((double)arrival_time / 1e9);
-#endif
 
     if (grid_period <= 0) {
         fleet_.rejected++;
@@ -303,8 +307,21 @@ void SessionSkewEstimator::process_snapshot(size_t slot_index,
         return;
     }
 
-    if (sample.niq_mean < 0 && sample.niq_instant < 0) {
-        // Nothing usable to compare.
+    if (sample.niq_mean < 0) {
+        // No interval mean. The row statistics compare interval means
+        // across slots; mixing in an instantaneous value would compare
+        // two different quantities.
+        fleet_.rejected++;
+#ifdef ROC_TARGET_PROMETHEUS
+        rejected_counter_->Increment();
+#endif
+        return;
+    }
+
+    if (grid_cts > arrival_time + config_.max_future_grid) {
+        // A grid point is a capture instant the receiver already
+        // played; it cannot sit far in the future of the local clock.
+        // This bound protects newest_grid_cts_, which only grows.
         fleet_.rejected++;
 #ifdef ROC_TARGET_PROMETHEUS
         rejected_counter_->Increment();
@@ -325,6 +342,13 @@ void SessionSkewEstimator::process_snapshot(size_t slot_index,
 
     row->samples[slot_index] = sample;
     row->present_mask |= (1u << slot_index);
+
+    // Freshness marks only on ACCEPTED new snapshots, so a slot whose
+    // snapshots are all rejected (or replayed) reads as stale.
+    slots_[slot_index].stats.last_update = arrival_time;
+#ifdef ROC_TARGET_PROMETHEUS
+    slots_[slot_index].snapshot_timestamp_gauge->Set((double)arrival_time / 1e9);
+#endif
 
     if (grid_cts > newest_grid_cts_) {
         newest_grid_cts_ = grid_cts;
@@ -373,12 +397,7 @@ SessionSkewEstimator::find_or_create_row_(core::nanoseconds_t grid_cts,
 }
 
 void SessionSkewEstimator::finalize_ready_rows_() {
-    uint32_t all_mask = 0;
-    for (size_t i = 0; i < MaxSlots; i++) {
-        if (slots_[i].used) {
-            all_mask |= (1u << i);
-        }
-    }
+    const uint32_t all_mask = used_mask_;
 
     for (size_t r = 0; r < MaxRows; r++) {
         Row& row = rows_[r];
@@ -407,17 +426,15 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
         }
     }
 
-    uint32_t all_mask = 0;
-    for (size_t i = 0; i < MaxSlots; i++) {
-        if (slots_[i].used) {
-            all_mask |= (1u << i);
-        }
-    }
+    const uint32_t all_mask = used_mask_;
 
     if (n_present < 2) {
         // Nothing cross-receiver to compute.
         if (n_present > 0) {
             fleet_.partial_rows++;
+#ifdef ROC_TARGET_PROMETHEUS
+            rows_partial_counter_->Increment();
+#endif
         }
         return;
     }
@@ -439,7 +456,7 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
     double q_sorted[MaxSlots];
     for (size_t n = 0; n < n_present; n++) {
         const packet::StreamSnapshot& sample = row.samples[present[n]];
-        q[n] = ns_2_sec(sample.niq_mean >= 0 ? sample.niq_mean : sample.niq_instant);
+        q[n] = ns_2_sec(sample.niq_mean);
         q_sorted[n] = q[n];
     }
     const double q_median = median_(q_sorted, n_present);
@@ -521,6 +538,11 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
         slot.target_latency_gauge->Set(slot.stats.target_latency);
 #endif
 
+        // The event detector compares against the mean BEFORE this
+        // row's offset enters it; otherwise the trigger references
+        // itself and desensitizes by alpha.
+        update_flinch_(i, offset[n], row);
+
         if (!slot.has_ewma) {
             slot.ewma_mean = offset[n];
             slot.has_ewma = true;
@@ -528,8 +550,6 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
             slot.ewma_mean += alpha * (offset[n] - slot.ewma_mean);
         }
         centered[n] = offset[n] - slot.ewma_mean;
-
-        update_flinch_(i, offset[n], row);
 
         slot.has_prev_offset = true;
         slot.prev_offset = offset[n];
@@ -596,9 +616,9 @@ void SessionSkewEstimator::update_flinch_(size_t slot_index,
     Slot& slot = slots_[slot_index];
     SlotStats& stats = slot.stats;
 
-    const double step_threshold = ns_2_sec(config_.flinch_step);
-    const double abs_threshold = ns_2_sec(config_.flinch_abs);
-    const double release_band = ns_2_sec(config_.flinch_release_band);
+    const double step_threshold = flinch_step_sec_;
+    const double abs_threshold = flinch_abs_sec_;
+    const double release_band = flinch_release_sec_;
 
     if (!stats.flinch_active) {
         const bool step_trigger = slot.has_prev_offset
@@ -634,14 +654,14 @@ void SessionSkewEstimator::update_flinch_(size_t slot_index,
 #endif
 
     if (excursion <= release_band) {
+        if (slot.flinch_hold_ns == 0) {
+            // First row back inside the band: the event ended here.
+            slot.flinch_end_cts = row.grid_cts;
+        }
         slot.flinch_hold_ns += row.grid_period;
         if (slot.flinch_hold_ns >= config_.flinch_hold) {
             stats.flinch_active = false;
-            stats.flinch_duration =
-                ns_2_sec(row.grid_cts - slot.flinch_start_cts - slot.flinch_hold_ns);
-            if (stats.flinch_duration < 0) {
-                stats.flinch_duration = 0;
-            }
+            stats.flinch_duration = ns_2_sec(slot.flinch_end_cts - slot.flinch_start_cts);
 #ifdef ROC_TARGET_PROMETHEUS
             slot.flinch_active_gauge->Set(0);
 #endif

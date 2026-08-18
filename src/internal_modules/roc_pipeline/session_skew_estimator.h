@@ -30,8 +30,18 @@ namespace pipeline {
 //! Session skew estimator configuration.
 struct SessionSkewEstimatorConfig {
     //! Reject snapshots whose position deviates from the grid point by
-    //! more than this (indicates CTS mapping breakage).
+    //! more than this. The deviation measures how far the receiver's
+    //! SR-anchored clock mapping and the sender's last-packet-anchored
+    //! mapping disagree; several milliseconds is normal noise, so the
+    //! bound must stay well above it.
     core::nanoseconds_t max_grid_delta;
+
+    //! Reject snapshots whose grid point sits further than this in the
+    //! future of the local clock. A grid point is a capture instant the
+    //! receiver already played, so it can never be far in the future;
+    //! without this bound one bad snapshot advances the newest-row
+    //! cursor permanently and all later rows are dropped as stale.
+    core::nanoseconds_t max_future_grid;
 
     //! Time constant of the EWMA statistics (means, covariance).
     core::nanoseconds_t stats_tau;
@@ -57,7 +67,8 @@ struct SessionSkewEstimatorConfig {
     size_t late_row_periods;
 
     SessionSkewEstimatorConfig()
-        : max_grid_delta(5 * core::Millisecond)
+        : max_grid_delta(20 * core::Millisecond)
+        , max_future_grid(30 * core::Second)
         , stats_tau(60 * core::Second)
         , common_mode_tau(60 * core::Second)
         , flinch_step(2 * core::Millisecond)
@@ -226,6 +237,7 @@ private:
         double flinch_baseline;
         core::nanoseconds_t flinch_start_cts;
         core::nanoseconds_t flinch_hold_ns;
+        core::nanoseconds_t flinch_end_cts;
 
 #ifdef ROC_TARGET_PROMETHEUS
         prometheus::Gauge* offset_gauge;
@@ -254,6 +266,15 @@ private:
 
     Slot slots_[MaxSlots];
     Row rows_[MaxRows];
+
+    // Bit i set while slots_[i].used; kept in sync by register_slot()
+    // and unregister_slot() so rows never scan the table.
+    uint32_t used_mask_;
+
+    // Flinch thresholds in seconds, fixed at construction.
+    double flinch_step_sec_;
+    double flinch_abs_sec_;
+    double flinch_release_sec_;
 
     // EWMA cross-products of centered offsets, upper triangle including
     // the diagonal (variances).
