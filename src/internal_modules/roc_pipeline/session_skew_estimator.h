@@ -42,10 +42,11 @@ namespace pipeline {
 //! clock-free skew (common emission means receiver i plays the position
 //! at arrival + q_i; no wall clocks involved). The e2e-based offset is
 //! computed the same way from the receivers' e2e estimates and inherits
-//! their NTP error; the difference of the two per slot IS the
-//! differential clock-mapping error. Note the clock-free offset
-//! measures the decode point: constant per-receiver device buffering
-//! appears only in the e2e view.
+//! their NTP error. The per-slot difference of the two contains the
+//! differential clock-mapping error together with the constant
+//! per-receiver device buffering: the clock-free offset measures the
+//! decode point, and device buffering appears only in the e2e view.
+//! Treat the disagreement as an upper bound on the mapping error.
 //!
 //! Also maintained at row rate: the full pairwise skew matrix and an
 //! EWMA covariance/correlation matrix of offset fluctuations (Prometheus
