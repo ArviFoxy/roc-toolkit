@@ -95,7 +95,7 @@ def test_track_per_leg(pw, roc_send, roc_recv, tmp_path, num_legs):
         assert all(c is not None and c > 0 for c in counts), counts
         assert max(counts) - min(counts) <= 0.05 * max(counts), counts
 
-        # M2 report plane: receiver snapshots reach the session skew
+        # Report plane: receiver snapshots reach the session skew
         # estimator, full rows finalize, and localhost legs are aligned
         # to well under the latency target (50 ms bound tolerates early
         # tuner-convergence transients).
