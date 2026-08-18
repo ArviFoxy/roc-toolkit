@@ -72,6 +72,9 @@ struct SessionSkewEstimatorConfig {
     core::nanoseconds_t max_future_grid;
 
     //! Time constant of the EWMA statistics (means, covariance).
+    //! Long against the spacing of latency events (minutes apart in
+    //! practice), so the covariance averages across events instead of
+    //! being shocked by each one.
     core::nanoseconds_t stats_tau;
 
     //! Time constant of the slow common-mode baseline.
@@ -102,7 +105,7 @@ struct SessionSkewEstimatorConfig {
     SessionSkewEstimatorConfig()
         : max_grid_delta(20 * core::Millisecond)
         , max_future_grid(30 * core::Second)
-        , stats_tau(60 * core::Second)
+        , stats_tau(15 * core::Minute)
         , common_mode_tau(60 * core::Second)
         , jump_step(2 * core::Millisecond)
         , jump_abs(10 * core::Millisecond)

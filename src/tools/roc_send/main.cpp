@@ -856,6 +856,32 @@ int main(int argc, char** argv) {
             prometheus_config.playout_spread.scale = metrics::HistogramScale_Log;
         }
     }
+    if (args.prometheus_playout_fleet_mean_buckets_given) {
+        prometheus_config.playout_fleet_mean.buckets =
+            args.prometheus_playout_fleet_mean_buckets_arg;
+    }
+    if (args.prometheus_playout_fleet_mean_min_given) {
+        if (!core::parse_duration(args.prometheus_playout_fleet_mean_min_arg,
+                                  prometheus_config.playout_fleet_mean.min)) {
+            roc_log(LogError, "invalid --prometheus-playout-fleet-mean-min: bad format");
+            return 1;
+        }
+    }
+    if (args.prometheus_playout_fleet_mean_max_given) {
+        if (!core::parse_duration(args.prometheus_playout_fleet_mean_max_arg,
+                                  prometheus_config.playout_fleet_mean.max)) {
+            roc_log(LogError, "invalid --prometheus-playout-fleet-mean-max: bad format");
+            return 1;
+        }
+    }
+    if (args.prometheus_playout_fleet_mean_scale_given) {
+        if (args.prometheus_playout_fleet_mean_scale_arg
+            == prometheus_playout_fleet_mean_scale_arg_linear) {
+            prometheus_config.playout_fleet_mean.scale = metrics::HistogramScale_Linear;
+        } else {
+            prometheus_config.playout_fleet_mean.scale = metrics::HistogramScale_Log;
+        }
+    }
 
     pipeline::SenderSinkConfig sender_config;
     if (!build_sender_config(args, sender_config, context, *input_source)) {

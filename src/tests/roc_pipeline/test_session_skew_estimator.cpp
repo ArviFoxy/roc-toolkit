@@ -246,6 +246,47 @@ TEST(session_skew_estimator, fleet_stats_over_present_slots) {
     DOUBLES_EQUAL(0.002, fleet.spread, 1e-9);
 }
 
+TEST(session_skew_estimator, ema_no_starting_bias) {
+    SessionSkewEstimatorConfig config;
+    config.common_mode_tau = 10 * core::Second;
+    Est est(config, metrics::PrometheusConfig());
+
+    ssize_t slots[2];
+    slots[0] = est.register_slot("a");
+    slots[1] = est.register_slot("b");
+
+    // Row 0: both slots at 10ms; the common-mode baseline seeds here.
+    const core::nanoseconds_t q0[2] = { 10 * core::Millisecond, 10 * core::Millisecond };
+    feed_row(est, slots, q0, 2, 0);
+
+    Est::FleetStats fleet;
+    est.fleet_stats(fleet);
+    DOUBLES_EQUAL(0, fleet.common_mode, 1e-12);
+
+    // Row 1: both slots at 12ms. The bias-corrected baseline weights
+    // the two rows almost equally, so common mode = step * (1 - alpha)
+    // / (2 - alpha), close to half the step. A first-sample seed would
+    // give step * (1 - alpha), close to the full step.
+    const core::nanoseconds_t q1[2] = { 12 * core::Millisecond, 12 * core::Millisecond };
+    feed_row(est, slots, q1, 2, 1);
+
+    const double alpha = (double)Period / (double)config.common_mode_tau;
+    est.fleet_stats(fleet);
+    DOUBLES_EQUAL(0.002 * (1 - alpha) / (2 - alpha), fleet.common_mode, 1e-9);
+
+    // The covariance centers on the prior mean, so the first products
+    // land in row 1: the per-slot deviation is exactly q1 - q0, and
+    // the weight normalization cancels for a single product.
+    Est::SlotStats stats;
+    CHECK(est.slot_stats((size_t)slots[0], stats));
+    DOUBLES_EQUAL(0.002, stats.rms, 1e-9);
+
+    Est::PairStats pair;
+    CHECK(est.pair_stats((size_t)slots[0], (size_t)slots[1], pair));
+    DOUBLES_EQUAL(1.0, pair.corr, 1e-9);
+    DOUBLES_EQUAL(4e-6, pair.cov, 1e-12);
+}
+
 TEST(session_skew_estimator, idempotent_duplicates) {
     SessionSkewEstimatorConfig config;
     Est est(config, metrics::PrometheusConfig());

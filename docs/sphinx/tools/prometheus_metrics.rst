@@ -407,10 +407,10 @@ SessionSkewEstimator
      - Clock-free playout skew between two slots
    * - ``roc_send_playout_corr{slot_a=...,slot_b=...}``
      - Gauge
-     - EWMA correlation of queue-depth changes; own-mean centered, no fleet reference
+     - Correlation of the two slots' latencies (exponential averages, 15min time constant)
    * - ``roc_send_playout_cov_seconds2{slot_a=...,slot_b=...}``
      - Gauge
-     - EWMA covariance of queue-depth changes; own-mean centered
+     - Covariance of the two slots' latencies (exponential averages, 15min time constant)
    * - ``roc_send_playout_fleet_mean_seconds``
      - Gauge
      - Mean queue depth across the fleet at a common stream position
@@ -439,8 +439,10 @@ SessionSkewEstimator
      - Counter
      - Snapshots rejected by the validity gates
 
-The three fleet histograms share the ``--prometheus-playout-spread-*``
-bucket bounds.
+The stddev histogram shares the ``--prometheus-playout-spread-*`` bucket
+bounds (default log, 10us to 10ms); the fleet mean histogram has its own
+``--prometheus-playout-fleet-mean-*`` flags (default log, 5ms to 100ms).
+Defaults put the log midpoint near each statistic's observed mode.
 
 Mixed versions are safe in both directions: an old sender skips the
 unknown XR block, and an old receiver simply never sends it (the

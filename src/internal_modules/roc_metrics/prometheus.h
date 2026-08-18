@@ -105,14 +105,21 @@ struct PrometheusConfig {
     HistogramConfig jitter;
     HistogramConfig rtt;
     HistogramConfig playout_spread;
+    HistogramConfig playout_fleet_mean;
 
+    // playout_spread bounds also serve the fleet stddev histogram:
+    // both statistics live in the same sub-millisecond decade, with the
+    // log midpoint near the observed modes (stddev ~0.3ms, spread
+    // ~0.8ms). The fleet mean sits near the target latency, two
+    // decades higher, so it has its own bounds (log midpoint ~22ms).
     PrometheusConfig()
         : port(0)
         , niq_latency(100, 5 * core::Millisecond, 50 * core::Millisecond)
         , e2e_latency(100, 20 * core::Millisecond, 200 * core::Millisecond)
         , jitter(100, 100 * core::Microsecond, 200 * core::Millisecond)
         , rtt(100, 1 * core::Millisecond, 100 * core::Millisecond)
-        , playout_spread(40, 10 * core::Microsecond, 50 * core::Millisecond) {
+        , playout_spread(40, 10 * core::Microsecond, 10 * core::Millisecond)
+        , playout_fleet_mean(40, 5 * core::Millisecond, 100 * core::Millisecond) {
     }
 };
 

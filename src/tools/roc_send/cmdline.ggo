@@ -127,8 +127,17 @@ section "Metrics options"
     option "prometheus-playout-spread-min" - "Minimum playout spread bucket boundary, TIME units"
         typestr="TIME" string default="10us" optional
     option "prometheus-playout-spread-max" - "Maximum playout spread bucket boundary, TIME units"
-        typestr="TIME" string default="50ms" optional
+        typestr="TIME" string default="10ms" optional
     option "prometheus-playout-spread-scale" - "Bucket spacing for playout spread histogram"
+        values="log","linear" default="log" enum optional
+
+    option "prometheus-playout-fleet-mean-buckets" - "Number of histogram buckets for playout fleet mean metric"
+        int default="40" optional
+    option "prometheus-playout-fleet-mean-min" - "Minimum playout fleet mean bucket boundary, TIME units"
+        typestr="TIME" string default="5ms" optional
+    option "prometheus-playout-fleet-mean-max" - "Maximum playout fleet mean bucket boundary, TIME units"
+        typestr="TIME" string default="100ms" optional
+    option "prometheus-playout-fleet-mean-scale" - "Bucket spacing for playout fleet mean histogram"
         values="log","linear" default="log" enum optional
 
 section "Memory options"

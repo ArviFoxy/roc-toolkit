@@ -90,8 +90,12 @@ const char *gengetopt_args_info_help[] = {
   "      --prometheus-rtt-scale=ENUM\n                                Bucket spacing for RTT histogram  (possible\n                                  values=\"log\", \"linear\" default=`log')",
   "      --prometheus-playout-spread-buckets=INT\n                                Number of histogram buckets for playout spread\n                                  metric  (default=`40')",
   "      --prometheus-playout-spread-min=TIME\n                                Minimum playout spread bucket boundary, TIME\n                                  units  (default=`10us')",
-  "      --prometheus-playout-spread-max=TIME\n                                Maximum playout spread bucket boundary, TIME\n                                  units  (default=`50ms')",
+  "      --prometheus-playout-spread-max=TIME\n                                Maximum playout spread bucket boundary, TIME\n                                  units  (default=`10ms')",
   "      --prometheus-playout-spread-scale=ENUM\n                                Bucket spacing for playout spread histogram\n                                  (possible values=\"log\", \"linear\"\n                                  default=`log')",
+  "      --prometheus-playout-fleet-mean-buckets=INT\n                                Number of histogram buckets for playout fleet\n                                  mean metric  (default=`40')",
+  "      --prometheus-playout-fleet-mean-min=TIME\n                                Minimum playout fleet mean bucket boundary,\n                                  TIME units  (default=`5ms')",
+  "      --prometheus-playout-fleet-mean-max=TIME\n                                Maximum playout fleet mean bucket boundary,\n                                  TIME units  (default=`100ms')",
+  "      --prometheus-playout-fleet-mean-scale=ENUM\n                                Bucket spacing for playout fleet mean histogram\n                                  (possible values=\"log\", \"linear\"\n                                  default=`log')",
   "\nMemory options:",
   "      --max-packet-size=SIZE    Maximum network packet size, SIZE units",
   "      --max-frame-size=SIZE     Maximum I/O and processing frame size, SIZE\n                                  units",
@@ -131,6 +135,7 @@ const char *cmdline_parser_prometheus_e2e_latency_scale_values[] = {"log", "line
 const char *cmdline_parser_prometheus_jitter_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-jitter-scale. */
 const char *cmdline_parser_prometheus_rtt_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-rtt-scale. */
 const char *cmdline_parser_prometheus_playout_spread_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-playout-spread-scale. */
+const char *cmdline_parser_prometheus_playout_fleet_mean_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-playout-fleet-mean-scale. */
 
 static char *
 gengetopt_strdup (const char *s);
@@ -190,6 +195,10 @@ void clear_given (struct gengetopt_args_info *args_info)
   args_info->prometheus_playout_spread_min_given = 0 ;
   args_info->prometheus_playout_spread_max_given = 0 ;
   args_info->prometheus_playout_spread_scale_given = 0 ;
+  args_info->prometheus_playout_fleet_mean_buckets_given = 0 ;
+  args_info->prometheus_playout_fleet_mean_min_given = 0 ;
+  args_info->prometheus_playout_fleet_mean_max_given = 0 ;
+  args_info->prometheus_playout_fleet_mean_scale_given = 0 ;
   args_info->max_packet_size_given = 0 ;
   args_info->max_frame_size_given = 0 ;
   args_info->prof_given = 0 ;
@@ -287,10 +296,18 @@ void clear_args (struct gengetopt_args_info *args_info)
   args_info->prometheus_playout_spread_buckets_orig = NULL;
   args_info->prometheus_playout_spread_min_arg = gengetopt_strdup ("10us");
   args_info->prometheus_playout_spread_min_orig = NULL;
-  args_info->prometheus_playout_spread_max_arg = gengetopt_strdup ("50ms");
+  args_info->prometheus_playout_spread_max_arg = gengetopt_strdup ("10ms");
   args_info->prometheus_playout_spread_max_orig = NULL;
   args_info->prometheus_playout_spread_scale_arg = prometheus_playout_spread_scale_arg_log;
   args_info->prometheus_playout_spread_scale_orig = NULL;
+  args_info->prometheus_playout_fleet_mean_buckets_arg = 40;
+  args_info->prometheus_playout_fleet_mean_buckets_orig = NULL;
+  args_info->prometheus_playout_fleet_mean_min_arg = gengetopt_strdup ("5ms");
+  args_info->prometheus_playout_fleet_mean_min_orig = NULL;
+  args_info->prometheus_playout_fleet_mean_max_arg = gengetopt_strdup ("100ms");
+  args_info->prometheus_playout_fleet_mean_max_orig = NULL;
+  args_info->prometheus_playout_fleet_mean_scale_arg = prometheus_playout_fleet_mean_scale_arg_log;
+  args_info->prometheus_playout_fleet_mean_scale_orig = NULL;
   args_info->max_packet_size_arg = NULL;
   args_info->max_packet_size_orig = NULL;
   args_info->max_frame_size_arg = NULL;
@@ -372,10 +389,14 @@ void init_args_info(struct gengetopt_args_info *args_info)
   args_info->prometheus_playout_spread_min_help = gengetopt_args_info_help[55] ;
   args_info->prometheus_playout_spread_max_help = gengetopt_args_info_help[56] ;
   args_info->prometheus_playout_spread_scale_help = gengetopt_args_info_help[57] ;
-  args_info->max_packet_size_help = gengetopt_args_info_help[59] ;
-  args_info->max_frame_size_help = gengetopt_args_info_help[60] ;
-  args_info->prof_help = gengetopt_args_info_help[62] ;
-  args_info->dump_help = gengetopt_args_info_help[63] ;
+  args_info->prometheus_playout_fleet_mean_buckets_help = gengetopt_args_info_help[58] ;
+  args_info->prometheus_playout_fleet_mean_min_help = gengetopt_args_info_help[59] ;
+  args_info->prometheus_playout_fleet_mean_max_help = gengetopt_args_info_help[60] ;
+  args_info->prometheus_playout_fleet_mean_scale_help = gengetopt_args_info_help[61] ;
+  args_info->max_packet_size_help = gengetopt_args_info_help[63] ;
+  args_info->max_frame_size_help = gengetopt_args_info_help[64] ;
+  args_info->prof_help = gengetopt_args_info_help[66] ;
+  args_info->dump_help = gengetopt_args_info_help[67] ;
   
 }
 
@@ -578,6 +599,12 @@ cmdline_parser_release (struct gengetopt_args_info *args_info)
   free_string_field (&(args_info->prometheus_playout_spread_max_arg));
   free_string_field (&(args_info->prometheus_playout_spread_max_orig));
   free_string_field (&(args_info->prometheus_playout_spread_scale_orig));
+  free_string_field (&(args_info->prometheus_playout_fleet_mean_buckets_orig));
+  free_string_field (&(args_info->prometheus_playout_fleet_mean_min_arg));
+  free_string_field (&(args_info->prometheus_playout_fleet_mean_min_orig));
+  free_string_field (&(args_info->prometheus_playout_fleet_mean_max_arg));
+  free_string_field (&(args_info->prometheus_playout_fleet_mean_max_orig));
+  free_string_field (&(args_info->prometheus_playout_fleet_mean_scale_orig));
   free_string_field (&(args_info->max_packet_size_arg));
   free_string_field (&(args_info->max_packet_size_orig));
   free_string_field (&(args_info->max_frame_size_arg));
@@ -760,6 +787,14 @@ cmdline_parser_dump(FILE *outfile, struct gengetopt_args_info *args_info)
     write_into_file(outfile, "prometheus-playout-spread-max", args_info->prometheus_playout_spread_max_orig, 0);
   if (args_info->prometheus_playout_spread_scale_given)
     write_into_file(outfile, "prometheus-playout-spread-scale", args_info->prometheus_playout_spread_scale_orig, cmdline_parser_prometheus_playout_spread_scale_values);
+  if (args_info->prometheus_playout_fleet_mean_buckets_given)
+    write_into_file(outfile, "prometheus-playout-fleet-mean-buckets", args_info->prometheus_playout_fleet_mean_buckets_orig, 0);
+  if (args_info->prometheus_playout_fleet_mean_min_given)
+    write_into_file(outfile, "prometheus-playout-fleet-mean-min", args_info->prometheus_playout_fleet_mean_min_orig, 0);
+  if (args_info->prometheus_playout_fleet_mean_max_given)
+    write_into_file(outfile, "prometheus-playout-fleet-mean-max", args_info->prometheus_playout_fleet_mean_max_orig, 0);
+  if (args_info->prometheus_playout_fleet_mean_scale_given)
+    write_into_file(outfile, "prometheus-playout-fleet-mean-scale", args_info->prometheus_playout_fleet_mean_scale_orig, cmdline_parser_prometheus_playout_fleet_mean_scale_values);
   if (args_info->max_packet_size_given)
     write_into_file(outfile, "max-packet-size", args_info->max_packet_size_orig, 0);
   if (args_info->max_frame_size_given)
@@ -1413,6 +1448,10 @@ cmdline_parser_internal (
         { "prometheus-playout-spread-min",	1, NULL, 0 },
         { "prometheus-playout-spread-max",	1, NULL, 0 },
         { "prometheus-playout-spread-scale",	1, NULL, 0 },
+        { "prometheus-playout-fleet-mean-buckets",	1, NULL, 0 },
+        { "prometheus-playout-fleet-mean-min",	1, NULL, 0 },
+        { "prometheus-playout-fleet-mean-max",	1, NULL, 0 },
+        { "prometheus-playout-fleet-mean-scale",	1, NULL, 0 },
         { "max-packet-size",	1, NULL, 0 },
         { "max-frame-size",	1, NULL, 0 },
         { "prof",	0, NULL, 0 },
@@ -2078,7 +2117,7 @@ cmdline_parser_internal (
           
             if (update_arg( (void *)&(args_info->prometheus_playout_spread_max_arg), 
                  &(args_info->prometheus_playout_spread_max_orig), &(args_info->prometheus_playout_spread_max_given),
-                &(local_args_info.prometheus_playout_spread_max_given), optarg, 0, "50ms", ARG_STRING,
+                &(local_args_info.prometheus_playout_spread_max_given), optarg, 0, "10ms", ARG_STRING,
                 check_ambiguity, override, 0, 0,
                 "prometheus-playout-spread-max", '-',
                 additional_error))
@@ -2095,6 +2134,62 @@ cmdline_parser_internal (
                 &(local_args_info.prometheus_playout_spread_scale_given), optarg, cmdline_parser_prometheus_playout_spread_scale_values, "log", ARG_ENUM,
                 check_ambiguity, override, 0, 0,
                 "prometheus-playout-spread-scale", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Number of histogram buckets for playout fleet mean metric.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-playout-fleet-mean-buckets") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_playout_fleet_mean_buckets_arg), 
+                 &(args_info->prometheus_playout_fleet_mean_buckets_orig), &(args_info->prometheus_playout_fleet_mean_buckets_given),
+                &(local_args_info.prometheus_playout_fleet_mean_buckets_given), optarg, 0, "40", ARG_INT,
+                check_ambiguity, override, 0, 0,
+                "prometheus-playout-fleet-mean-buckets", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Minimum playout fleet mean bucket boundary, TIME units.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-playout-fleet-mean-min") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_playout_fleet_mean_min_arg), 
+                 &(args_info->prometheus_playout_fleet_mean_min_orig), &(args_info->prometheus_playout_fleet_mean_min_given),
+                &(local_args_info.prometheus_playout_fleet_mean_min_given), optarg, 0, "5ms", ARG_STRING,
+                check_ambiguity, override, 0, 0,
+                "prometheus-playout-fleet-mean-min", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Maximum playout fleet mean bucket boundary, TIME units.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-playout-fleet-mean-max") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_playout_fleet_mean_max_arg), 
+                 &(args_info->prometheus_playout_fleet_mean_max_orig), &(args_info->prometheus_playout_fleet_mean_max_given),
+                &(local_args_info.prometheus_playout_fleet_mean_max_given), optarg, 0, "100ms", ARG_STRING,
+                check_ambiguity, override, 0, 0,
+                "prometheus-playout-fleet-mean-max", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Bucket spacing for playout fleet mean histogram.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-playout-fleet-mean-scale") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_playout_fleet_mean_scale_arg), 
+                 &(args_info->prometheus_playout_fleet_mean_scale_orig), &(args_info->prometheus_playout_fleet_mean_scale_given),
+                &(local_args_info.prometheus_playout_fleet_mean_scale_given), optarg, cmdline_parser_prometheus_playout_fleet_mean_scale_values, "log", ARG_ENUM,
+                check_ambiguity, override, 0, 0,
+                "prometheus-playout-fleet-mean-scale", '-',
                 additional_error))
               goto failure;
           

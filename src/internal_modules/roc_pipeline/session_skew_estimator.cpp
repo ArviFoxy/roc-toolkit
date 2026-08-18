@@ -64,7 +64,8 @@ const SlotGaugeDef* slot_gauge_defs() {
         { "playout_offset_disagreement_seconds",
           "Clock-free offset minus e2e offset; contains the differential"
           " clock-mapping error and constant per-receiver device buffering" },
-        { "playout_offset_rms_seconds", "EWMA RMS of queue-depth changes (own-mean centered)" },
+        { "playout_offset_rms_seconds",
+          "RMS of the slot's latency around its own exponential average" },
         { "recv_warp", "Receiver-reported warp (frequency coefficient - 1)" },
         { "recv_target_latency_seconds", "Receiver-reported target latency" },
         { "snapshot_timestamp_seconds",
@@ -90,8 +91,7 @@ SessionSkewEstimator::SessionSkewEstimator(
     , jump_step_sec_(ns_2_sec(config.jump_step))
     , jump_abs_sec_(ns_2_sec(config.jump_abs))
     , jump_release_sec_(ns_2_sec(config.jump_release_band))
-    , common_mode_baseline_(0)
-    , has_common_mode_baseline_(false)
+    , common_mode_baseline_()
     , newest_grid_cts_(0)
     , metrics_enabled_(prometheus_config.port > 0) {
     memset(slots_, 0, sizeof(slots_));
@@ -144,8 +144,10 @@ SessionSkewEstimator::SessionSkewEstimator(
                                             "playout_cov_seconds2" };
     static const char* pair_helps[3] = {
         "Clock-free playout skew, slot_a minus slot_b",
-        "EWMA correlation of queue-depth changes (own-mean centered)",
-        "EWMA covariance of queue-depth changes (own-mean centered)",
+        "Correlation of the two slots' latencies; mean and covariance are"
+        " exponential averages",
+        "Covariance of the two slots' latencies; mean and covariance are"
+        " exponential averages",
     };
     for (size_t g = 0; g < 3; g++) {
         pair_gauge_families_[g] = &prometheus::BuildGauge()
@@ -157,8 +159,10 @@ SessionSkewEstimator::SessionSkewEstimator(
 
     // Fleet cross-section statistics: mean, population stddev and
     // max-min of the queue depths at one grid instant. Gauges carry
-    // the last row; histograms aggregate the rows over time. All
-    // histograms share the playout_spread bucket bounds.
+    // the last row; histograms aggregate the rows over time. The
+    // stddev histogram shares the playout_spread bucket bounds; the
+    // mean has its own (it lives near the target latency, two decades
+    // above the spreads).
     fleet_mean_gauge_ =
         &prometheus::BuildGauge()
              .Name(metrics::scope_metric_name(scope, "playout_fleet_mean_seconds"))
@@ -173,7 +177,8 @@ SessionSkewEstimator::SessionSkewEstimator(
                    " slots, in seconds; one sample per grid row")
              .Register(*registry)
              .Add(no_labels,
-                  metrics::generate_histogram_buckets(prometheus_config.playout_spread));
+                  metrics::generate_histogram_buckets(
+                      prometheus_config.playout_fleet_mean));
     stddev_gauge_ =
         &prometheus::BuildGauge()
              .Name(metrics::scope_metric_name(scope, "playout_stddev_seconds"))
@@ -309,15 +314,13 @@ void SessionSkewEstimator::clear_slot_state_(size_t slot_index) {
         Pair& lo =
             pairs_[j < slot_index ? j : slot_index][j < slot_index ? slot_index : j];
         lo.valid = false;
-        lo.cov_valid = false;
         lo.skew = 0;
-        lo.cov = 0;
+        lo.cov = Ema();
     }
     Pair& diag = pairs_[slot_index][slot_index];
     diag.valid = false;
-    diag.cov_valid = false;
     diag.skew = 0;
-    diag.cov = 0;
+    diag.cov = Ema();
 }
 
 ssize_t SessionSkewEstimator::register_slot(const char* name) {
@@ -617,18 +620,13 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
     q_var /= (double)n_present;
 
     const double cm_alpha = (double)row.grid_period / (double)config_.common_mode_tau;
-    if (!has_common_mode_baseline_) {
-        common_mode_baseline_ = q_mean;
-        has_common_mode_baseline_ = true;
-    } else {
-        common_mode_baseline_ += cm_alpha * (q_mean - common_mode_baseline_);
-    }
+    common_mode_baseline_.update(cm_alpha, q_mean);
 
     fleet_.valid = true;
     fleet_.mean = q_mean;
     fleet_.stddev = sqrt(q_var);
     fleet_.spread = q_max - q_min;
-    fleet_.common_mode = q_mean - common_mode_baseline_;
+    fleet_.common_mode = q_mean - common_mode_baseline_.get();
 
 #ifdef ROC_TARGET_PROMETHEUS
     if (metrics_enabled_) {
@@ -647,6 +645,7 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
 
     double offset[MaxSlots];
     double centered[MaxSlots];
+    bool has_centered[MaxSlots];
     for (size_t n = 0; n < n_present; n++) {
         const size_t i = present[n];
         Slot& slot = slots_[i];
@@ -684,12 +683,7 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
         // itself and desensitizes by alpha.
         update_jump_(i, offset[n], row);
 
-        if (!slot.has_ewma) {
-            slot.ewma_mean = offset[n];
-            slot.has_ewma = true;
-        } else {
-            slot.ewma_mean += alpha * (offset[n] - slot.ewma_mean);
-        }
+        slot.offset_mean.update(alpha, offset[n]);
 
         // Covariance base: the slot's own queue-depth average. A fleet
         // reference (median or mean) mixes the slots' signals and
@@ -697,13 +691,17 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
         // correlated group; own-mean centering measures each pair
         // alone. A genuinely global cause then shows in ALL pairs,
         // which is the honest reading.
-        if (!slot.has_q_ewma) {
-            slot.q_ewma_mean = q[n];
-            slot.has_q_ewma = true;
+        // Centering uses the mean BEFORE this row's sample enters it:
+        // the residual keeps its full size, and a slot's first row only
+        // seeds the mean and contributes no product.
+        if (slot.q_mean.has()) {
+            centered[n] = q[n] - slot.q_mean.get();
+            has_centered[n] = true;
         } else {
-            slot.q_ewma_mean += alpha * (q[n] - slot.q_ewma_mean);
+            centered[n] = 0;
+            has_centered[n] = false;
         }
-        centered[n] = q[n] - slot.q_ewma_mean;
+        slot.q_mean.update(alpha, q[n]);
 
         slot.has_prev_offset = true;
         slot.prev_offset = offset[n];
@@ -717,12 +715,8 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
 
             Pair& pair = pairs_[i][j];
 
-            const double prod = centered[a] * centered[b];
-            if (!pair.cov_valid) {
-                pair.cov = prod;
-                pair.cov_valid = true;
-            } else {
-                pair.cov += alpha * (prod - pair.cov);
+            if (has_centered[a] && has_centered[b]) {
+                pair.cov.update(alpha, centered[a] * centered[b]);
             }
 
             if (i != j) {
@@ -733,7 +727,7 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
                 if (metrics_enabled_ && pair.skew_gauge) {
                     pair.skew_gauge->Set(pair.skew);
                     pair.corr_gauge->Set(pair_corr_(i, j));
-                    pair.cov_gauge->Set(pair.cov);
+                    pair.cov_gauge->Set(pair.cov.has() ? pair.cov.get() : 0);
                 }
 #endif
             }
@@ -743,8 +737,8 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
     // Per-slot RMS from the variance diagonal.
     for (size_t n = 0; n < n_present; n++) {
         const size_t i = present[n];
-        if (pairs_[i][i].cov_valid && pairs_[i][i].cov > 0) {
-            slots_[i].stats.rms = sqrt(pairs_[i][i].cov);
+        if (pairs_[i][i].cov.has() && pairs_[i][i].cov.get() > 0) {
+            slots_[i].stats.rms = sqrt(pairs_[i][i].cov.get());
 #ifdef ROC_TARGET_PROMETHEUS
             if (metrics_enabled_) {
                 slots_[i].gauges[Gauge_Rms]->Set(slots_[i].stats.rms);
@@ -757,12 +751,14 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
 // Correlation from the covariance triangle; [-1; 1], zero when either
 // variance is not yet established.
 double SessionSkewEstimator::pair_corr_(size_t slot_a, size_t slot_b) const {
-    const double var_a = pairs_[slot_a][slot_a].cov_valid ? pairs_[slot_a][slot_a].cov : 0;
-    const double var_b = pairs_[slot_b][slot_b].cov_valid ? pairs_[slot_b][slot_b].cov : 0;
-    if (var_a <= 0 || var_b <= 0) {
+    const Ema& var_a = pairs_[slot_a][slot_a].cov;
+    const Ema& var_b = pairs_[slot_b][slot_b].cov;
+    const Ema& cov = pairs_[slot_a][slot_b].cov;
+    if (!var_a.has() || !var_b.has() || !cov.has() || var_a.get() <= 0
+        || var_b.get() <= 0) {
         return 0;
     }
-    double corr = pairs_[slot_a][slot_b].cov / sqrt(var_a * var_b);
+    double corr = cov.get() / sqrt(var_a.get() * var_b.get());
     if (corr > 1) {
         corr = 1;
     }
@@ -785,7 +781,8 @@ void SessionSkewEstimator::update_jump_(size_t slot_index,
     if (!stats.jump_active) {
         const bool step_trigger = slot.has_prev_offset
             && fabs(offset - slot.prev_offset) > step_threshold;
-        const bool abs_trigger = fabs(offset - slot.ewma_mean) > abs_threshold;
+        const double mean_ref = slot.offset_mean.has() ? slot.offset_mean.get() : 0;
+        const bool abs_trigger = fabs(offset - mean_ref) > abs_threshold;
 
         if (step_trigger || abs_trigger) {
             stats.jump_active = true;
@@ -890,7 +887,7 @@ bool SessionSkewEstimator::pair_stats(size_t slot_a,
 
     stats.valid = pairs_[lo][hi].valid;
     stats.skew = slot_a < slot_b ? pairs_[lo][hi].skew : -pairs_[lo][hi].skew;
-    stats.cov = pairs_[lo][hi].cov;
+    stats.cov = pairs_[lo][hi].cov.has() ? pairs_[lo][hi].cov.get() : 0;
     stats.corr = pair_corr_(lo, hi);
     return true;
 }
