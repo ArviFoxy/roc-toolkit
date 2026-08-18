@@ -746,6 +746,24 @@ void SessionSkewEstimator::update_jump_(size_t slot_index,
         return;
     }
 
+    if (row.grid_cts - slot.jump_start_cts >= config_.jump_max_duration) {
+        // The offset settled at a new level instead of returning: close
+        // the event; the new level is the new normal.
+        stats.jump_active = false;
+        stats.jump_duration = ns_2_sec(config_.jump_max_duration);
+#ifdef ROC_TARGET_PROMETHEUS
+        if (metrics_enabled_) {
+            slot.gauges[Gauge_JumpActive]->Set(0);
+            slot.gauges[Gauge_JumpDuration]->Set(stats.jump_duration);
+        }
+#endif
+        roc_log(LogDebug,
+                "session skew estimator: offset jump timeout (level shift):"
+                " slot=%s magnitude=%.6f",
+                slot.name, stats.jump_magnitude);
+        return;
+    }
+
     const double excursion = fabs(offset - slot.jump_baseline);
     if (excursion > stats.jump_magnitude) {
         stats.jump_magnitude = excursion;

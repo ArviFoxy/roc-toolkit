@@ -90,6 +90,11 @@ struct SessionSkewEstimatorConfig {
     //! ...and stay there for this long.
     core::nanoseconds_t jump_hold;
 
+    //! Close an event after this long even without a return to the
+    //! baseline: a permanent level shift is then the new normal, not
+    //! an event that stays active forever.
+    core::nanoseconds_t jump_max_duration;
+
     //! Rows older than this many grid periods behind the newest row are
     //! finalized even if some slots are missing.
     size_t late_row_periods;
@@ -103,6 +108,7 @@ struct SessionSkewEstimatorConfig {
         , jump_abs(10 * core::Millisecond)
         , jump_release_band(500 * core::Microsecond)
         , jump_hold(2 * core::Second)
+        , jump_max_duration(60 * core::Second)
         , late_row_periods(3) {
     }
 };

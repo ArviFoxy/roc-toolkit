@@ -439,5 +439,43 @@ TEST(session_skew_estimator, freshness_only_on_accept) {
     LONGLONGS_EQUAL(BaseCts, stats.last_update);
 }
 
+TEST(session_skew_estimator, jump_closes_on_level_shift) {
+    // A permanent level shift must not keep the event active forever.
+    SessionSkewEstimatorConfig config;
+    config.jump_max_duration = 3 * core::Second; // 6 rows at 500ms
+    Est est(config, metrics::PrometheusConfig());
+
+    ssize_t slots[2];
+    slots[0] = est.register_slot("a");
+    slots[1] = est.register_slot("b");
+
+    const core::nanoseconds_t q_base[2] = { 10 * core::Millisecond,
+                                            10 * core::Millisecond };
+    size_t row = 0;
+    for (; row < 10; row++) {
+        feed_row(est, slots, q_base, 2, row);
+    }
+
+    // Slot a shifts +5ms and STAYS there.
+    const core::nanoseconds_t q_shift[2] = { 15 * core::Millisecond,
+                                             10 * core::Millisecond };
+    for (size_t n = 0; n < 3; n++, row++) {
+        feed_row(est, slots, q_shift, 2, row);
+    }
+
+    Est::SlotStats stats;
+    CHECK(est.slot_stats((size_t)slots[0], stats));
+    CHECK(stats.jump_active);
+
+    // Hold the new level past jump_max_duration.
+    for (size_t n = 0; n < 8; n++, row++) {
+        feed_row(est, slots, q_shift, 2, row);
+    }
+
+    CHECK(est.slot_stats((size_t)slots[0], stats));
+    CHECK(!stats.jump_active);
+    DOUBLES_EQUAL(3.0, stats.jump_duration, 1e-9);
+}
+
 } // namespace pipeline
 } // namespace roc
