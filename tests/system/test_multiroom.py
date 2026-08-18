@@ -8,7 +8,7 @@ import time
 
 import pytest
 
-from pwtest import RocProc, assert_single_tone, write_tone_raw
+from pwtest import RocProc, assert_single_tone, wait_for, write_tone_raw
 
 ALL_TRACK_HZ = [440.0, 700.0, 1000.0, 1400.0, 2200.0, 3100.0, 4200.0]
 
@@ -133,16 +133,16 @@ def test_track_per_leg(pw, roc_send, roc_recv, tmp_path, num_legs):
             "roc_send_snapshot_timestamp_seconds", '{slot="leg_0"}')
         assert ts_victim_before and ts_other_before
 
-        time.sleep(3.0)
+        # A healthy leg advances within one grid period plus one report
+        # interval; poll instead of a fixed sleep.
+        wait_for(lambda: (send.metric_value("roc_send_snapshot_timestamp_seconds",
+                                            '{slot="leg_0"}') or 0) > ts_other_before,
+                 timeout=5, what="healthy leg snapshot advance")
 
         ts_victim_after = send.metric_value(
             "roc_send_snapshot_timestamp_seconds", f'{{slot="leg_{victim}"}}')
-        ts_other_after = send.metric_value(
-            "roc_send_snapshot_timestamp_seconds", '{slot="leg_0"}')
         assert ts_victim_after == ts_victim_before, (ts_victim_before,
                                                      ts_victim_after)
-        assert ts_other_after > ts_other_before, (ts_other_before,
-                                                  ts_other_after)
 
         # The staleness check above deliberately stopped the last receiver.
         assert send.alive()
