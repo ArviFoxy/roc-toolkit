@@ -667,6 +667,38 @@ TEST(latency_tuner_scaling, e2e_below_target) {
     CHECK(scaling < 1.0);
 }
 
+TEST(latency_tuner_scaling, e2e_no_epoch_replay_after_idle_start) {
+    // The e2e backend is idle until the first RTCP mapping arrives, while
+    // the stream position keeps advancing. The epoch grid is anchored at
+    // the first computed sample, so a tuner with a long metric-less
+    // preamble produces exactly the same scaling as a fresh tuner fed the
+    // same single e2e sample: no backlogged epochs are replayed.
+    LatencyConfig config =
+        make_e2e_config(LatencyTunerProfile_Responsive, 200 * Ms, 200 * Ms);
+
+    TestTuner idle_tuner(config);
+    TestTuner fresh_tuner(config);
+    CHECK(idle_tuner.is_valid());
+    CHECK(fresh_tuner.is_valid());
+
+    // Long preamble without metrics: stream advances, no scaling computed.
+    for (size_t i = 0; i < 2000; i++) {
+        CHECK(idle_tuner.update_stream());
+        idle_tuner.advance_stream(StepDuration);
+    }
+    DOUBLES_EQUAL(0.0, (double)idle_tuner.fetch_scaling(), 0.0);
+
+    // One identical e2e sample into both tuners.
+    step_e2e(idle_tuner, 230 * Ms);
+    step_e2e(fresh_tuner, 230 * Ms);
+
+    const float idle_scaling = idle_tuner.fetch_scaling();
+    const float fresh_scaling = fresh_tuner.fetch_scaling();
+
+    CHECK(fresh_scaling != 0);
+    DOUBLES_EQUAL((double)fresh_scaling, (double)idle_scaling, 0.0);
+}
+
 TEST(latency_tuner_scaling, e2e_ignores_niq) {
     // When backend=E2E, NIQ metrics should have no effect on scaling.
     LatencyConfig config =

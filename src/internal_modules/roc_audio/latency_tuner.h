@@ -131,6 +131,9 @@ private:
 
     packet::stream_timestamp_t scale_interval_;
     packet::stream_timestamp_t scale_pos_;
+    // True once the first scaling was computed. The epoch grid is anchored
+    // at the stream position of that first computation.
+    bool scaling_started_;
 
     packet::stream_timestamp_t report_interval_;
     packet::stream_timestamp_t report_pos_;

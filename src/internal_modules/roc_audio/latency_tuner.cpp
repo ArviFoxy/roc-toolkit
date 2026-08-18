@@ -45,6 +45,7 @@ LatencyTuner::LatencyTuner(const LatencyConfig& latency_config,
     : stream_pos_(0)
     , scale_interval_(sample_spec.ns_2_stream_timestamp(latency_config.scaling_interval))
     , scale_pos_(0)
+    , scaling_started_(false)
     , report_interval_(sample_spec.ns_2_stream_timestamp(LogInterval))
     , report_pos_(0)
     , has_new_freq_coeff_(false)
@@ -450,6 +451,16 @@ bool LatencyTuner::check_actual_latency_(
 void LatencyTuner::compute_scaling_(packet::stream_timestamp_diff_t actual_latency) {
     if (actual_latency < 0) {
         actual_latency = 0;
+    }
+
+    // Anchor the epoch grid at the position where scaling becomes active.
+    // Metrics may appear long after the stream started (e.g. the e2e
+    // backend is idle until the first RTCP mapping arrives), and epochs
+    // from that metric-less preamble carry no measurements, so they must
+    // not be fed to the estimator with the first sample's error.
+    if (!scaling_started_) {
+        scaling_started_ = true;
+        scale_pos_ = stream_pos_;
     }
 
     if (packet::stream_timestamp_lt(stream_pos_, scale_pos_)) {
