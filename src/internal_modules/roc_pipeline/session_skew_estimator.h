@@ -20,6 +20,7 @@
 
 #ifdef ROC_TARGET_PROMETHEUS
 #include <prometheus/counter.h>
+#include <prometheus/family.h>
 #include <prometheus/gauge.h>
 #include <prometheus/histogram.h>
 #endif
@@ -49,18 +50,18 @@ struct SessionSkewEstimatorConfig {
     //! Time constant of the slow common-mode baseline.
     core::nanoseconds_t common_mode_tau;
 
-    //! Flinch trigger: offset step between consecutive rows.
-    core::nanoseconds_t flinch_step;
+    //! Jump trigger: offset step between consecutive rows.
+    core::nanoseconds_t jump_step;
 
-    //! Flinch trigger: absolute offset bound.
-    core::nanoseconds_t flinch_abs;
+    //! Jump trigger: absolute offset bound.
+    core::nanoseconds_t jump_abs;
 
-    //! Flinch release: offset must return within this band of the
+    //! Jump release: offset must return within this band of the
     //! pre-event baseline...
-    core::nanoseconds_t flinch_release_band;
+    core::nanoseconds_t jump_release_band;
 
     //! ...and stay there for this long.
-    core::nanoseconds_t flinch_hold;
+    core::nanoseconds_t jump_hold;
 
     //! Rows older than this many grid periods behind the newest row are
     //! finalized even if some slots are missing.
@@ -71,10 +72,10 @@ struct SessionSkewEstimatorConfig {
         , max_future_grid(30 * core::Second)
         , stats_tau(60 * core::Second)
         , common_mode_tau(60 * core::Second)
-        , flinch_step(2 * core::Millisecond)
-        , flinch_abs(10 * core::Millisecond)
-        , flinch_release_band(500 * core::Microsecond)
-        , flinch_hold(2 * core::Second)
+        , jump_step(2 * core::Millisecond)
+        , jump_abs(10 * core::Millisecond)
+        , jump_release_band(500 * core::Microsecond)
+        , jump_hold(2 * core::Second)
         , late_row_periods(3) {
     }
 };
@@ -100,7 +101,7 @@ struct SessionSkewEstimatorConfig {
 //! Also maintained at row rate: the full pairwise skew matrix and an
 //! EWMA covariance/correlation matrix of offset fluctuations (Prometheus
 //! cannot reconstruct sub-scrape correlation from gauges), fleet spread
-//! and slow common-mode baseline, per-slot RMS, and a flinch detector
+//! and slow common-mode baseline, per-slot RMS, and a offset jump detector
 //! (offset-step events with magnitude, duration and per-slot counts).
 //!
 //! Single-threaded: all calls run on the sender pipeline thread.
@@ -108,6 +109,23 @@ class SessionSkewEstimator : public core::NonCopyable<> {
 public:
     //! Maximum slots.
     static const size_t MaxSlots = 16;
+
+    //! Per-slot gauge identifiers; one table entry each, so a gauge
+    //! cannot be registered without a write site by construction.
+    enum SlotGauge {
+        Gauge_Offset = 0,
+        Gauge_OffsetE2e,
+        Gauge_OffsetDisagreement,
+        Gauge_Rms,
+        Gauge_Warp,
+        Gauge_TargetLatency,
+        Gauge_SnapshotTimestamp,
+        Gauge_JumpActive,
+        Gauge_JumpMagnitude,
+        Gauge_JumpDuration,
+        NumSlotGauges
+    };
+
 
     //! Per-slot statistics, updated at row rate.
     struct SlotStats {
@@ -118,10 +136,10 @@ public:
         double rms;             //!< EWMA RMS of offset fluctuations, seconds.
         double warp;            //!< Last reported warp (coeff - 1).
         double target_latency;  //!< Last reported target latency, seconds.
-        bool flinch_active;     //!< Whether a flinch event is in progress.
-        double flinch_magnitude; //!< Peak |offset - baseline| of last event, seconds.
-        double flinch_duration; //!< Duration of last completed event, seconds.
-        uint64_t flinch_count;  //!< Total flinch events.
+        bool jump_active;     //!< Whether a offset jump event is in progress.
+        double jump_magnitude; //!< Peak |offset - baseline| of last event, seconds.
+        double jump_duration; //!< Duration of last completed event, seconds.
+        uint64_t jump_count;  //!< Total offset jump events.
         core::nanoseconds_t last_update; //!< Arrival time of last snapshot.
 
         SlotStats()
@@ -132,10 +150,10 @@ public:
             , rms(0)
             , warp(0)
             , target_latency(0)
-            , flinch_active(false)
-            , flinch_magnitude(0)
-            , flinch_duration(0)
-            , flinch_count(0)
+            , jump_active(false)
+            , jump_magnitude(0)
+            , jump_duration(0)
+            , jump_count(0)
             , last_update(0) {
         }
     };
@@ -174,20 +192,20 @@ public:
         }
     };
 
+    //! Initialize.
+    //! @p prometheus_config supplies the metrics port (zero disables all
+    //! metric registration) and the spread histogram bounds.
     SessionSkewEstimator(const SessionSkewEstimatorConfig& config,
                          const metrics::PrometheusConfig& prometheus_config);
 
     //! Register a slot; returns slot index or -1 if the table is full.
+    //! An empty or duplicate @p name gets a unique generated label, so
+    //! metric series never alias between slots.
     ssize_t register_slot(const char* name);
 
-    //! Unregister a slot: rows stop waiting for it.
+    //! Unregister a slot: rows stop waiting for it, its accumulated
+    //! statistics are cleared, and its metric series are removed.
     void unregister_slot(size_t slot_index);
-
-    //! Get slot name.
-    const char* slot_name(size_t slot_index) const;
-
-    //! Get number of registered slot table entries (indices may be sparse).
-    size_t num_slots() const;
 
     //! Push one snapshot from a slot.
     //! @p grid_cts is the grid point on the sender CTS timeline (as
@@ -222,6 +240,7 @@ private:
         packet::StreamSnapshot samples[MaxSlots];
     };
 
+
     struct Slot {
         bool used;
         char name[MaxNameLen];
@@ -233,34 +252,30 @@ private:
         double ewma_mean;
         bool has_ewma;
 
-        // Flinch state.
-        double flinch_baseline;
-        core::nanoseconds_t flinch_start_cts;
-        core::nanoseconds_t flinch_hold_ns;
-        core::nanoseconds_t flinch_end_cts;
+        // Jump state.
+        double jump_baseline;
+        core::nanoseconds_t jump_start_cts;
+        core::nanoseconds_t jump_hold_ns;
+        core::nanoseconds_t jump_end_cts;
 
 #ifdef ROC_TARGET_PROMETHEUS
-        prometheus::Gauge* offset_gauge;
-        prometheus::Gauge* offset_e2e_gauge;
-        prometheus::Gauge* mapping_error_gauge;
-        prometheus::Gauge* rms_gauge;
-        prometheus::Gauge* warp_gauge;
-        prometheus::Gauge* target_latency_gauge;
-        prometheus::Gauge* snapshot_timestamp_gauge;
-        prometheus::Gauge* flinch_active_gauge;
-        prometheus::Gauge* flinch_magnitude_gauge;
-        prometheus::Counter* flinch_counter;
+        prometheus::Gauge* gauges[NumSlotGauges];
+        prometheus::Counter* jump_counter;
 #endif
     };
 
+
     void register_slot_metrics_(size_t slot_index);
     void register_pair_metrics_(size_t slot_a, size_t slot_b);
+    void remove_slot_metrics_(size_t slot_index);
+    void clear_slot_state_(size_t slot_index);
+    double pair_corr_(size_t slot_a, size_t slot_b) const;
 
     Row* find_or_create_row_(core::nanoseconds_t grid_cts,
                              core::nanoseconds_t grid_period);
     void finalize_ready_rows_();
     void finalize_row_(Row& row);
-    void update_flinch_(size_t slot_index, double offset, const Row& row);
+    void update_jump_(size_t slot_index, double offset, const Row& row);
 
     const SessionSkewEstimatorConfig config_;
 
@@ -271,17 +286,27 @@ private:
     // and unregister_slot() so rows never scan the table.
     uint32_t used_mask_;
 
-    // Flinch thresholds in seconds, fixed at construction.
-    double flinch_step_sec_;
-    double flinch_abs_sec_;
-    double flinch_release_sec_;
+    // Offset jump thresholds in seconds, fixed at construction.
+    double jump_step_sec_;
+    double jump_abs_sec_;
+    double jump_release_sec_;
 
-    // EWMA cross-products of centered offsets, upper triangle including
-    // the diagonal (variances).
-    double cov_[MaxSlots][MaxSlots];
-    bool cov_valid_[MaxSlots][MaxSlots];
+    // One record per slot pair, upper triangle; the diagonal holds the
+    // EWMA variance. skew/valid mirror the PairStats API; cov is the
+    // one source for both the correlation denominator and the gauge.
+    struct Pair {
+        bool valid;
+        double skew;
+        bool cov_valid;
+        double cov;
+#ifdef ROC_TARGET_PROMETHEUS
+        prometheus::Gauge* skew_gauge;
+        prometheus::Gauge* corr_gauge;
+        prometheus::Gauge* cov_gauge;
+#endif
+    };
 
-    PairStats pair_stats_[MaxSlots][MaxSlots];
+    Pair pairs_[MaxSlots][MaxSlots];
 
     FleetStats fleet_;
     double common_mode_baseline_;
@@ -289,12 +314,14 @@ private:
 
     core::nanoseconds_t newest_grid_cts_;
 
-    const metrics::PrometheusConfig prometheus_config_;
+    // False when the metrics port is zero: no series are registered and
+    // no gauge writes happen.
+    const bool metrics_enabled_;
 
 #ifdef ROC_TARGET_PROMETHEUS
-    prometheus::Gauge* pair_skew_gauge_[MaxSlots][MaxSlots];
-    prometheus::Gauge* pair_corr_gauge_[MaxSlots][MaxSlots];
-    prometheus::Gauge* pair_cov_gauge_[MaxSlots][MaxSlots];
+    prometheus::Family<prometheus::Gauge>* slot_gauge_families_[NumSlotGauges];
+    prometheus::Family<prometheus::Counter>* jump_counter_family_;
+    prometheus::Family<prometheus::Gauge>* pair_gauge_families_[3];
 
     prometheus::Gauge* spread_gauge_;
     prometheus::Histogram* spread_histogram_;

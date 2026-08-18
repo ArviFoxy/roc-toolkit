@@ -46,6 +46,40 @@ double median_(double* values, size_t n) {
     return (values[n / 2 - 1] + values[n / 2]) / 2;
 }
 
+#ifdef ROC_TARGET_PROMETHEUS
+
+// One table row per per-slot gauge: a gauge cannot exist without a
+// name, a help text and an enum id that some write site uses.
+struct SlotGaugeDef {
+    const char* suffix;
+    const char* help;
+};
+
+const SlotGaugeDef* slot_gauge_defs() {
+    static const SlotGaugeDef defs[SessionSkewEstimator::NumSlotGauges] = {
+        { "playout_offset_seconds",
+          "Clock-free playout offset against the fleet median" },
+        { "playout_offset_e2e_seconds",
+          "E2E-based playout offset against the fleet median" },
+        { "playout_offset_disagreement_seconds",
+          "Clock-free offset minus e2e offset; contains the differential"
+          " clock-mapping error and constant per-receiver device buffering" },
+        { "playout_offset_rms_seconds", "EWMA RMS of playout offset changes" },
+        { "recv_warp", "Receiver-reported warp (frequency coefficient - 1)" },
+        { "recv_target_latency_seconds", "Receiver-reported target latency" },
+        { "snapshot_timestamp_seconds",
+          "Unix time when the last snapshot was accepted; age = time() - value" },
+        { "offset_jump_active", "1 while an offset jump event is in progress" },
+        { "offset_jump_magnitude_seconds",
+          "Peak offset excursion of the last jump event" },
+        { "offset_jump_duration_seconds",
+          "Duration of the last completed jump event" },
+    };
+    return defs;
+}
+
+#endif // ROC_TARGET_PROMETHEUS
+
 } // namespace
 
 SessionSkewEstimator::SessionSkewEstimator(
@@ -53,35 +87,69 @@ SessionSkewEstimator::SessionSkewEstimator(
     const metrics::PrometheusConfig& prometheus_config)
     : config_(config)
     , used_mask_(0)
-    , flinch_step_sec_(ns_2_sec(config.flinch_step))
-    , flinch_abs_sec_(ns_2_sec(config.flinch_abs))
-    , flinch_release_sec_(ns_2_sec(config.flinch_release_band))
+    , jump_step_sec_(ns_2_sec(config.jump_step))
+    , jump_abs_sec_(ns_2_sec(config.jump_abs))
+    , jump_release_sec_(ns_2_sec(config.jump_release_band))
     , common_mode_baseline_(0)
     , has_common_mode_baseline_(false)
     , newest_grid_cts_(0)
-    , prometheus_config_(prometheus_config) {
+    , metrics_enabled_(prometheus_config.port > 0) {
     memset(slots_, 0, sizeof(slots_));
     memset(rows_, 0, sizeof(rows_));
-    memset(cov_, 0, sizeof(cov_));
-    memset(cov_valid_, 0, sizeof(cov_valid_));
-
-    for (size_t i = 0; i < MaxSlots; i++) {
-        slots_[i].stats = SlotStats();
-        for (size_t j = 0; j < MaxSlots; j++) {
-            pair_stats_[i][j] = PairStats();
-        }
-    }
+    memset(pairs_, 0, sizeof(pairs_));
 
 #ifdef ROC_TARGET_PROMETHEUS
-    memset(pair_skew_gauge_, 0, sizeof(pair_skew_gauge_));
-    memset(pair_corr_gauge_, 0, sizeof(pair_corr_gauge_));
-    memset(pair_cov_gauge_, 0, sizeof(pair_cov_gauge_));
+    memset(slot_gauge_families_, 0, sizeof(slot_gauge_families_));
+    memset(pair_gauge_families_, 0, sizeof(pair_gauge_families_));
+    jump_counter_family_ = NULL;
+    spread_gauge_ = NULL;
+    spread_histogram_ = NULL;
+    common_mode_gauge_ = NULL;
+    rows_full_counter_ = NULL;
+    rows_partial_counter_ = NULL;
+    rejected_counter_ = NULL;
+
+    if (!metrics_enabled_) {
+        // No exposer will ever serve these series; registering them
+        // would only spend memory and, with several sinks in one
+        // process, alias the unlabeled fleet series between them.
+        return;
+    }
 
     metrics::MetricsScope scope;
     scope.side = metrics::MetricsScope::Side_Send;
 
     std::shared_ptr<prometheus::Registry> registry = metrics::prometheus_registry();
     const prometheus::Labels no_labels;
+
+    for (size_t g = 0; g < NumSlotGauges; g++) {
+        slot_gauge_families_[g] =
+            &prometheus::BuildGauge()
+                 .Name(metrics::scope_metric_name(scope, slot_gauge_defs()[g].suffix))
+                 .Help(slot_gauge_defs()[g].help)
+                 .Register(*registry);
+    }
+    jump_counter_family_ =
+        &prometheus::BuildCounter()
+             .Name(metrics::scope_metric_name(scope, "offset_jump_total"))
+             .Help("Offset jump events per slot (trigger: offset step above"
+                   " the configured threshold)")
+             .Register(*registry);
+
+    static const char* pair_suffixes[3] = { "playout_skew_seconds", "playout_corr",
+                                            "playout_cov_seconds2" };
+    static const char* pair_helps[3] = {
+        "Clock-free playout skew, slot_a minus slot_b",
+        "EWMA correlation of playout offset changes",
+        "EWMA covariance of playout offset changes",
+    };
+    for (size_t g = 0; g < 3; g++) {
+        pair_gauge_families_[g] = &prometheus::BuildGauge()
+                                       .Name(metrics::scope_metric_name(
+                                           scope, pair_suffixes[g]))
+                                       .Help(pair_helps[g])
+                                       .Register(*registry);
+    }
 
     spread_gauge_ = &prometheus::BuildGauge()
                          .Name(metrics::scope_metric_name(scope,
@@ -95,8 +163,7 @@ SessionSkewEstimator::SessionSkewEstimator(
              .Help("Distribution of max-min clock-free playout skew in seconds")
              .Register(*registry)
              .Add(no_labels,
-                  metrics::generate_histogram_buckets(
-                      prometheus_config_.playout_spread));
+                  metrics::generate_histogram_buckets(prometheus_config.playout_spread));
     common_mode_gauge_ =
         &prometheus::BuildGauge()
              .Name(metrics::scope_metric_name(scope, "playout_common_mode_seconds"))
@@ -115,7 +182,7 @@ SessionSkewEstimator::SessionSkewEstimator(
     rejected_counter_ =
         &prometheus::BuildCounter()
              .Name(metrics::scope_metric_name(scope, "snapshot_rejected_total"))
-             .Help("Snapshots rejected (grid delta gate, unusable fields)")
+             .Help("Snapshots rejected (validity gates)")
              .Register(*registry)
              .Add(no_labels);
 #endif // ROC_TARGET_PROMETHEUS
@@ -123,91 +190,65 @@ SessionSkewEstimator::SessionSkewEstimator(
 
 #ifdef ROC_TARGET_PROMETHEUS
 
-namespace {
-
-prometheus::Gauge* make_slot_gauge(const char* suffix,
-                                   const char* help,
-                                   const char* slot_name) {
-    metrics::MetricsScope scope;
-    scope.side = metrics::MetricsScope::Side_Send;
-    scope.set_slot(slot_name);
-
-    return &prometheus::BuildGauge()
-                .Name(metrics::scope_metric_name(scope, suffix))
-                .Help(help)
-                .Register(*metrics::prometheus_registry())
-                .Add(metrics::scope_labels(scope));
-}
-
-} // namespace
-
 void SessionSkewEstimator::register_slot_metrics_(size_t slot_index) {
-    Slot& slot = slots_[slot_index];
+    if (!metrics_enabled_) {
+        return;
+    }
 
-    slot.offset_gauge =
-        make_slot_gauge("playout_offset_seconds",
-                        "Clock-free playout offset vs fleet median", slot.name);
-    slot.offset_e2e_gauge =
-        make_slot_gauge("playout_offset_e2e_seconds",
-                        "E2E-based playout offset vs fleet median", slot.name);
-    slot.mapping_error_gauge =
-        make_slot_gauge("clock_mapping_error_seconds",
-                        "Clock-free minus e2e offset (differential mapping error)",
-                        slot.name);
-    slot.rms_gauge = make_slot_gauge(
-        "playout_offset_rms_seconds", "EWMA RMS of playout offset fluctuations",
-        slot.name);
-    slot.warp_gauge = make_slot_gauge(
-        "recv_warp", "Receiver-reported warp (frequency coefficient - 1)", slot.name);
-    slot.target_latency_gauge =
-        make_slot_gauge("recv_target_latency_seconds",
-                        "Receiver-reported target latency", slot.name);
-    slot.snapshot_timestamp_gauge = make_slot_gauge(
-        "snapshot_timestamp_seconds",
-        "Unix time of last received snapshot (age = time() - this)", slot.name);
-    slot.flinch_active_gauge = make_slot_gauge(
-        "flinch_active", "1 while a playout offset event is in progress", slot.name);
-    slot.flinch_magnitude_gauge =
-        make_slot_gauge("flinch_magnitude_seconds",
-                        "Peak offset excursion of the last flinch event", slot.name);
+    Slot& slot = slots_[slot_index];
 
     metrics::MetricsScope scope;
     scope.side = metrics::MetricsScope::Side_Send;
     scope.set_slot(slot.name);
-    slot.flinch_counter =
-        &prometheus::BuildCounter()
-             .Name(metrics::scope_metric_name(scope, "flinch_total"))
-             .Help("Playout offset events (who flinched)")
-             .Register(*metrics::prometheus_registry())
-             .Add(metrics::scope_labels(scope));
+    const prometheus::Labels labels = metrics::scope_labels(scope);
+
+    for (size_t g = 0; g < NumSlotGauges; g++) {
+        slot.gauges[g] = &slot_gauge_families_[g]->Add(labels);
+    }
+    slot.jump_counter = &jump_counter_family_->Add(labels);
 }
 
 void SessionSkewEstimator::register_pair_metrics_(size_t slot_a, size_t slot_b) {
-    metrics::MetricsScope scope;
-    scope.side = metrics::MetricsScope::Side_Send;
+    if (!metrics_enabled_) {
+        return;
+    }
 
-    std::shared_ptr<prometheus::Registry> registry = metrics::prometheus_registry();
+    Pair& pair = pairs_[slot_a][slot_b];
     const prometheus::Labels labels =
         metrics::pair_labels(slots_[slot_a].name, slots_[slot_b].name);
 
-    pair_skew_gauge_[slot_a][slot_b] =
-        &prometheus::BuildGauge()
-             .Name(metrics::scope_metric_name(scope, "playout_skew_seconds"))
-             .Help("Clock-free playout skew slot_a minus slot_b")
-             .Register(*registry)
-             .Add(labels);
-    pair_corr_gauge_[slot_a][slot_b] =
-        &prometheus::BuildGauge()
-             .Name(metrics::scope_metric_name(scope, "playout_corr"))
-             .Help("EWMA correlation of playout offset fluctuations")
-             .Register(*registry)
-             .Add(labels);
-    pair_cov_gauge_[slot_a][slot_b] =
-        &prometheus::BuildGauge()
-             .Name(metrics::scope_metric_name(scope, "playout_cov_seconds2"))
-             .Help("EWMA covariance of playout offset fluctuations")
-             .Register(*registry)
-             .Add(labels);
+    pair.skew_gauge = &pair_gauge_families_[0]->Add(labels);
+    pair.corr_gauge = &pair_gauge_families_[1]->Add(labels);
+    pair.cov_gauge = &pair_gauge_families_[2]->Add(labels);
+}
+
+void SessionSkewEstimator::remove_slot_metrics_(size_t slot_index) {
+    if (!metrics_enabled_) {
+        return;
+    }
+
+    Slot& slot = slots_[slot_index];
+
+    for (size_t g = 0; g < NumSlotGauges; g++) {
+        if (slot.gauges[g]) {
+            slot_gauge_families_[g]->Remove(slot.gauges[g]);
+            slot.gauges[g] = NULL;
+        }
+    }
+    if (slot.jump_counter) {
+        jump_counter_family_->Remove(slot.jump_counter);
+        slot.jump_counter = NULL;
+    }
+
+    for (size_t j = 0; j < MaxSlots; j++) {
+        Pair& lo = pairs_[j < slot_index ? j : slot_index][j < slot_index ? slot_index : j];
+        if (j != slot_index && lo.skew_gauge) {
+            pair_gauge_families_[0]->Remove(lo.skew_gauge);
+            pair_gauge_families_[1]->Remove(lo.corr_gauge);
+            pair_gauge_families_[2]->Remove(lo.cov_gauge);
+            lo.skew_gauge = lo.corr_gauge = lo.cov_gauge = NULL;
+        }
+    }
 }
 
 #else // !ROC_TARGET_PROMETHEUS
@@ -218,7 +259,28 @@ void SessionSkewEstimator::register_slot_metrics_(size_t) {
 void SessionSkewEstimator::register_pair_metrics_(size_t, size_t) {
 }
 
+void SessionSkewEstimator::remove_slot_metrics_(size_t) {
+}
+
 #endif // ROC_TARGET_PROMETHEUS
+
+// Clears the accumulated statistics tied to a slot index, so a future
+// occupant of the index cannot inherit a departed slot's state.
+void SessionSkewEstimator::clear_slot_state_(size_t slot_index) {
+    for (size_t j = 0; j < MaxSlots; j++) {
+        Pair& lo =
+            pairs_[j < slot_index ? j : slot_index][j < slot_index ? slot_index : j];
+        lo.valid = false;
+        lo.cov_valid = false;
+        lo.skew = 0;
+        lo.cov = 0;
+    }
+    Pair& diag = pairs_[slot_index][slot_index];
+    diag.valid = false;
+    diag.cov_valid = false;
+    diag.skew = 0;
+    diag.cov = 0;
+}
 
 ssize_t SessionSkewEstimator::register_slot(const char* name) {
     roc_panic_if(!name);
@@ -227,9 +289,29 @@ ssize_t SessionSkewEstimator::register_slot(const char* name) {
         if (!slots_[i].used) {
             memset(&slots_[i], 0, sizeof(slots_[i]));
             slots_[i].used = true;
-            strncpy(slots_[i].name, name, MaxNameLen - 1);
             slots_[i].stats = SlotStats();
             used_mask_ |= (1u << i);
+            clear_slot_state_(i);
+
+            // Unique label, always: an empty label would produce an
+            // UNLABELED series, and a duplicate label the SAME series
+            // object, so several slots would silently write one gauge.
+            if (name[0] == '\0') {
+                snprintf(slots_[i].name, MaxNameLen, "slot%u", (unsigned)i);
+            } else {
+                strncpy(slots_[i].name, name, MaxNameLen - 1);
+            }
+            for (size_t j = 0; j < MaxSlots; j++) {
+                if (j != i && slots_[j].used
+                    && strcmp(slots_[j].name, slots_[i].name) == 0) {
+                    char base[MaxNameLen];
+                    strncpy(base, slots_[i].name, MaxNameLen - 1);
+                    base[MaxNameLen - 1] = '\0';
+                    snprintf(slots_[i].name, MaxNameLen, "%.*s_%u", MaxNameLen - 8,
+                             base, (unsigned)i);
+                    break;
+                }
+            }
 
             register_slot_metrics_(i);
             for (size_t j = 0; j < MaxSlots; j++) {
@@ -249,28 +331,15 @@ ssize_t SessionSkewEstimator::register_slot(const char* name) {
 void SessionSkewEstimator::unregister_slot(size_t slot_index) {
     roc_panic_if(slot_index >= MaxSlots);
 
+    remove_slot_metrics_(slot_index);
+    clear_slot_state_(slot_index);
+
     slots_[slot_index].used = false;
     used_mask_ &= ~(1u << slot_index);
 
     for (size_t r = 0; r < MaxRows; r++) {
         rows_[r].present_mask &= ~(1u << slot_index);
     }
-}
-
-const char* SessionSkewEstimator::slot_name(size_t slot_index) const {
-    roc_panic_if(slot_index >= MaxSlots);
-
-    return slots_[slot_index].name;
-}
-
-size_t SessionSkewEstimator::num_slots() const {
-    size_t n = 0;
-    for (size_t i = 0; i < MaxSlots; i++) {
-        if (slots_[i].used) {
-            n++;
-        }
-    }
-    return n;
 }
 
 void SessionSkewEstimator::process_snapshot(size_t slot_index,
@@ -284,7 +353,9 @@ void SessionSkewEstimator::process_snapshot(size_t slot_index,
     if (!slots_[slot_index].used) {
         fleet_.rejected++;
 #ifdef ROC_TARGET_PROMETHEUS
-        rejected_counter_->Increment();
+        if (metrics_enabled_) {
+            rejected_counter_->Increment();
+        }
 #endif
         return;
     }
@@ -292,7 +363,9 @@ void SessionSkewEstimator::process_snapshot(size_t slot_index,
     if (grid_period <= 0) {
         fleet_.rejected++;
 #ifdef ROC_TARGET_PROMETHEUS
-        rejected_counter_->Increment();
+        if (metrics_enabled_) {
+            rejected_counter_->Increment();
+        }
 #endif
         return;
     }
@@ -302,7 +375,9 @@ void SessionSkewEstimator::process_snapshot(size_t slot_index,
         // or discontinuity on the receiver.
         fleet_.rejected++;
 #ifdef ROC_TARGET_PROMETHEUS
-        rejected_counter_->Increment();
+        if (metrics_enabled_) {
+            rejected_counter_->Increment();
+        }
 #endif
         return;
     }
@@ -313,7 +388,9 @@ void SessionSkewEstimator::process_snapshot(size_t slot_index,
         // two different quantities.
         fleet_.rejected++;
 #ifdef ROC_TARGET_PROMETHEUS
-        rejected_counter_->Increment();
+        if (metrics_enabled_) {
+            rejected_counter_->Increment();
+        }
 #endif
         return;
     }
@@ -324,7 +401,9 @@ void SessionSkewEstimator::process_snapshot(size_t slot_index,
         // This bound protects newest_grid_cts_, which only grows.
         fleet_.rejected++;
 #ifdef ROC_TARGET_PROMETHEUS
-        rejected_counter_->Increment();
+        if (metrics_enabled_) {
+            rejected_counter_->Increment();
+        }
 #endif
         return;
     }
@@ -347,7 +426,9 @@ void SessionSkewEstimator::process_snapshot(size_t slot_index,
     // snapshots are all rejected (or replayed) reads as stale.
     slots_[slot_index].stats.last_update = arrival_time;
 #ifdef ROC_TARGET_PROMETHEUS
-    slots_[slot_index].snapshot_timestamp_gauge->Set((double)arrival_time / 1e9);
+    if (metrics_enabled_) {
+        slots_[slot_index].gauges[Gauge_SnapshotTimestamp]->Set(ns_2_sec(arrival_time));
+    }
 #endif
 
     if (grid_cts > newest_grid_cts_) {
@@ -433,7 +514,9 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
         if (n_present > 0) {
             fleet_.partial_rows++;
 #ifdef ROC_TARGET_PROMETHEUS
-            rows_partial_counter_->Increment();
+            if (metrics_enabled_) {
+                rows_partial_counter_->Increment();
+            }
 #endif
         }
         return;
@@ -442,12 +525,16 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
     if ((row.present_mask & all_mask) == all_mask) {
         fleet_.full_rows++;
 #ifdef ROC_TARGET_PROMETHEUS
-        rows_full_counter_->Increment();
+        if (metrics_enabled_) {
+            rows_full_counter_->Increment();
+        }
 #endif
     } else {
         fleet_.partial_rows++;
 #ifdef ROC_TARGET_PROMETHEUS
-        rows_partial_counter_->Increment();
+        if (metrics_enabled_) {
+            rows_partial_counter_->Increment();
+        }
 #endif
     }
 
@@ -498,9 +585,11 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
     fleet_.common_mode = q_mean - common_mode_baseline_;
 
 #ifdef ROC_TARGET_PROMETHEUS
-    spread_gauge_->Set(fleet_.spread);
-    spread_histogram_->Observe(fleet_.spread);
-    common_mode_gauge_->Set(fleet_.common_mode);
+    if (metrics_enabled_) {
+        spread_gauge_->Set(fleet_.spread);
+        spread_histogram_->Observe(fleet_.spread);
+        common_mode_gauge_->Set(fleet_.common_mode);
+    }
 #endif
 
     // Per-slot offsets and EWMA statistics.
@@ -529,19 +618,21 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
         }
 
 #ifdef ROC_TARGET_PROMETHEUS
-        slot.offset_gauge->Set(slot.stats.offset);
-        if (e2e[n] >= 0 && n_e2e >= 2) {
-            slot.offset_e2e_gauge->Set(slot.stats.offset_e2e);
-            slot.mapping_error_gauge->Set(slot.stats.mapping_error);
+        if (metrics_enabled_) {
+            slot.gauges[Gauge_Offset]->Set(slot.stats.offset);
+            if (e2e[n] >= 0 && n_e2e >= 2) {
+                slot.gauges[Gauge_OffsetE2e]->Set(slot.stats.offset_e2e);
+                slot.gauges[Gauge_OffsetDisagreement]->Set(slot.stats.mapping_error);
+            }
+            slot.gauges[Gauge_Warp]->Set(slot.stats.warp);
+            slot.gauges[Gauge_TargetLatency]->Set(slot.stats.target_latency);
         }
-        slot.warp_gauge->Set(slot.stats.warp);
-        slot.target_latency_gauge->Set(slot.stats.target_latency);
 #endif
 
         // The event detector compares against the mean BEFORE this
         // row's offset enters it; otherwise the trigger references
         // itself and desensitizes by alpha.
-        update_flinch_(i, offset[n], row);
+        update_jump_(i, offset[n], row);
 
         if (!slot.has_ewma) {
             slot.ewma_mean = offset[n];
@@ -561,37 +652,25 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
             const size_t i = present[a];
             const size_t j = present[b];
 
+            Pair& pair = pairs_[i][j];
+
             const double prod = centered[a] * centered[b];
-            if (!cov_valid_[i][j]) {
-                cov_[i][j] = prod;
-                cov_valid_[i][j] = true;
+            if (!pair.cov_valid) {
+                pair.cov = prod;
+                pair.cov_valid = true;
             } else {
-                cov_[i][j] += alpha * (prod - cov_[i][j]);
+                pair.cov += alpha * (prod - pair.cov);
             }
 
             if (i != j) {
-                PairStats& pair = pair_stats_[i][j];
                 pair.valid = true;
                 pair.skew = q[a] - q[b];
-                pair.cov = cov_[i][j];
-
-                const double var_i = cov_valid_[i][i] ? cov_[i][i] : 0;
-                const double var_j = cov_valid_[j][j] ? cov_[j][j] : 0;
-                if (var_i > 0 && var_j > 0) {
-                    pair.corr = cov_[i][j] / sqrt(var_i * var_j);
-                    if (pair.corr > 1) {
-                        pair.corr = 1;
-                    }
-                    if (pair.corr < -1) {
-                        pair.corr = -1;
-                    }
-                }
 
 #ifdef ROC_TARGET_PROMETHEUS
-                if (pair_skew_gauge_[i][j]) {
-                    pair_skew_gauge_[i][j]->Set(pair.skew);
-                    pair_corr_gauge_[i][j]->Set(pair.corr);
-                    pair_cov_gauge_[i][j]->Set(pair.cov);
+                if (metrics_enabled_ && pair.skew_gauge) {
+                    pair.skew_gauge->Set(pair.skew);
+                    pair.corr_gauge->Set(pair_corr_(i, j));
+                    pair.cov_gauge->Set(pair.cov);
                 }
 #endif
             }
@@ -601,78 +680,105 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
     // Per-slot RMS from the variance diagonal.
     for (size_t n = 0; n < n_present; n++) {
         const size_t i = present[n];
-        if (cov_valid_[i][i] && cov_[i][i] > 0) {
-            slots_[i].stats.rms = sqrt(cov_[i][i]);
+        if (pairs_[i][i].cov_valid && pairs_[i][i].cov > 0) {
+            slots_[i].stats.rms = sqrt(pairs_[i][i].cov);
 #ifdef ROC_TARGET_PROMETHEUS
-            slots_[i].rms_gauge->Set(slots_[i].stats.rms);
+            if (metrics_enabled_) {
+                slots_[i].gauges[Gauge_Rms]->Set(slots_[i].stats.rms);
+            }
 #endif
         }
     }
 }
 
-void SessionSkewEstimator::update_flinch_(size_t slot_index,
+// Correlation from the covariance triangle; [-1; 1], zero when either
+// variance is not yet established.
+double SessionSkewEstimator::pair_corr_(size_t slot_a, size_t slot_b) const {
+    const double var_a = pairs_[slot_a][slot_a].cov_valid ? pairs_[slot_a][slot_a].cov : 0;
+    const double var_b = pairs_[slot_b][slot_b].cov_valid ? pairs_[slot_b][slot_b].cov : 0;
+    if (var_a <= 0 || var_b <= 0) {
+        return 0;
+    }
+    double corr = pairs_[slot_a][slot_b].cov / sqrt(var_a * var_b);
+    if (corr > 1) {
+        corr = 1;
+    }
+    if (corr < -1) {
+        corr = -1;
+    }
+    return corr;
+}
+
+void SessionSkewEstimator::update_jump_(size_t slot_index,
                                           double offset,
                                           const Row& row) {
     Slot& slot = slots_[slot_index];
     SlotStats& stats = slot.stats;
 
-    const double step_threshold = flinch_step_sec_;
-    const double abs_threshold = flinch_abs_sec_;
-    const double release_band = flinch_release_sec_;
+    const double step_threshold = jump_step_sec_;
+    const double abs_threshold = jump_abs_sec_;
+    const double release_band = jump_release_sec_;
 
-    if (!stats.flinch_active) {
+    if (!stats.jump_active) {
         const bool step_trigger = slot.has_prev_offset
             && fabs(offset - slot.prev_offset) > step_threshold;
         const bool abs_trigger = fabs(offset - slot.ewma_mean) > abs_threshold;
 
         if (step_trigger || abs_trigger) {
-            stats.flinch_active = true;
-            stats.flinch_count++;
+            stats.jump_active = true;
+            stats.jump_count++;
 #ifdef ROC_TARGET_PROMETHEUS
-            slot.flinch_active_gauge->Set(1);
-            slot.flinch_counter->Increment();
+            if (metrics_enabled_) {
+                slot.gauges[Gauge_JumpActive]->Set(1);
+                slot.jump_counter->Increment();
+            }
 #endif
-            slot.flinch_baseline = slot.has_prev_offset ? slot.prev_offset : 0;
-            slot.flinch_start_cts = row.grid_cts;
-            slot.flinch_hold_ns = 0;
-            stats.flinch_magnitude = fabs(offset - slot.flinch_baseline);
+            slot.jump_baseline = slot.has_prev_offset ? slot.prev_offset : 0;
+            slot.jump_start_cts = row.grid_cts;
+            slot.jump_hold_ns = 0;
+            stats.jump_magnitude = fabs(offset - slot.jump_baseline);
 
             roc_log(LogDebug,
-                    "session skew estimator: flinch start: slot=%s offset=%.6f"
+                    "session skew estimator: offset jump start: slot=%s offset=%.6f"
                     " baseline=%.6f",
-                    slot.name, offset, slot.flinch_baseline);
+                    slot.name, offset, slot.jump_baseline);
         }
         return;
     }
 
-    const double excursion = fabs(offset - slot.flinch_baseline);
-    if (excursion > stats.flinch_magnitude) {
-        stats.flinch_magnitude = excursion;
+    const double excursion = fabs(offset - slot.jump_baseline);
+    if (excursion > stats.jump_magnitude) {
+        stats.jump_magnitude = excursion;
     }
 #ifdef ROC_TARGET_PROMETHEUS
-    slot.flinch_magnitude_gauge->Set(stats.flinch_magnitude);
+    if (metrics_enabled_) {
+        slot.gauges[Gauge_JumpMagnitude]->Set(stats.jump_magnitude);
+    }
 #endif
 
     if (excursion <= release_band) {
-        if (slot.flinch_hold_ns == 0) {
+        if (slot.jump_hold_ns == 0) {
             // First row back inside the band: the event ended here.
-            slot.flinch_end_cts = row.grid_cts;
+            slot.jump_end_cts = row.grid_cts;
         }
-        slot.flinch_hold_ns += row.grid_period;
-        if (slot.flinch_hold_ns >= config_.flinch_hold) {
-            stats.flinch_active = false;
-            stats.flinch_duration = ns_2_sec(slot.flinch_end_cts - slot.flinch_start_cts);
+        slot.jump_hold_ns += row.grid_period;
+        if (slot.jump_hold_ns >= config_.jump_hold) {
+            stats.jump_active = false;
+            stats.jump_duration = ns_2_sec(slot.jump_end_cts - slot.jump_start_cts);
 #ifdef ROC_TARGET_PROMETHEUS
-            slot.flinch_active_gauge->Set(0);
+            if (metrics_enabled_) {
+                slot.gauges[Gauge_JumpActive]->Set(0);
+                slot.gauges[Gauge_JumpDuration]->Set(stats.jump_duration);
+            }
 #endif
 
             roc_log(LogDebug,
-                    "session skew estimator: flinch end: slot=%s magnitude=%.6f"
+                    "session skew estimator: offset jump end: slot=%s magnitude=%.6f"
                     " duration=%.3f",
-                    slot.name, stats.flinch_magnitude, stats.flinch_duration);
+                    slot.name, stats.jump_magnitude, stats.jump_duration);
         }
     } else {
-        slot.flinch_hold_ns = 0;
+        slot.jump_hold_ns = 0;
     }
 }
 
@@ -698,12 +804,13 @@ bool SessionSkewEstimator::pair_stats(size_t slot_a,
         return false;
     }
 
-    if (slot_a < slot_b) {
-        stats = pair_stats_[slot_a][slot_b];
-    } else {
-        stats = pair_stats_[slot_b][slot_a];
-        stats.skew = -stats.skew;
-    }
+    const size_t lo = slot_a < slot_b ? slot_a : slot_b;
+    const size_t hi = slot_a < slot_b ? slot_b : slot_a;
+
+    stats.valid = pairs_[lo][hi].valid;
+    stats.skew = slot_a < slot_b ? pairs_[lo][hi].skew : -pairs_[lo][hi].skew;
+    stats.cov = pairs_[lo][hi].cov;
+    stats.corr = pair_corr_(lo, hi);
     return true;
 }
 

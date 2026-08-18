@@ -97,8 +97,8 @@ TEST(session_skew_estimator, zero_skew) {
         DOUBLES_EQUAL(0, stats.offset, 1e-9);
         DOUBLES_EQUAL(1000e-9, stats.warp, 1e-12);
         DOUBLES_EQUAL(0.032, stats.target_latency, 1e-9);
-        CHECK(!stats.flinch_active);
-        CHECK_EQUAL(0, stats.flinch_count);
+        CHECK(!stats.jump_active);
+        CHECK_EQUAL(0, stats.jump_count);
     }
 }
 
@@ -267,7 +267,7 @@ TEST(session_skew_estimator, grid_delta_gate) {
     CHECK_EQUAL(0, fleet.full_rows);
 }
 
-TEST(session_skew_estimator, flinch_detection) {
+TEST(session_skew_estimator, offset_jump_detection) {
     SessionSkewEstimatorConfig config;
     Est est(config, metrics::PrometheusConfig());
 
@@ -285,8 +285,8 @@ TEST(session_skew_estimator, flinch_detection) {
 
     Est::SlotStats stats;
     CHECK(est.slot_stats((size_t)slots[0], stats));
-    CHECK(!stats.flinch_active);
-    CHECK_EQUAL(0, stats.flinch_count);
+    CHECK(!stats.jump_active);
+    CHECK_EQUAL(0, stats.jump_count);
 
     // Slot a jumps +5ms (offset jumps by +2.5ms, above the 2ms step
     // threshold: median moves too).
@@ -297,22 +297,22 @@ TEST(session_skew_estimator, flinch_detection) {
     }
 
     CHECK(est.slot_stats((size_t)slots[0], stats));
-    CHECK(stats.flinch_active);
-    CHECK_EQUAL(1, stats.flinch_count);
-    CHECK(stats.flinch_magnitude > 0.002);
+    CHECK(stats.jump_active);
+    CHECK_EQUAL(1, stats.jump_count);
+    CHECK(stats.jump_magnitude > 0.002);
 
-    // Recovery: back to baseline and hold for > flinch_hold (2s = 4 rows).
+    // Recovery: back to baseline and hold for > jump_hold (2s = 4 rows).
     for (size_t n = 0; n < 6; n++, row++) {
         feed_row(est, slots, q_base, 2, row);
     }
 
     CHECK(est.slot_stats((size_t)slots[0], stats));
-    CHECK(!stats.flinch_active);
-    CHECK_EQUAL(1, stats.flinch_count);
+    CHECK(!stats.jump_active);
+    CHECK_EQUAL(1, stats.jump_count);
 
-    // The quiet slot never flinched.
+    // The quiet slot never offset jumped.
     CHECK(est.slot_stats((size_t)slots[1], stats));
-    CHECK_EQUAL(1, stats.flinch_count); // median shift makes b jump too
+    CHECK_EQUAL(1, stats.jump_count); // median shift makes b jump too
 }
 
 TEST(session_skew_estimator, e2e_disagreement) {
