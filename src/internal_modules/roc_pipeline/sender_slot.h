@@ -27,8 +27,8 @@
 #include "roc_pipeline/config.h"
 #include "roc_pipeline/metrics.h"
 #include "roc_pipeline/sender_endpoint.h"
-#include "roc_pipeline/session_skew_estimator.h"
 #include "roc_pipeline/sender_session.h"
+#include "roc_pipeline/session_skew_estimator.h"
 #include "roc_pipeline/state_tracker.h"
 
 #ifdef ROC_TARGET_PROMETHEUS

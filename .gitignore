@@ -64,5 +64,7 @@ TODO.org
 .justfile
 .unisonignore
 
-# Core dumps from crashed test processes
-core.*
+# Core dumps from crashed test processes. Anchored patterns: an
+# unanchored core.* would silently untrack future files like core.h.
+/core.[0-9]*
+/tests/system/core.[0-9]*

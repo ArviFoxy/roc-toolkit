@@ -143,12 +143,12 @@ public:
                                      const header::XrDelayMetricsBlock& blk);
 
     //! Process XR Queue Metrics block (extended receiver report).
-    //! Process XR Stream Snapshot block.
-    void process_stream_snapshot_block(const header::XrPacket& xr,
-                                       const header::XrStreamSnapshotBlock& blk);
-
     void process_queue_metrics_block(const header::XrPacket& xr,
                                      const header::XrQueueMetricsBlock& blk);
+
+    //! Process XR Stream Snapshot block (extended receiver report).
+    void process_stream_snapshot_block(const header::XrPacket& xr,
+                                       const header::XrStreamSnapshotBlock& blk);
 
     //! Process BYE message.
     void process_goodbye(packet::stream_source_t ssrc);

@@ -341,10 +341,10 @@ TEST(multiroom_sink_2_sources, track_per_leg) {
 }
 
 TEST(multiroom_sink_2_sources, rtcp_snapshots_reach_estimator) {
-    // Same 3-leg session, now with per-leg RTCP control endpoints: the
+    // A 3-slot session with per-slot RTCP control endpoints: the
     // receivers' stream snapshots flow back and the sender's skew
     // estimator finalizes rows at common grid points. Offline queues
-    // give all legs identical timing, so clock-free offsets are ~0.
+    // give all slots identical timing, so clock-free offsets are ~0.
     const core::nanoseconds_t send_base_cts = 1000000000000000;
 
     SenderSinkConfig sender_config = make_sender_config();
