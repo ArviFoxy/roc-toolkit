@@ -44,8 +44,8 @@ PreciseFreqEstimator::PreciseFreqEstimator(const PreciseFreqEstimatorConfig& con
     , coeff_(1.0f)
     , coeff_precise_(1.0)
     , ema_alpha_(0)
-    , e_mean_ema_(0)
-    , e_sq_ema_(0)
+    , e_mean_ema_()
+    , e_sq_ema_()
     , dumper_(dumper) {
 
     const double omega_n = std::sqrt((double)sample_spec.sample_rate() * spring_gain_);
@@ -112,13 +112,22 @@ bool PreciseFreqEstimator::is_stable() const {
     // Var[e] = E[e²] - E[e]²  (centered variance)
     // Converged when |E[e]|² < 0.25 * Var[e], i.e. bias < 0.5 * stddev.
     //
-    // During startup (e_sq_ema_ ≈ 0) or when variance estimate is
-    // not yet reliable, we return false.
-    const double variance = e_sq_ema_ - e_mean_ema_ * e_mean_ema_;
+    // Both moments are averages of the samples seen so far, so the ratio
+    // is meaningful from the start. It still takes a few samples to
+    // measure a spread at all: with none the averages are undefined, and
+    // with one the variance is exactly zero. Report not stable until the
+    // noise floor is actually observable.
+    if (!e_mean_ema_.has()) {
+        return false;
+    }
+
+    const double mean = e_mean_ema_.get();
+    const double variance = e_sq_ema_.get() - mean * mean;
     if (variance <= 0) {
         return false;
     }
-    return e_mean_ema_ * e_mean_ema_ < 0.25 * variance;
+
+    return mean * mean < 0.25 * variance;
 }
 
 void PreciseFreqEstimator::update_target_latency(
@@ -174,8 +183,8 @@ void PreciseFreqEstimator::update(packet::stream_timestamp_t current_latency) {
 
     // 5. Update queue error statistics for convergence detection.
     //    EMA alpha is derived from the system's natural time constant.
-    e_mean_ema_ = (1.0 - ema_alpha_) * e_mean_ema_ + ema_alpha_ * error;
-    e_sq_ema_   = (1.0 - ema_alpha_) * e_sq_ema_   + ema_alpha_ * error * error;
+    e_mean_ema_.update(ema_alpha_, error);
+    e_sq_ema_.update(ema_alpha_, error * error);
 
 #ifdef ROC_TARGET_PROMETHEUS
     freq_coeff_gauge_->Set((double)coeff_);

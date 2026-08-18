@@ -92,11 +92,10 @@ LatencyTuner::LatencyTuner(const LatencyConfig& latency_config,
     , dumper_(dumper)
     , init_status_(status::NoStatus)
     , obj_ema_alpha_((double)latency_config.scaling_interval / (30.0 * 1e9))
-    , obj_ema_w_(1.0)
-    , obj_error_mean_(0)
-    , obj_error_sq_(0)
-    , obj_error_cube_(0)
-    , obj_warp_deriv_sq_(0)
+    , obj_error_mean_()
+    , obj_error_sq_()
+    , obj_error_cube_()
+    , obj_warp_deriv_sq_()
     , prev_freq_coeff_(0)
     , sample_rate_((double)sample_spec.sample_rate())
     , scale_interval_sec_((double)latency_config.scaling_interval / 1e9) {
@@ -466,37 +465,29 @@ void LatencyTuner::compute_scaling_(packet::stream_timestamp_diff_t actual_laten
     // Computed after the controller has produced freq_coeff_, so they
     // measure closed-loop performance regardless of controller type.
 
-    // Update bias correction weight: w_{n+1} = (1-alpha) * w_n.
-    // Starts at 1.0, decays to 0. Corrected EMA = raw / (1 - w).
-    obj_ema_w_ *= (1.0 - obj_ema_alpha_);
-    const double bias_corr = 1.0 - obj_ema_w_;
-
     // J1/J2/J3: Queue error statistics (bias, variance, skewness).
     const double error = (double)actual_latency - (double)cur_target_latency_;
-    obj_error_mean_ = (1.0 - obj_ema_alpha_) * obj_error_mean_
-                    + obj_ema_alpha_ * error;
-    obj_error_sq_   = (1.0 - obj_ema_alpha_) * obj_error_sq_
-                    + obj_ema_alpha_ * error * error;
-    obj_error_cube_ = (1.0 - obj_ema_alpha_) * obj_error_cube_
-                    + obj_ema_alpha_ * error * error * error;
+    obj_error_mean_.update(obj_ema_alpha_, error);
+    obj_error_sq_.update(obj_ema_alpha_, error * error);
+    obj_error_cube_.update(obj_ema_alpha_, error * error * error);
 
     // J4: Warp derivative (rate of change of freq_coeff).
     if (prev_freq_coeff_ > 0 && scale_interval_sec_ > 0) {
         const double du_dt =
             ((double)freq_coeff_ - (double)prev_freq_coeff_) / scale_interval_sec_;
-        obj_warp_deriv_sq_ = (1.0 - obj_ema_alpha_) * obj_warp_deriv_sq_
-                           + obj_ema_alpha_ * du_dt * du_dt;
+        obj_warp_deriv_sq_.update(obj_ema_alpha_, du_dt * du_dt);
     }
     prev_freq_coeff_ = freq_coeff_;
 
-    // Apply bias correction and convert to physical units.
-    if (bias_corr > 0) {
-        const double mean_corr = obj_error_mean_ / bias_corr;
-        const double sq_corr   = obj_error_sq_ / bias_corr;
-        const double cube_corr = obj_error_cube_ / bias_corr;
+    // Convert to physical units.
+    if (obj_error_mean_.has()) {
+        const double mean_corr = obj_error_mean_.get();
+        const double sq_corr   = obj_error_sq_.get();
+        const double cube_corr = obj_error_cube_.get();
         const double variance  = sq_corr - mean_corr * mean_corr;
         const double stddev    = variance > 0 ? std::sqrt(variance) : 0;
-        const double warp_rms  = std::sqrt(obj_warp_deriv_sq_ / bias_corr);
+        const double warp_rms =
+            obj_warp_deriv_sq_.has() ? std::sqrt(obj_warp_deriv_sq_.get()) : 0;
 
         // Skewness = E[(e - mu)^3] / sigma^3
         // E[(e-mu)^3] = E[e^3] - 3*mu*E[e^2] + 2*mu^3

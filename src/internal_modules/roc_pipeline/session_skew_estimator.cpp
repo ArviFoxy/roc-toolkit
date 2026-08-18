@@ -315,12 +315,12 @@ void SessionSkewEstimator::clear_slot_state_(size_t slot_index) {
             pairs_[j < slot_index ? j : slot_index][j < slot_index ? slot_index : j];
         lo.valid = false;
         lo.skew = 0;
-        lo.cov = Ema();
+        lo.cov = stat::ExpAvg();
     }
     Pair& diag = pairs_[slot_index][slot_index];
     diag.valid = false;
     diag.skew = 0;
-    diag.cov = Ema();
+    diag.cov = stat::ExpAvg();
 }
 
 ssize_t SessionSkewEstimator::register_slot(const char* name) {
@@ -751,9 +751,9 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
 // Correlation from the covariance triangle; [-1; 1], zero when either
 // variance is not yet established.
 double SessionSkewEstimator::pair_corr_(size_t slot_a, size_t slot_b) const {
-    const Ema& var_a = pairs_[slot_a][slot_a].cov;
-    const Ema& var_b = pairs_[slot_b][slot_b].cov;
-    const Ema& cov = pairs_[slot_a][slot_b].cov;
+    const stat::ExpAvg& var_a = pairs_[slot_a][slot_a].cov;
+    const stat::ExpAvg& var_b = pairs_[slot_b][slot_b].cov;
+    const stat::ExpAvg& cov = pairs_[slot_a][slot_b].cov;
     if (!var_a.has() || !var_b.has() || !cov.has() || var_a.get() <= 0
         || var_b.get() <= 0) {
         return 0;

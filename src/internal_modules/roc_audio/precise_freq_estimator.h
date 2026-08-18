@@ -19,6 +19,7 @@
 #include "roc_metrics/prometheus.h"
 
 #include "roc_packet/units.h"
+#include "roc_stat/exp_avg.h"
 
 #ifdef ROC_TARGET_PROMETHEUS
 #include <prometheus/gauge.h>
@@ -172,9 +173,9 @@ private:
     // Convergence detection: EMA of queue error statistics.
     // The EMA alpha is derived from the system's natural time constant
     // tau_c = sqrt(2) / omega_n, averaging over 2*tau_c.
-    double ema_alpha_;   // EMA discount factor.
-    double e_mean_ema_;  // EMA of e (tracks bias / mean error).
-    double e_sq_ema_;    // EMA of e² (tracks second moment).
+    double ema_alpha_;        // EMA discount factor.
+    stat::ExpAvg e_mean_ema_; // EMA of e (tracks bias / mean error).
+    stat::ExpAvg e_sq_ema_;   // EMA of e² (tracks second moment).
 
     dbgio::CsvDumper* dumper_;
 

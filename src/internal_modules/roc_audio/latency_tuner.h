@@ -22,6 +22,7 @@
 #include "roc_dbgio/csv_dumper.h"
 #include "roc_packet/ilink_meter.h"
 #include "roc_packet/units.h"
+#include "roc_stat/exp_avg.h"
 #include "roc_status/status_code.h"
 
 #include <cmath>
@@ -211,17 +212,18 @@ private:
     //  J4: warp derivative RMS   (frequency smoothness)
     //
     // EMA time constant is 30 seconds (smooths over NTP sync transients).
-    // Alpha = scaling_interval / tau_ema. Bias correction: divide raw EMA
-    // by (1 - w) where w = (1-alpha)^n decays from 1 to 0.
-    double obj_ema_alpha_;       // EMA discount factor = h / tau_ema.
-    double obj_ema_w_;           // Bias correction weight = (1-alpha)^n.
-    double obj_error_mean_;      // Raw EMA of e (queue error in samples).
-    double obj_error_sq_;        // Raw EMA of e² (second moment).
-    double obj_error_cube_;      // Raw EMA of e³ (third moment).
-    double obj_warp_deriv_sq_;   // Raw EMA of (du/dt)².
-    float prev_freq_coeff_;      // Previous freq_coeff for finite differencing.
-    double sample_rate_;         // Fs, for samples → seconds conversion.
-    double scale_interval_sec_;  // Scaling interval in seconds, for du/dt.
+    // Alpha = scaling_interval / tau_ema. Each average carries its own
+    // accumulated weight, so the warp average, which updates only once
+    // finite differencing has a previous sample, stays normalized by the
+    // weight it actually received while the error moments run ahead of it.
+    double obj_ema_alpha_;           // EMA discount factor = h / tau_ema.
+    stat::ExpAvg obj_error_mean_;    // EMA of e (queue error in samples).
+    stat::ExpAvg obj_error_sq_;      // EMA of e² (second moment).
+    stat::ExpAvg obj_error_cube_;    // EMA of e³ (third moment).
+    stat::ExpAvg obj_warp_deriv_sq_; // EMA of (du/dt)².
+    float prev_freq_coeff_;          // Previous freq_coeff for finite differencing.
+    double sample_rate_;             // Fs, for samples → seconds conversion.
+    double scale_interval_sec_;      // Scaling interval in seconds, for du/dt.
 
 #ifdef ROC_TARGET_PROMETHEUS
     prometheus::Gauge* target_latency_gauge_;

@@ -18,6 +18,7 @@
 #include "roc_packet/stream_snapshot.h"
 #include "roc_metrics/prometheus.h"
 #include "roc_pipeline/config.h"
+#include "roc_stat/exp_avg.h"
 
 #ifdef ROC_TARGET_PROMETHEUS
 #include <prometheus/counter.h>
@@ -198,29 +199,6 @@ private:
         packet::StreamSnapshot samples[MaxSlots];
     };
 
-
-    // Bias-corrected exponential average: raw sum and accumulated
-    // weight both start at zero and the estimate is raw / weight, so an
-    // early estimate is the weighted average of the samples seen so
-    // far. Seeding from the first sample instead would keep that one
-    // sample dominant for a full time constant - a starting bias that
-    // matters at stats_tau of minutes.
-    struct Ema {
-        double raw; // Zero-initialized exponential sum.
-        double w;   // Accumulated weight; converges to 1.
-
-        void update(double alpha, double x) {
-            raw += alpha * (x - raw);
-            w += alpha * (1 - w);
-        }
-        bool has() const {
-            return w > 0;
-        }
-        double get() const {
-            return raw / w;
-        }
-    };
-
     struct Slot {
         bool used;
         char name[MaxNameLen];
@@ -232,12 +210,12 @@ private:
 
         // Mean of the slot's offset; the absolute-bound reference of
         // the jump detector.
-        Ema offset_mean;
+        stat::ExpAvg offset_mean;
 
         // Mean of the raw queue depth: the centering base for the
         // covariance/correlation. No fleet reference enters that path,
         // so pair correlation is a pure two-slot measurement.
-        Ema q_mean;
+        stat::ExpAvg q_mean;
 
         // Jump state.
         double jump_baseline;
@@ -284,7 +262,7 @@ private:
     struct Pair {
         bool valid;
         double skew;
-        Ema cov;
+        stat::ExpAvg cov;
 #ifdef ROC_TARGET_PROMETHEUS
         prometheus::Gauge* skew_gauge;
         prometheus::Gauge* corr_gauge;
@@ -295,7 +273,7 @@ private:
     Pair pairs_[MaxSlots][MaxSlots];
 
     FleetStats fleet_;
-    Ema common_mode_baseline_;
+    stat::ExpAvg common_mode_baseline_;
 
     core::nanoseconds_t newest_grid_cts_;
 
