@@ -17,7 +17,7 @@ namespace roc {
 namespace packet {
 
 DelayedReader::DelayedReader(IReader& reader,
-                             core::nanoseconds_t target_delay,
+                             const DelayedReaderConfig& config,
                              const audio::SampleSpec& sample_spec)
     : reader_(reader)
     , delay_queue_(0)
@@ -26,8 +26,8 @@ DelayedReader::DelayedReader(IReader& reader,
     , unloaded_(false)
     , sample_spec_(sample_spec)
     , init_status_(status::NoStatus) {
-    if (target_delay > 0) {
-        delay_ = sample_spec.ns_2_stream_timestamp(target_delay);
+    if (config.target_delay > 0) {
+        delay_ = sample_spec.ns_2_stream_timestamp(config.target_delay);
     }
 
     roc_log(LogDebug, "delayed reader: initializing: delay=%lu(%.3fms)",

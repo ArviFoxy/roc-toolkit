@@ -87,12 +87,13 @@ ReceiverSession::ReceiverSession(const ReceiverSessionConfig& session_config,
     }
     pkt_reader = filter_.get();
 
+    packet::DelayedReaderConfig delayed_reader_config;
+    delayed_reader_config.target_delay = session_config.latency.target_latency != 0
+        ? session_config.latency.target_latency
+        : session_config.latency.start_target_latency;
+
     delayed_reader_.reset(new (delayed_reader_) packet::DelayedReader(
-        *pkt_reader,
-        session_config.latency.target_latency != 0
-            ? session_config.latency.target_latency
-            : session_config.latency.start_target_latency,
-        pkt_encoding->sample_spec));
+        *pkt_reader, delayed_reader_config, pkt_encoding->sample_spec));
     if ((init_status_ = delayed_reader_->init_status()) != status::StatusOK) {
         return;
     }

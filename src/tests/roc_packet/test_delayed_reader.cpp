@@ -33,6 +33,12 @@ const audio::SampleSpec sample_spec(SampleRate,
 core::HeapArena arena;
 PacketFactory packet_factory(arena, MaxBufSize);
 
+DelayedReaderConfig make_config(core::nanoseconds_t target_delay) {
+    DelayedReaderConfig config;
+    config.target_delay = target_delay;
+    return config;
+}
+
 PacketPtr new_packet(seqnum_t sn) {
     PacketPtr packet = packet_factory.new_packet();
     CHECK(packet);
@@ -82,7 +88,7 @@ TEST_GROUP(delayed_reader) {};
 
 TEST(delayed_reader, no_delay) {
     FifoQueue queue;
-    DelayedReader dr(queue, 0, sample_spec);
+    DelayedReader dr(queue, make_config(0), sample_spec);
     LONGS_EQUAL(status::StatusOK, dr.init_status());
 
     PacketPtr pp = expect_read(status::StatusDrain, dr, ModeFetch);
@@ -99,7 +105,8 @@ TEST(delayed_reader, no_delay) {
 
 TEST(delayed_reader, delay) {
     FifoQueue queue;
-    DelayedReader dr(queue, NumSamples * NumPackets * NsPerSample, sample_spec);
+    DelayedReader dr(queue, make_config(NumSamples * NumPackets * NsPerSample),
+                     sample_spec);
     LONGS_EQUAL(status::StatusOK, dr.init_status());
 
     PacketPtr packets[NumPackets];
@@ -134,7 +141,8 @@ TEST(delayed_reader, delay) {
 
 TEST(delayed_reader, instant) {
     FifoQueue queue;
-    DelayedReader dr(queue, NumSamples * NumPackets * NsPerSample, sample_spec);
+    DelayedReader dr(queue, make_config(NumSamples * NumPackets * NsPerSample),
+                     sample_spec);
     LONGS_EQUAL(status::StatusOK, dr.init_status());
 
     PacketPtr packets[NumPackets];
@@ -155,7 +163,8 @@ TEST(delayed_reader, instant) {
 
 TEST(delayed_reader, trim) {
     FifoQueue queue;
-    DelayedReader dr(queue, NumSamples * NumPackets * NsPerSample, sample_spec);
+    DelayedReader dr(queue, make_config(NumSamples * NumPackets * NsPerSample),
+                     sample_spec);
     LONGS_EQUAL(status::StatusOK, dr.init_status());
 
     PacketPtr packets[NumPackets * 2];
@@ -176,7 +185,8 @@ TEST(delayed_reader, trim) {
 
 TEST(delayed_reader, late_duplicates) {
     FifoQueue queue;
-    DelayedReader dr(queue, NumSamples * NumPackets * NsPerSample, sample_spec);
+    DelayedReader dr(queue, make_config(NumSamples * NumPackets * NsPerSample),
+                     sample_spec);
     LONGS_EQUAL(status::StatusOK, dr.init_status());
 
     PacketPtr packets[NumPackets];
@@ -205,7 +215,8 @@ TEST(delayed_reader, late_duplicates) {
 
 TEST(delayed_reader, fetch_peek) {
     FifoQueue queue;
-    DelayedReader dr(queue, NumSamples * NumPackets * NsPerSample, sample_spec);
+    DelayedReader dr(queue, make_config(NumSamples * NumPackets * NsPerSample),
+                     sample_spec);
     LONGS_EQUAL(status::StatusOK, dr.init_status());
 
     PacketPtr packets[NumPackets * 2];
@@ -261,7 +272,7 @@ TEST(delayed_reader, forward_error) {
     for (size_t st_n = 0; st_n < ROC_ARRAY_SIZE(status_list); st_n++) {
         for (size_t dl_n = 0; dl_n < ROC_ARRAY_SIZE(delay_list); dl_n++) {
             MockReader reader(status_list[st_n]);
-            DelayedReader dr(reader, delay_list[dl_n], sample_spec);
+            DelayedReader dr(reader, make_config(delay_list[dl_n]), sample_spec);
             LONGS_EQUAL(status::StatusOK, dr.init_status());
 
             expect_read(status_list[st_n], dr, ModePeek);

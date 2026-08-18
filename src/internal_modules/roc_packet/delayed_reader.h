@@ -22,6 +22,16 @@
 namespace roc {
 namespace packet {
 
+//! Delayed reader parameters.
+struct DelayedReaderConfig {
+    //! Delay to insert before the first packet.
+    core::nanoseconds_t target_delay;
+
+    DelayedReaderConfig()
+        : target_delay(0) {
+    }
+};
+
 //! Delayed reader.
 //!
 //! Delays read of the first packet in stream for the configured duration.
@@ -52,10 +62,10 @@ public:
     //!
     //! @b Parameters
     //!  - @p reader is used to read packets from incoming queue
-    //!  - @p target_delay is the delay to insert before first packet
+    //!  - @p config defines the delay to insert before first packet
     //!  - @p sample_spec is the specifications of incoming packets
     DelayedReader(IReader& reader,
-                  core::nanoseconds_t target_delay,
+                  const DelayedReaderConfig& config,
                   const audio::SampleSpec& sample_spec);
 
     //! Check if the object was successfully constructed.
