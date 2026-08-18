@@ -17,6 +17,7 @@
 #include "roc_core/time.h"
 #include "roc_packet/stream_snapshot.h"
 #include "roc_metrics/prometheus.h"
+#include "roc_pipeline/config.h"
 
 #ifdef ROC_TARGET_PROMETHEUS
 #include <prometheus/counter.h>
@@ -27,58 +28,6 @@
 
 namespace roc {
 namespace pipeline {
-
-//! Session skew estimator configuration.
-struct SessionSkewEstimatorConfig {
-    //! Reject snapshots whose position deviates from the grid point by
-    //! more than this. The deviation measures how far the receiver's
-    //! SR-anchored clock mapping and the sender's last-packet-anchored
-    //! mapping disagree; several milliseconds is normal noise, so the
-    //! bound must stay well above it.
-    core::nanoseconds_t max_grid_delta;
-
-    //! Reject snapshots whose grid point sits further than this in the
-    //! future of the local clock. A grid point is a capture instant the
-    //! receiver already played, so it can never be far in the future;
-    //! without this bound one bad snapshot advances the newest-row
-    //! cursor permanently and all later rows are dropped as stale.
-    core::nanoseconds_t max_future_grid;
-
-    //! Time constant of the EWMA statistics (means, covariance).
-    core::nanoseconds_t stats_tau;
-
-    //! Time constant of the slow common-mode baseline.
-    core::nanoseconds_t common_mode_tau;
-
-    //! Jump trigger: offset step between consecutive rows.
-    core::nanoseconds_t jump_step;
-
-    //! Jump trigger: absolute offset bound.
-    core::nanoseconds_t jump_abs;
-
-    //! Jump release: offset must return within this band of the
-    //! pre-event baseline...
-    core::nanoseconds_t jump_release_band;
-
-    //! ...and stay there for this long.
-    core::nanoseconds_t jump_hold;
-
-    //! Rows older than this many grid periods behind the newest row are
-    //! finalized even if some slots are missing.
-    size_t late_row_periods;
-
-    SessionSkewEstimatorConfig()
-        : max_grid_delta(20 * core::Millisecond)
-        , max_future_grid(30 * core::Second)
-        , stats_tau(60 * core::Second)
-        , common_mode_tau(60 * core::Second)
-        , jump_step(2 * core::Millisecond)
-        , jump_abs(10 * core::Millisecond)
-        , jump_release_band(500 * core::Microsecond)
-        , jump_hold(2 * core::Second)
-        , late_row_periods(3) {
-    }
-};
 
 //! Session skew estimator.
 //!

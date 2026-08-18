@@ -30,7 +30,7 @@ SenderSink::SenderSink(const SenderSinkConfig& sink_config,
     , packet_factory_(packet_pool, packet_buffer_pool)
     , frame_factory_(frame_pool, frame_buffer_pool)
     , arena_(arena)
-    , skew_estimator_(SessionSkewEstimatorConfig(), sink_config.latency.prometheus)
+    , skew_estimator_(sink_config.session_skew, sink_config.latency.prometheus)
     , frame_writer_(NULL)
     , init_status_(status::NoStatus) {
     if (!sink_config_.deduce_defaults(processor_map)) {
