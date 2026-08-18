@@ -1782,10 +1782,6 @@ public:
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //! |                    Target Latency (NTP32)                     |
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//! |            Receiver Local Time (NTP64), high word             |
-//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//! |            Receiver Local Time (NTP64), low word              |
-//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //! @endcode
 ROC_PACKED_BEGIN class XrStreamSnapshotEntry {
 private:
@@ -1796,7 +1792,6 @@ private:
     NtpTimestamp32 e2e_latency_;
     uint32_t warp_ppb_;
     NtpTimestamp32 target_latency_;
-    NtpTimestamp64 recv_local_time_;
 
 public:
     //! Sentinel for unavailable warp.
@@ -1815,7 +1810,6 @@ public:
         e2e_latency_.set_value(MetricUnavail_32);
         warp_ppb_ = core::hton32u((uint32_t)WarpUnavail);
         target_latency_.set_value(MetricUnavail_32);
-        recv_local_time_.set_value(MetricUnavail_64);
     }
 
     //! Get grid index (snapshot sequence number on the sender CTS grid).
@@ -1913,20 +1907,6 @@ public:
         target_latency_.set_value(ntp_clamp_32(t, MetricUnavail_32 - 1));
     }
 
-    //! Check if receiver local time is set.
-    bool has_recv_local_time() const {
-        return recv_local_time_.value() != MetricUnavail_64;
-    }
-
-    //! Get receiver local clock at the crossing (NTP).
-    packet::ntp_timestamp_t recv_local_time() const {
-        return recv_local_time_.value();
-    }
-
-    //! Set receiver local time.
-    void set_recv_local_time(const packet::ntp_timestamp_t t) {
-        recv_local_time_.set_value(ntp_clamp_64(t, MetricUnavail_64 - 1));
-    }
 } ROC_PACKED_END;
 
 //! XR Stream Snapshot Report Block.

@@ -396,7 +396,6 @@ TEST(builder_traverser, rr_sdes_xr) {
     snapshot_entries[0].set_e2e_latency(0xB500000);
     snapshot_entries[0].set_warp_ppb(-4242);
     snapshot_entries[0].set_target_latency(0xB600000);
-    snapshot_entries[0].set_recv_local_time(0xB700000000000077);
     snapshot_entries[1].set_grid_index(4002);
     snapshot_entries[1].set_position(0xB2000002);
 
@@ -545,8 +544,6 @@ TEST(builder_traverser, rr_sdes_xr) {
     CHECK_EQUAL(0xB500000, xr_it.get_stream_snapshot().entry(0).e2e_latency());
     CHECK_EQUAL(-4242, xr_it.get_stream_snapshot().entry(0).warp_ppb());
     CHECK_EQUAL(0xB600000, xr_it.get_stream_snapshot().entry(0).target_latency());
-    CHECK_EQUAL(0xB700000000000077,
-                xr_it.get_stream_snapshot().entry(0).recv_local_time());
     CHECK_EQUAL(4002, xr_it.get_stream_snapshot().entry(1).grid_index());
     CHECK_EQUAL(0xB2000002, xr_it.get_stream_snapshot().entry(1).position());
     CHECK(!xr_it.get_stream_snapshot().entry(1).has_niq_instant());
@@ -984,7 +981,7 @@ TEST(builder_traverser, xr_stream_snapshot_forward_compat) {
 
     // Hand-append a grown snapshot block to the XR packet: entry_words=11
     // (two extra words per entry), one entry.
-    const size_t grown_entry_words = 11;
+    const size_t grown_entry_words = 9;
     const size_t grown_size =
         sizeof(header::XrStreamSnapshotBlock) + grown_entry_words * 4;
 

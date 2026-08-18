@@ -42,6 +42,7 @@ PreciseFreqEstimator::PreciseFreqEstimator(const PreciseFreqEstimatorConfig& con
     , xi_(0.0)
     , u_feedback_(0.0)
     , coeff_(1.0f)
+    , coeff_precise_(1.0)
     , ema_alpha_(0)
     , e_mean_ema_(0)
     , e_sq_ema_(0)
@@ -100,6 +101,10 @@ float PreciseFreqEstimator::freq_coeff() const {
     return coeff_;
 }
 
+double PreciseFreqEstimator::freq_coeff_precise() const {
+    return coeff_precise_;
+}
+
 bool PreciseFreqEstimator::is_stable() const {
     // Bias-to-noise ratio test: is the transient bias small relative
     // to the steady-state noise floor?
@@ -156,6 +161,7 @@ void PreciseFreqEstimator::update(packet::stream_timestamp_t current_latency) {
     }
 
     coeff_ = (float)(1.0 + correction);
+    coeff_precise_ = 1.0 + correction;
 
     // 5. Update integral state with anti-windup.
     //    Freeze xi when u is saturated and the error pushes in the

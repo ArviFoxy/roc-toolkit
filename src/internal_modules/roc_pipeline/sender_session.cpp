@@ -454,7 +454,7 @@ SenderSession::notify_send_stream(packet::stream_source_t recv_source_id,
         const core::nanoseconds_t period = recv_report.snapshot_grid_period;
 
         for (size_t n = 0; n < recv_report.n_snapshots; n++) {
-            const rtcp::StreamSnapshot& snap = recv_report.snapshots[n];
+            const packet::StreamSnapshot& snap = recv_report.snapshots[n];
 
             // Slot-local RTP position -> common sender CTS timeline.
             const core::nanoseconds_t cts =
@@ -468,17 +468,8 @@ SenderSession::notify_send_stream(packet::stream_source_t recv_source_id,
                 k_est + (int32_t)(snap.grid_index - (uint32_t)k_est);
             const core::nanoseconds_t grid_cts = (core::nanoseconds_t)k_full * period;
 
-            SessionSkewEstimator::SlotSample sample;
-            sample.niq_instant = snap.niq_instant;
-            sample.niq_mean = snap.niq_mean;
-            sample.e2e_latency = snap.e2e_latency;
-            sample.has_warp = snap.has_warp;
-            sample.warp_ppb = snap.warp_ppb;
-            sample.target_latency = snap.target_latency;
-            sample.recv_local_time = snap.recv_local_time;
-
             skew_estimator_->process_snapshot(skew_slot_index_, grid_cts, period,
-                                              sample, cts - grid_cts, arrival_time);
+                                              snap, cts - grid_cts, arrival_time);
         }
     }
 

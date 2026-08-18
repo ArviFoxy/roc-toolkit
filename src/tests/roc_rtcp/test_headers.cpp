@@ -412,8 +412,8 @@ TEST(headers, metrics) {
 TEST(headers, stream_snapshot) {
     { // block sizes are wire-format constants
         CHECK_EQUAL(16, sizeof(header::XrStreamSnapshotBlock));
-        CHECK_EQUAL(36, sizeof(header::XrStreamSnapshotEntry));
-        CHECK_EQUAL(9, header::XrStreamSnapshotBlock::EntryWords);
+        CHECK_EQUAL(28, sizeof(header::XrStreamSnapshotEntry));
+        CHECK_EQUAL(7, header::XrStreamSnapshotBlock::EntryWords);
     }
     { // fixed part defaults and fields
         header::XrStreamSnapshotBlock blk;
@@ -509,18 +509,6 @@ TEST(headers, stream_snapshot) {
 
         e.reset();
         CHECK(!e.has_warp());
-    }
-    { // entry: NTP64 local time with sentinel
-        header::XrStreamSnapshotEntry e;
-
-        CHECK(!e.has_recv_local_time());
-
-        e.set_recv_local_time(0x1122334455667788);
-        CHECK(e.has_recv_local_time());
-        CHECK_EQUAL(0x1122334455667788, e.recv_local_time());
-
-        e.reset();
-        CHECK(!e.has_recv_local_time());
     }
 }
 

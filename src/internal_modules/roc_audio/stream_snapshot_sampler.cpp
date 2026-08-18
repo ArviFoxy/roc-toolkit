@@ -59,9 +59,8 @@ void StreamSnapshotSampler::update_mapping(core::nanoseconds_t capture_ts,
 void StreamSnapshotSampler::process_read(packet::stream_timestamp_t position,
                                          core::nanoseconds_t niq_latency,
                                          core::nanoseconds_t e2e_latency,
-                                         float freq_coeff,
-                                         core::nanoseconds_t target_latency,
-                                         core::nanoseconds_t local_time) {
+                                         double freq_coeff,
+                                         core::nanoseconds_t target_latency) {
     if (!is_enabled() || !has_mapping_) {
         return;
     }
@@ -95,13 +94,12 @@ void StreamSnapshotSampler::process_read(packet::stream_timestamp_t position,
     }
 
     while (cts_now >= next_grid_cts_) {
-        emit_(position, niq_latency, e2e_latency, freq_coeff, target_latency,
-              local_time);
+        emit_(position, niq_latency, e2e_latency, freq_coeff, target_latency);
         next_grid_cts_ += grid_period_;
     }
 }
 
-size_t StreamSnapshotSampler::get_snapshots(StreamSnapshot* snapshots,
+size_t StreamSnapshotSampler::get_snapshots(packet::StreamSnapshot* snapshots,
                                             size_t max_snapshots) const {
     roc_panic_if(!snapshots);
 
@@ -119,10 +117,9 @@ size_t StreamSnapshotSampler::get_snapshots(StreamSnapshot* snapshots,
 void StreamSnapshotSampler::emit_(packet::stream_timestamp_t position,
                                   core::nanoseconds_t niq_latency,
                                   core::nanoseconds_t e2e_latency,
-                                  float freq_coeff,
-                                  core::nanoseconds_t target_latency,
-                                  core::nanoseconds_t local_time) {
-    StreamSnapshot snap;
+                                  double freq_coeff,
+                                  core::nanoseconds_t target_latency) {
+    packet::StreamSnapshot snap;
 
     snap.grid_index = (uint32_t)(next_grid_cts_ / grid_period_);
     snap.position = position;
@@ -133,11 +130,10 @@ void StreamSnapshotSampler::emit_(packet::stream_timestamp_t position,
     snap.e2e_latency = e2e_latency >= 0 ? e2e_latency : -1;
     if (freq_coeff != 0) {
         snap.has_warp = true;
-        const double ppb = (double)(freq_coeff - 1.f) * 1e9;
+        const double ppb = (freq_coeff - 1.0) * 1e9;
         snap.warp_ppb = (int32_t)(ppb >= 0 ? ppb + 0.5 : ppb - 0.5);
     }
     snap.target_latency = target_latency >= 0 ? target_latency : -1;
-    snap.recv_local_time = local_time;
 
     ring_[ring_head_] = snap;
     ring_head_ = (ring_head_ + 1) % MaxSnapshots;

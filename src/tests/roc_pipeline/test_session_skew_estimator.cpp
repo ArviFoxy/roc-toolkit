@@ -10,6 +10,7 @@
 
 #include "roc_core/time.h"
 #include "roc_metrics/prometheus.h"
+#include "roc_packet/stream_snapshot.h"
 #include "roc_pipeline/session_skew_estimator.h"
 
 namespace roc {
@@ -35,16 +36,15 @@ struct Lcg {
     }
 };
 
-Est::SlotSample make_sample(core::nanoseconds_t niq_mean,
-                            core::nanoseconds_t e2e = -1) {
-    Est::SlotSample sample;
+packet::StreamSnapshot make_sample(core::nanoseconds_t niq_mean,
+                                   core::nanoseconds_t e2e = -1) {
+    packet::StreamSnapshot sample;
     sample.niq_mean = niq_mean;
     sample.niq_instant = niq_mean;
     sample.e2e_latency = e2e;
     sample.has_warp = true;
     sample.warp_ppb = 1000;
     sample.target_latency = 32 * core::Millisecond;
-    sample.recv_local_time = BaseCts;
     return sample;
 }
 

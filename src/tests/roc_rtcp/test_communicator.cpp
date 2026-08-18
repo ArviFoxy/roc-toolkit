@@ -394,7 +394,7 @@ RecvReport make_recv_report(core::nanoseconds_t time,
     report.snapshot_grid_period = 500 * core::Millisecond;
     report.n_snapshots = 2;
     for (size_t n = 0; n < report.n_snapshots; n++) {
-        StreamSnapshot& snap = report.snapshots[n];
+        packet::StreamSnapshot& snap = report.snapshots[n];
         snap.grid_index = seed * 100 + (uint32_t)n;
         snap.position = seed * 48000 + (packet::stream_timestamp_t)n * 24000;
         snap.niq_instant = seed * 500000 + (core::nanoseconds_t)n * 1000000;
@@ -403,7 +403,6 @@ RecvReport make_recv_report(core::nanoseconds_t time,
         snap.has_warp = true;
         snap.warp_ppb = (int32_t)seed * 100 - 5000;
         snap.target_latency = seed * 800000;
-        snap.recv_local_time = time + (core::nanoseconds_t)n * 500 * core::Millisecond;
     }
     return report;
 }
@@ -446,7 +445,7 @@ void expect_recv_report(const RecvReport& report,
         LONGLONGS_EQUAL(500 * core::Millisecond, report.snapshot_grid_period);
         CHECK_EQUAL(2, report.n_snapshots);
         for (size_t n = 0; n < report.n_snapshots; n++) {
-            const StreamSnapshot& snap = report.snapshots[n];
+            const packet::StreamSnapshot& snap = report.snapshots[n];
             CHECK_EQUAL(seed * 100 + n, snap.grid_index);
             CHECK_EQUAL(seed * 48000 + n * 24000, snap.position);
             expect_timestamp("snap.niq_instant",
@@ -461,9 +460,6 @@ void expect_recv_report(const RecvReport& report,
             CHECK_EQUAL((int32_t)seed * 100 - 5000, snap.warp_ppb);
             expect_timestamp("snap.target_latency", seed * 800000, snap.target_latency,
                              RttEpsilon);
-            expect_timestamp("snap.recv_local_time",
-                             time + (core::nanoseconds_t)n * 500 * core::Millisecond,
-                             snap.recv_local_time, TimestampEpsilon);
         }
     } else {
         CHECK(report.niq_latency == 0);

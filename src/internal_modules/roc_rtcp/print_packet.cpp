@@ -225,9 +225,8 @@ void print_xr_stream_snapshot(core::Printer& p,
                  (unsigned long long)e.niq_instant(), (unsigned long long)e.niq_mean());
         p.writef("|---- e2e_latency: %016llx warp_ppb: %ld\n",
                  (unsigned long long)e.e2e_latency(), (long)e.warp_ppb());
-        p.writef("|---- target_latency: %016llx recv_local_time: %016llx\n",
-                 (unsigned long long)e.target_latency(),
-                 (unsigned long long)e.recv_local_time());
+        p.writef("|---- target_latency: %016llx\n",
+                 (unsigned long long)e.target_latency());
     }
 }
 

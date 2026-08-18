@@ -49,6 +49,7 @@ LatencyTuner::LatencyTuner(const LatencyConfig& latency_config,
     , report_pos_(0)
     , has_new_freq_coeff_(false)
     , freq_coeff_(0)
+    , freq_coeff_precise_(0)
     , freq_coeff_max_delta_(latency_config.scaling_tolerance)
     , backend_(latency_config.tuner_backend)
     , profile_(latency_config.tuner_profile)
@@ -344,8 +345,8 @@ float LatencyTuner::fetch_scaling() {
     return freq_coeff_;
 }
 
-float LatencyTuner::last_freq_coeff() const {
-    return freq_coeff_;
+double LatencyTuner::last_freq_coeff() const {
+    return freq_coeff_precise_;
 }
 
 core::nanoseconds_t LatencyTuner::last_target_latency() const {
@@ -441,6 +442,7 @@ void LatencyTuner::compute_scaling_(packet::stream_timestamp_diff_t actual_laten
 
         has_new_freq_coeff_ = true;
         freq_coeff_ = pfe_->freq_coeff();
+        freq_coeff_precise_ = pfe_->freq_coeff_precise();
     } else {
         while (packet::stream_timestamp_ge(stream_pos_, scale_pos_)) {
             fe_->update_stream_position(stream_pos_);
@@ -450,10 +452,15 @@ void LatencyTuner::compute_scaling_(packet::stream_timestamp_diff_t actual_laten
 
         has_new_freq_coeff_ = true;
         freq_coeff_ = fe_->freq_coeff();
+        freq_coeff_precise_ = (double)fe_->freq_coeff();
     }
 
     freq_coeff_ = std::min(freq_coeff_, 1.0f + freq_coeff_max_delta_);
     freq_coeff_ = std::max(freq_coeff_, 1.0f - freq_coeff_max_delta_);
+    freq_coeff_precise_ =
+        std::min(freq_coeff_precise_, 1.0 + (double)freq_coeff_max_delta_);
+    freq_coeff_precise_ =
+        std::max(freq_coeff_precise_, 1.0 - (double)freq_coeff_max_delta_);
 
     // --- Controller-independent objective metrics ---
     // Computed after the controller has produced freq_coeff_, so they

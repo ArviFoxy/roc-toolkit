@@ -15,6 +15,7 @@
 #include "roc_core/noncopyable.h"
 #include "roc_core/stddefs.h"
 #include "roc_core/time.h"
+#include "roc_packet/stream_snapshot.h"
 #include "roc_metrics/prometheus.h"
 
 #ifdef ROC_TARGET_PROMETHEUS
@@ -96,27 +97,6 @@ class SessionSkewEstimator : public core::NonCopyable<> {
 public:
     //! Maximum slots.
     static const size_t MaxSlots = 16;
-
-    //! One slot's contribution to a grid row.
-    struct SlotSample {
-        core::nanoseconds_t niq_instant; //!< Queue depth at crossing; -1 unavail.
-        core::nanoseconds_t niq_mean;    //!< Interval-mean queue depth; -1 unavail.
-        core::nanoseconds_t e2e_latency; //!< E2E estimate; -1 unavail.
-        bool has_warp;                   //!< Whether warp_ppb is valid.
-        int32_t warp_ppb;                //!< Warp in parts per billion.
-        core::nanoseconds_t target_latency;  //!< Target latency; -1 unavail.
-        core::nanoseconds_t recv_local_time; //!< Receiver clock; 0 unavail.
-
-        SlotSample()
-            : niq_instant(-1)
-            , niq_mean(-1)
-            , e2e_latency(-1)
-            , has_warp(false)
-            , warp_ppb(0)
-            , target_latency(-1)
-            , recv_local_time(0) {
-        }
-    };
 
     //! Per-slot statistics, updated at row rate.
     struct SlotStats {
@@ -206,7 +186,7 @@ public:
     void process_snapshot(size_t slot_index,
                           core::nanoseconds_t grid_cts,
                           core::nanoseconds_t grid_period,
-                          const SlotSample& sample,
+                          const packet::StreamSnapshot& sample,
                           core::nanoseconds_t grid_delta,
                           core::nanoseconds_t arrival_time);
 
@@ -228,7 +208,7 @@ private:
         core::nanoseconds_t grid_cts;
         core::nanoseconds_t grid_period;
         uint32_t present_mask;
-        SlotSample samples[MaxSlots];
+        packet::StreamSnapshot samples[MaxSlots];
     };
 
     struct Slot {

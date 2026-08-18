@@ -391,29 +391,17 @@ void ReceiverSession::generate_reports(const char* report_cname,
         report.niq_stalling = latency_metrics.niq_stalling;
         report.e2e_latency = latency_metrics.e2e_latency;
 
-        // Attach stream snapshots (audio stream only). audio::StreamSnapshot
-        // and rtcp::StreamSnapshot are mirror structs (roc_audio cannot
-        // depend on roc_rtcp), hence the field-by-field copy.
+        // Attach stream snapshots (audio stream only). The sampler and
+        // the report share one snapshot type, so this is a direct fill.
+        // Reset the fields first: the reporter reuses report elements
+        // across rounds.
+        report.snapshot_grid_period = 0;
+        report.n_snapshots = 0;
         audio::StreamSnapshotSampler& sampler = latency_monitor_->snapshot_sampler();
         if (sampler.is_enabled()) {
-            audio::StreamSnapshot snaps[audio::StreamSnapshotSampler::MaxSnapshots];
-            const size_t n_snaps = sampler.get_snapshots(
-                snaps, audio::StreamSnapshotSampler::MaxSnapshots);
-
             report.snapshot_grid_period = sampler.grid_period();
-            report.n_snapshots = 0;
-            for (size_t n = 0; n < n_snaps && n < rtcp::MaxStreamSnapshots; n++) {
-                rtcp::StreamSnapshot& out = report.snapshots[report.n_snapshots++];
-                out.grid_index = snaps[n].grid_index;
-                out.position = snaps[n].position;
-                out.niq_instant = snaps[n].niq_instant;
-                out.niq_mean = snaps[n].niq_mean;
-                out.e2e_latency = snaps[n].e2e_latency;
-                out.has_warp = snaps[n].has_warp;
-                out.warp_ppb = snaps[n].warp_ppb;
-                out.target_latency = snaps[n].target_latency;
-                out.recv_local_time = snaps[n].recv_local_time;
-            }
+            report.n_snapshots =
+                sampler.get_snapshots(report.snapshots, packet::MaxStreamSnapshots);
         }
 
         reports++;

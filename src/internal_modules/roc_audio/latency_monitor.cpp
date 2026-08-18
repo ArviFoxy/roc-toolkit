@@ -110,8 +110,7 @@ status::StatusCode LatencyMonitor::read(Frame& frame,
         snapshot_sampler_.process_read(
             depacketizer_.next_timestamp(), latency_metrics_.niq_latency,
             latency_metrics_.e2e_latency != 0 ? latency_metrics_.e2e_latency : -1,
-            tuner_.last_freq_coeff(), tuner_.last_target_latency(),
-            core::timestamp(core::ClockUnix));
+            tuner_.last_freq_coeff(), tuner_.last_target_latency());
     }
 
     if (!pre_read_()) {

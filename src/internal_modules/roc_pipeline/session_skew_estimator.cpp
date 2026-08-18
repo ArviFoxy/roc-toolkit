@@ -270,7 +270,7 @@ size_t SessionSkewEstimator::num_slots() const {
 void SessionSkewEstimator::process_snapshot(size_t slot_index,
                                             core::nanoseconds_t grid_cts,
                                             core::nanoseconds_t grid_period,
-                                            const SlotSample& sample,
+                                            const packet::StreamSnapshot& sample,
                                             core::nanoseconds_t grid_delta,
                                             core::nanoseconds_t arrival_time) {
     roc_panic_if(slot_index >= MaxSlots);
@@ -438,7 +438,7 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
     double q[MaxSlots];
     double q_sorted[MaxSlots];
     for (size_t n = 0; n < n_present; n++) {
-        const SlotSample& sample = row.samples[present[n]];
+        const packet::StreamSnapshot& sample = row.samples[present[n]];
         q[n] = ns_2_sec(sample.niq_mean >= 0 ? sample.niq_mean : sample.niq_instant);
         q_sorted[n] = q[n];
     }
@@ -449,7 +449,7 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
     double e2e_sorted[MaxSlots];
     size_t n_e2e = 0;
     for (size_t n = 0; n < n_present; n++) {
-        const SlotSample& sample = row.samples[present[n]];
+        const packet::StreamSnapshot& sample = row.samples[present[n]];
         if (sample.e2e_latency >= 0) {
             e2e[n] = ns_2_sec(sample.e2e_latency);
             e2e_sorted[n_e2e++] = e2e[n];
@@ -494,7 +494,7 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
     for (size_t n = 0; n < n_present; n++) {
         const size_t i = present[n];
         Slot& slot = slots_[i];
-        const SlotSample& sample = row.samples[i];
+        const packet::StreamSnapshot& sample = row.samples[i];
 
         offset[n] = q[n] - q_median;
 

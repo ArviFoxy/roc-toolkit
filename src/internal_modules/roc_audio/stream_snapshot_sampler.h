@@ -16,54 +16,11 @@
 #include "roc_core/noncopyable.h"
 #include "roc_core/stddefs.h"
 #include "roc_core/time.h"
+#include "roc_packet/stream_snapshot.h"
 #include "roc_packet/units.h"
 
 namespace roc {
 namespace audio {
-
-//! One stream telemetry snapshot, captured at a grid-point crossing.
-//! Mirrors rtcp::StreamSnapshot (roc_audio cannot depend on roc_rtcp;
-//! the pipeline copies field by field).
-struct StreamSnapshot {
-    //! Grid point index: floor(sender CTS / grid period).
-    uint32_t grid_index;
-
-    //! RTP stream timestamp of the read that crossed the grid point.
-    packet::stream_timestamp_t position;
-
-    //! Queue latency at the crossing; negative if unavailable.
-    core::nanoseconds_t niq_instant;
-
-    //! Queue latency averaged since the previous crossing; negative if unavailable.
-    core::nanoseconds_t niq_mean;
-
-    //! End-to-end latency at the crossing; negative if unavailable.
-    core::nanoseconds_t e2e_latency;
-
-    //! Whether warp_ppb carries a value.
-    bool has_warp;
-
-    //! Warp: (frequency coefficient - 1) in parts per billion.
-    int32_t warp_ppb;
-
-    //! Target latency at the crossing; negative if unavailable.
-    core::nanoseconds_t target_latency;
-
-    //! Receiver local clock at the crossing (Unix ns); zero if unavailable.
-    core::nanoseconds_t recv_local_time;
-
-    StreamSnapshot()
-        : grid_index(0)
-        , position(0)
-        , niq_instant(-1)
-        , niq_mean(-1)
-        , e2e_latency(-1)
-        , has_warp(false)
-        , warp_ppb(0)
-        , target_latency(-1)
-        , recv_local_time(0) {
-    }
-};
 
 //! Stream snapshot sampler.
 //!
@@ -88,7 +45,7 @@ struct StreamSnapshot {
 class StreamSnapshotSampler : public core::NonCopyable<> {
 public:
     //! Maximum snapshots kept (and reported per RTCP report).
-    static const size_t MaxSnapshots = 4;
+    static const size_t MaxSnapshots = packet::MaxStreamSnapshots;
 
     //! Initialize.
     //! @p grid_period is the grid step on the sender CTS timeline;
@@ -111,26 +68,23 @@ public:
     //! timestamp of the next sample to be decoded); @p niq_latency is
     //! the current queue depth (negative if unavailable); @p e2e_latency
     //! and @p target_latency are negative if unavailable; @p freq_coeff
-    //! is zero if not yet computed; @p local_time is the local Unix
-    //! clock (zero if unavailable).
+    //! is zero if not yet computed.
     void process_read(packet::stream_timestamp_t position,
                       core::nanoseconds_t niq_latency,
                       core::nanoseconds_t e2e_latency,
-                      float freq_coeff,
-                      core::nanoseconds_t target_latency,
-                      core::nanoseconds_t local_time);
+                      double freq_coeff,
+                      core::nanoseconds_t target_latency);
 
     //! Read up to @p max_snapshots snapshots, oldest first, newest last.
     //! Non-destructive; returns the number of snapshots copied.
-    size_t get_snapshots(StreamSnapshot* snapshots, size_t max_snapshots) const;
+    size_t get_snapshots(packet::StreamSnapshot* snapshots, size_t max_snapshots) const;
 
 private:
     void emit_(packet::stream_timestamp_t position,
                core::nanoseconds_t niq_latency,
                core::nanoseconds_t e2e_latency,
-               float freq_coeff,
-               core::nanoseconds_t target_latency,
-               core::nanoseconds_t local_time);
+               double freq_coeff,
+               core::nanoseconds_t target_latency);
     void resync_(core::nanoseconds_t cts_now);
     void reset_accum_();
 
@@ -148,7 +102,7 @@ private:
     core::nanoseconds_t niq_accum_;
     size_t niq_accum_count_;
 
-    StreamSnapshot ring_[MaxSnapshots];
+    packet::StreamSnapshot ring_[MaxSnapshots];
     size_t ring_size_;
     size_t ring_head_;
 };

@@ -586,11 +586,11 @@ void Reporter::process_stream_snapshot_block(const header::XrPacket& xr,
     report.snapshot_grid_period = (core::nanoseconds_t)blk.grid_period_ns();
 
     size_t n_out = 0;
-    for (size_t n = 0; n < blk.n_entries() && n_out < MaxStreamSnapshots; n++) {
+    for (size_t n = 0; n < blk.n_entries() && n_out < packet::MaxStreamSnapshots; n++) {
         const header::XrStreamSnapshotEntry& e = blk.entry(n);
 
-        StreamSnapshot& snap = report.snapshots[n_out];
-        snap = StreamSnapshot();
+        packet::StreamSnapshot& snap = report.snapshots[n_out];
+        snap = packet::StreamSnapshot();
 
         snap.grid_index = e.grid_index();
         snap.position = e.position();
@@ -610,10 +610,6 @@ void Reporter::process_stream_snapshot_block(const header::XrPacket& xr,
         if (e.has_target_latency()) {
             snap.target_latency = packet::ntp_2_nanoseconds(e.target_latency());
         }
-        if (e.has_recv_local_time()) {
-            snap.recv_local_time = packet::ntp_2_unix(e.recv_local_time());
-        }
-
         n_out++;
     }
     report.n_snapshots = n_out;
@@ -951,8 +947,8 @@ void Reporter::generate_stream_snapshot_block(size_t addr_index,
     }
 
     n_entries = 0;
-    for (size_t n = 0; n < report.n_snapshots && n < MaxStreamSnapshots; n++) {
-        const StreamSnapshot& snap = report.snapshots[n];
+    for (size_t n = 0; n < report.n_snapshots && n < packet::MaxStreamSnapshots; n++) {
+        const packet::StreamSnapshot& snap = report.snapshots[n];
         header::XrStreamSnapshotEntry& e = entries[n_entries];
 
         e.reset();
@@ -973,10 +969,6 @@ void Reporter::generate_stream_snapshot_block(size_t addr_index,
         if (snap.target_latency >= 0) {
             e.set_target_latency(packet::nanoseconds_2_ntp(snap.target_latency));
         }
-        if (snap.recv_local_time != 0) {
-            e.set_recv_local_time(packet::unix_2_ntp(snap.recv_local_time));
-        }
-
         n_entries++;
     }
 }

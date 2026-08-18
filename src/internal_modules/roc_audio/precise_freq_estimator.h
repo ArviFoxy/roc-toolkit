@@ -131,6 +131,11 @@ public:
     //! value < 1.0 means consume slower (receiver is fast).
     float freq_coeff() const;
 
+    //! Get current frequency coefficient in double precision.
+    //! Telemetry reports warp in parts per billion; float spacing near
+    //! 1.0 is ~60 ppb, so the float accessor quantizes visibly.
+    double freq_coeff_precise() const;
+
     //! Check if the estimator has converged to steady state.
     //! True when the queue error bias (transient) is small compared
     //! to the noise-driven fluctuations (stationary variance).
@@ -162,6 +167,7 @@ private:
     double xi_;         // Integral of queue error (integral state).
     double u_feedback_; // Warp rate (integrator output).
     float coeff_;
+    double coeff_precise_;
 
     // Convergence detection: EMA of queue error statistics.
     // The EMA alpha is derived from the system's natural time constant

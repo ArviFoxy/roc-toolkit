@@ -41,8 +41,8 @@ void feed_reads(StreamSnapshotSampler& sampler,
     const packet::stream_timestamp_diff_t total =
         packet::stream_timestamp_diff(to_pos, from_pos);
     for (packet::stream_timestamp_diff_t off = 0; off < total; off += ReadSamples) {
-        sampler.process_read(from_pos + (packet::stream_timestamp_t)off, niq, -1, 0, -1,
-                             0);
+        sampler.process_read(from_pos + (packet::stream_timestamp_t)off, niq, -1, 0,
+                             -1);
     }
 }
 
@@ -58,7 +58,7 @@ TEST(stream_snapshot_sampler, disabled) {
     sampler.update_mapping(MapCts, MapRtp);
     feed_reads(sampler, MapRtp, MapRtp + GridSamples * 4, core::Millisecond);
 
-    StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
     CHECK_EQUAL(0, sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots));
 }
 
@@ -69,7 +69,7 @@ TEST(stream_snapshot_sampler, no_mapping_inert) {
 
     feed_reads(sampler, MapRtp, MapRtp + GridSamples * 4, core::Millisecond);
 
-    StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
     CHECK_EQUAL(0, sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots));
 }
 
@@ -81,7 +81,7 @@ TEST(stream_snapshot_sampler, basic_crossings) {
     feed_reads(sampler, MapRtp, MapRtp + GridSamples * 2 + ReadSamples,
                2 * core::Millisecond);
 
-    StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
     const size_t n = sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots);
     CHECK_EQUAL(2, n);
 
@@ -105,10 +105,9 @@ TEST(stream_snapshot_sampler, basic_crossings) {
     CHECK(snaps[1].e2e_latency < 0);
     CHECK(!snaps[1].has_warp);
     CHECK(snaps[1].target_latency < 0);
-    CHECK(snaps[1].recv_local_time == 0);
 
     // Non-destructive read: same result again.
-    StreamSnapshot again[StreamSnapshotSampler::MaxSnapshots];
+    packet::StreamSnapshot again[StreamSnapshotSampler::MaxSnapshots];
     CHECK_EQUAL(n, sampler.get_snapshots(again, StreamSnapshotSampler::MaxSnapshots));
     CHECK_EQUAL(snaps[0].grid_index, again[0].grid_index);
     CHECK_EQUAL(snaps[1].grid_index, again[1].grid_index);
@@ -127,13 +126,13 @@ TEST(stream_snapshot_sampler, niq_mean_averages_interval) {
     packet::stream_timestamp_t pos = MapRtp + GridSamples + ReadSamples;
     const packet::stream_timestamp_t half = MapRtp + GridSamples + GridSamples / 2;
     for (; pos < half; pos += ReadSamples) {
-        sampler.process_read(pos, 2 * core::Millisecond, -1, 0, -1, 0);
+        sampler.process_read(pos, 2 * core::Millisecond, -1, 0, -1);
     }
     for (; pos < MapRtp + GridSamples * 2 + ReadSamples; pos += ReadSamples) {
-        sampler.process_read(pos, 6 * core::Millisecond, -1, 0, -1, 0);
+        sampler.process_read(pos, 6 * core::Millisecond, -1, 0, -1);
     }
 
-    StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
     const size_t n = sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots);
     CHECK_EQUAL(2, n);
 
@@ -150,7 +149,7 @@ TEST(stream_snapshot_sampler, ring_overwrites_oldest) {
     feed_reads(sampler, MapRtp, MapRtp + GridSamples * 7 + ReadSamples,
                core::Millisecond);
 
-    StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
     const size_t n = sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots);
     CHECK_EQUAL(StreamSnapshotSampler::MaxSnapshots, n);
 
@@ -167,20 +166,16 @@ TEST(stream_snapshot_sampler, metric_capture) {
     for (packet::stream_timestamp_t pos = MapRtp;
          pos < MapRtp + GridSamples + ReadSamples; pos += ReadSamples) {
         sampler.process_read(pos, 3 * core::Millisecond, 32 * core::Millisecond,
-                             1.000010f, 32 * core::Millisecond,
-                             1700000000 * core::Second);
+                             1.000010, 32 * core::Millisecond);
     }
 
-    StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
     CHECK_EQUAL(1, sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots));
 
     LONGLONGS_EQUAL(32 * core::Millisecond, snaps[0].e2e_latency);
     CHECK(snaps[0].has_warp);
-    // 1.000010f -> ~10000 ppb (float carries ~7 significant digits).
-    CHECK(snaps[0].warp_ppb > 9000);
-    CHECK(snaps[0].warp_ppb < 11000);
+    CHECK_EQUAL(10000, snaps[0].warp_ppb);
     LONGLONGS_EQUAL(32 * core::Millisecond, snaps[0].target_latency);
-    LONGLONGS_EQUAL(1700000000 * core::Second, snaps[0].recv_local_time);
 }
 
 TEST(stream_snapshot_sampler, negative_warp) {
@@ -189,15 +184,14 @@ TEST(stream_snapshot_sampler, negative_warp) {
 
     for (packet::stream_timestamp_t pos = MapRtp;
          pos < MapRtp + GridSamples + ReadSamples; pos += ReadSamples) {
-        sampler.process_read(pos, core::Millisecond, -1, 0.999990f, -1, 0);
+        sampler.process_read(pos, core::Millisecond, -1, 0.999990, -1);
     }
 
-    StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
     CHECK_EQUAL(1, sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots));
 
     CHECK(snaps[0].has_warp);
-    CHECK(snaps[0].warp_ppb < -9000);
-    CHECK(snaps[0].warp_ppb > -11000);
+    CHECK_EQUAL(-10000, snaps[0].warp_ppb);
 }
 
 TEST(stream_snapshot_sampler, discontinuity_resync) {
@@ -207,7 +201,7 @@ TEST(stream_snapshot_sampler, discontinuity_resync) {
     feed_reads(sampler, MapRtp, MapRtp + GridSamples + ReadSamples,
                core::Millisecond);
 
-    StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
     CHECK_EQUAL(1, sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots));
     const uint32_t first_index = snaps[0].grid_index;
 
@@ -239,7 +233,7 @@ TEST(stream_snapshot_sampler, mapping_update_small_shift) {
     feed_reads(sampler, MapRtp + GridSamples + ReadSamples,
                MapRtp + GridSamples * 2 + ReadSamples, core::Millisecond);
 
-    StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
     const size_t n = sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots);
     CHECK_EQUAL(2, n);
     CHECK_EQUAL(snaps[0].grid_index + 1, snaps[1].grid_index);
@@ -255,7 +249,7 @@ TEST(stream_snapshot_sampler, rtp_wraparound) {
     feed_reads(sampler, wrap_rtp, wrap_rtp + GridSamples * 2 + ReadSamples,
                core::Millisecond);
 
-    StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
     const size_t n = sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots);
     CHECK_EQUAL(2, n);
     CHECK_EQUAL(snaps[0].grid_index + 1, snaps[1].grid_index);

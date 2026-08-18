@@ -96,8 +96,10 @@ public:
     //! Get last computed frequency coefficient.
     //! Non-consuming observation accessor: unlike fetch_scaling(), does
     //! not affect what the next fetch_scaling() call returns.
+    //! Double precision on purpose: telemetry reports warp in parts per
+    //! billion, and float spacing near 1.0 is ~60 ppb.
     //! Returns zero until the first scaling was computed.
-    float last_freq_coeff() const;
+    double last_freq_coeff() const;
 
     //! Get current target latency in nanoseconds.
     //! Non-consuming observation accessor.
@@ -133,6 +135,7 @@ private:
 
     bool has_new_freq_coeff_;
     float freq_coeff_;
+    double freq_coeff_precise_;
     const float freq_coeff_max_delta_;
 
     const LatencyTunerBackend backend_;
