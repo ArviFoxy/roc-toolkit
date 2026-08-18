@@ -77,9 +77,6 @@ struct SessionSkewEstimatorConfig {
     //! being shocked by each one.
     core::nanoseconds_t stats_tau;
 
-    //! Time constant of the slow common-mode baseline.
-    core::nanoseconds_t common_mode_tau;
-
     //! Jump trigger: offset step between consecutive rows.
     core::nanoseconds_t jump_step;
 
@@ -106,7 +103,6 @@ struct SessionSkewEstimatorConfig {
         : max_grid_delta(20 * core::Millisecond)
         , max_future_grid(30 * core::Second)
         , stats_tau(15 * core::Minute)
-        , common_mode_tau(60 * core::Second)
         , jump_step(2 * core::Millisecond)
         , jump_abs(10 * core::Millisecond)
         , jump_release_band(500 * core::Microsecond)

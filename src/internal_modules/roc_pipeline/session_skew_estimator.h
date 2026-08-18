@@ -38,23 +38,26 @@ namespace pipeline {
 //! invariant of the session sender); a row finalizes when every
 //! registered slot contributed, or late with whoever showed up.
 //!
-//! Per finalized row, with q_i = interval-mean queue depth of slot i at
-//! the common position: playout offset of slot i = q_i - median(q), the
-//! clock-free skew (common emission means receiver i plays the position
-//! at arrival + q_i; no wall clocks involved). The e2e-based offset is
-//! computed the same way from the receivers' e2e estimates and inherits
-//! their NTP error. The per-slot difference of the two contains the
-//! differential clock-mapping error together with the constant
-//! per-receiver device buffering: the clock-free offset measures the
-//! decode point, and device buffering appears only in the e2e view.
-//! Treat the disagreement as an upper bound on the mapping error.
+//! Sync statistics build on e2e latency: capture timestamp to projected
+//! playback on the receiver clock, the span listeners hear, including
+//! sender batching, network transit and sink projection. They rest on
+//! the documented deployment assumption that all hosts' clocks are
+//! NTP/chrony-synchronized to microsecond-level error; e2e latency
+//! inherits the clock error, so under this assumption e2e differences
+//! between receivers equal playout-timing differences.
 //!
-//! Also maintained at row rate: the full pairwise skew matrix and an
-//! EWMA covariance/correlation matrix of offset fluctuations (Prometheus
-//! cannot reconstruct sub-scrape correlation from gauges), fleet
-//! cross-section statistics (mean, population stddev, max-min spread,
-//! slow common-mode baseline), per-slot RMS, and a offset jump detector
-//! (offset-step events with magnitude, duration and per-slot counts).
+//! Per finalized row, with l_i = e2e latency of slot i at the common
+//! position: playout offset of slot i = l_i - median(l), the pairwise
+//! skew matrix, fleet cross-section statistics (mean, population
+//! stddev, max-min spread), and an offset jump detector (offset-step
+//! events with magnitude, duration and per-slot counts). A slot whose
+//! snapshot carries no e2e value (no RTCP clock mapping yet) is absent
+//! from that row's sync statistics.
+//!
+//! Queue depth (arrival-to-read span) measures buffer margin, not
+//! playout timing; it feeds only the EWMA covariance/correlation matrix
+//! between slots and the per-slot RMS, a transport diagnostic
+//! (Prometheus cannot reconstruct sub-scrape correlation from gauges).
 //!
 //! Single-threaded: all calls run on the sender pipeline thread.
 class SessionSkewEstimator : public core::NonCopyable<> {
@@ -66,8 +69,6 @@ public:
     //! cannot be registered without a write site by construction.
     enum SlotGauge {
         Gauge_Offset = 0,
-        Gauge_OffsetE2e,
-        Gauge_OffsetDisagreement,
         Gauge_Rms,
         Gauge_Warp,
         Gauge_TargetLatency,
@@ -82,10 +83,8 @@ public:
     //! Per-slot statistics, updated at row rate.
     struct SlotStats {
         bool valid;             //!< Whether the slot contributed to a row yet.
-        double offset;          //!< Clock-free playout offset vs fleet median, seconds.
-        double offset_e2e;      //!< E2E-based offset vs fleet median, seconds.
-        double mapping_error;   //!< offset - offset_e2e, seconds.
-        double rms;             //!< EWMA RMS of offset fluctuations, seconds.
+        double offset;          //!< E2E playout offset vs fleet median, seconds.
+        double rms;             //!< EWMA RMS of queue-depth fluctuations, seconds.
         double warp;            //!< Last reported warp (coeff - 1).
         double target_latency;  //!< Last reported target latency, seconds.
         bool jump_active;     //!< Whether a offset jump event is in progress.
@@ -97,8 +96,6 @@ public:
         SlotStats()
             : valid(false)
             , offset(0)
-            , offset_e2e(0)
-            , mapping_error(0)
             , rms(0)
             , warp(0)
             , target_latency(0)
@@ -113,8 +110,9 @@ public:
     //! Per-pair statistics.
     struct PairStats {
         bool valid;  //!< Whether the pair co-occurred in a row yet.
-        double skew; //!< Last q_i - q_j, seconds.
-        double cov;  //!< EWMA covariance of offset fluctuations, seconds^2.
+        double skew; //!< Last l_i - l_j (e2e), seconds; zero until both
+                     //!< slots reported e2e in a common row.
+        double cov;  //!< EWMA covariance of queue-depth fluctuations, seconds^2.
         double corr; //!< EWMA correlation coefficient, [-1; 1].
 
         PairStats()
@@ -126,15 +124,15 @@ public:
     };
 
     //! Fleet-level statistics.
-    //! mean/stddev/spread are cross-section statistics of the queue
-    //! depths at one grid instant: location, scale (population stddev,
-    //! divide by N over present slots), and extremes (max-min).
+    //! mean/stddev/spread are cross-section statistics of the e2e
+    //! latencies at one grid instant, over the slots that reported e2e:
+    //! location, scale (population stddev, divide by N), and extremes
+    //! (max-min).
     struct FleetStats {
-        bool valid;         //!< Whether any row finalized yet.
-        double mean;        //!< Mean of q across slots, seconds.
-        double stddev;      //!< Population stddev of q across slots, seconds.
-        double spread;      //!< Last max-min of q across slots, seconds.
-        double common_mode; //!< Fleet mean minus slow baseline, seconds.
+        bool valid;         //!< Whether any row with two e2e slots finalized yet.
+        double mean;        //!< Mean e2e latency across slots, seconds.
+        double stddev;      //!< Population stddev of e2e across slots, seconds.
+        double spread;      //!< Last max-min of e2e across slots, seconds.
         uint64_t full_rows;    //!< Rows finalized with all slots present.
         uint64_t partial_rows; //!< Rows finalized late with missing slots.
         uint64_t rejected;     //!< Snapshots rejected (grid delta, bad slot).
@@ -144,7 +142,6 @@ public:
             , mean(0)
             , stddev(0)
             , spread(0)
-            , common_mode(0)
             , full_rows(0)
             , partial_rows(0)
             , rejected(0) {
@@ -273,7 +270,6 @@ private:
     Pair pairs_[MaxSlots][MaxSlots];
 
     FleetStats fleet_;
-    stat::ExpAvg common_mode_baseline_;
 
     core::nanoseconds_t newest_grid_cts_;
 
@@ -292,7 +288,6 @@ private:
     prometheus::Histogram* stddev_histogram_;
     prometheus::Gauge* spread_gauge_;
     prometheus::Histogram* spread_histogram_;
-    prometheus::Gauge* common_mode_gauge_;
     prometheus::Counter* rows_full_counter_;
     prometheus::Counter* rows_partial_counter_;
     prometheus::Counter* rejected_counter_;

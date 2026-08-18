@@ -352,16 +352,19 @@ session sender's skew estimator turns them into cross-receiver
 statistics, exported per slot (``slot=`` label, one series per slot),
 per pair (``slot_a``/``slot_b``), and fleet-wide.
 
-The clock-free offsets derive from queue depths at a common stream
-position: emission is common (one sender clock), so receiver i plays a
-position at approximately arrival + queue_i, and differences of queue
-depths at the same position measure playout skew without any wall-clock
-agreement. The e2e-based offsets inherit the NTP error of the RTCP clock
-mapping. The per-slot difference of the two contains the differential
-mapping error TOGETHER WITH the constant per-receiver device buffering:
-the clock-free offset measures the decode point, while device buffering
-shows only in the e2e view. Treat the disagreement as an upper bound on
-the mapping error, not as the mapping error itself.
+The sync statistics (offsets, skew matrix, fleet mean/stddev/spread,
+jump detector) derive from e2e latency at a common stream position:
+capture timestamp to projected playback on the receiver clock, the span
+listeners hear, including sender batching, network transit and sink
+projection. The sync metrics assume all hosts' clocks are NTP/chrony-
+synchronized to microsecond-level error; e2e latency inherits clock
+error, so under this assumption e2e differences between receivers equal
+playout-timing differences. A slot whose snapshot carries no e2e value
+(no RTCP clock mapping yet) is absent from that row's sync statistics.
+Queue depth (the arrival-to-read span) excludes sender batching, LAN
+transit and sink projection; it measures buffer margin (distance to
+underrun) and feeds only the correlation matrix and per-slot RMS, a
+transport diagnostic.
 
 SessionSkewEstimator
 --------------------
@@ -375,16 +378,10 @@ SessionSkewEstimator
      - Description
    * - ``roc_send_playout_offset_seconds{slot=...}``
      - Gauge
-     - Clock-free playout offset vs fleet median
-   * - ``roc_send_playout_offset_e2e_seconds{slot=...}``
-     - Gauge
-     - E2E-based playout offset vs fleet median (inherits NTP error)
-   * - ``roc_send_playout_offset_disagreement_seconds{slot=...}``
-     - Gauge
-     - Clock-free minus e2e offset (mapping error plus device buffering)
+     - E2E playout offset vs fleet median
    * - ``roc_send_playout_offset_rms_seconds{slot=...}``
      - Gauge
-     - EWMA RMS of queue-depth changes (60s time constant)
+     - EWMA RMS of queue-depth fluctuations (15min time constant)
    * - ``roc_send_recv_warp{slot=...}``
      - Gauge
      - Receiver-reported warp (frequency coefficient - 1)
@@ -408,34 +405,31 @@ SessionSkewEstimator
      - Offset jump events per slot (2ms step or 10ms absolute trigger)
    * - ``roc_send_playout_skew_seconds{slot_a=...,slot_b=...}``
      - Gauge
-     - Clock-free playout skew between two slots
+     - E2E playout skew between two slots
    * - ``roc_send_playout_corr{slot_a=...,slot_b=...}``
      - Gauge
-     - Correlation of the two slots' latencies (exponential averages, 15min time constant)
+     - Correlation of the two slots' queue-depth (buffer margin) fluctuations, a transport diagnostic (exponential averages, 15min time constant)
    * - ``roc_send_playout_cov_seconds2{slot_a=...,slot_b=...}``
      - Gauge
-     - Covariance of the two slots' latencies (exponential averages, 15min time constant)
+     - Covariance of the two slots' queue-depth fluctuations (exponential averages, 15min time constant)
    * - ``roc_send_playout_fleet_mean_seconds``
      - Gauge
-     - Mean queue depth across the fleet at a common stream position
+     - Mean e2e latency across the fleet at a common stream position
    * - ``roc_send_playout_fleet_mean``
      - Histogram
      - Distribution of the fleet mean over time (one sample per grid row)
    * - ``roc_send_playout_stddev_seconds``
      - Gauge
-     - Population stddev of queue depth across the fleet at a common stream position
+     - Population stddev of e2e latency across the fleet at a common stream position
    * - ``roc_send_playout_stddev``
      - Histogram
      - Distribution of the fleet stddev over time (one sample per grid row)
    * - ``roc_send_playout_spread_seconds``
      - Gauge
-     - Max-min clock-free skew across the fleet
+     - Max-min e2e latency across the fleet
    * - ``roc_send_playout_spread``
      - Histogram
      - Distribution of fleet spread over time (one sample per grid row)
-   * - ``roc_send_playout_common_mode_seconds``
-     - Gauge
-     - Fleet mean queue depth minus its slow baseline
    * - ``roc_send_snapshot_rows_total{completeness="full|partial"}``
      - Counter
      - Finalized snapshot grid rows

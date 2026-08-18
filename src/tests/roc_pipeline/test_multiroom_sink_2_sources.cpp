@@ -344,7 +344,9 @@ TEST(multiroom_sink_2_sources, rtcp_snapshots_reach_estimator) {
     // A 3-slot session with per-slot RTCP control endpoints: the
     // receivers' stream snapshots flow back and the sender's skew
     // estimator finalizes rows at common grid points. Offline queues
-    // give all slots identical timing, so clock-free offsets are ~0.
+    // give all slots identical timing, so e2e playout offsets are ~0.
+    // Each receiver gets reclock() calls (the role of the sound card
+    // pump) so it can compute the e2e latency the sync statistics use.
     const core::nanoseconds_t send_base_cts = 1000000000000000;
 
     SenderSinkConfig sender_config = make_sender_config();
@@ -443,6 +445,8 @@ TEST(multiroom_sink_2_sources, rtcp_snapshots_reach_estimator) {
                 frame_readers[leg]->read_distinct_samples(SamplesPerFrame, output_spec,
                                                           send_base_cts);
 
+                receivers[leg]->reclock(frame_readers[leg]->refresh_ts(send_base_cts));
+
                 control_to_send[leg].deliver_from(recv_control_queues[leg]);
             }
         }
@@ -492,6 +496,8 @@ TEST(multiroom_sink_2_sources, rtcp_snapshots_reach_estimator) {
 
             frame_readers[leg]->read_distinct_samples(SamplesPerFrame, output_spec,
                                                           send_base_cts);
+
+            receivers[leg]->reclock(frame_readers[leg]->refresh_ts(send_base_cts));
 
             control_to_send[leg].deliver_from(recv_control_queues[leg],
                                               /* drop = */ leg == 2);

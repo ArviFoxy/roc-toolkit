@@ -58,14 +58,10 @@ struct SlotGaugeDef {
 const SlotGaugeDef* slot_gauge_defs() {
     static const SlotGaugeDef defs[SessionSkewEstimator::NumSlotGauges] = {
         { "playout_offset_seconds",
-          "Clock-free playout offset against the fleet median" },
-        { "playout_offset_e2e_seconds",
-          "E2E-based playout offset against the fleet median" },
-        { "playout_offset_disagreement_seconds",
-          "Clock-free offset minus e2e offset; contains the differential"
-          " clock-mapping error and constant per-receiver device buffering" },
+          "E2E playout offset against the fleet median (assumes"
+          " NTP-synchronized host clocks)" },
         { "playout_offset_rms_seconds",
-          "RMS of the slot's latency around its own exponential average" },
+          "RMS of the slot's queue depth around its own exponential average" },
         { "recv_warp", "Receiver-reported warp (frequency coefficient - 1)" },
         { "recv_target_latency_seconds", "Receiver-reported target latency" },
         { "snapshot_timestamp_seconds",
@@ -91,7 +87,6 @@ SessionSkewEstimator::SessionSkewEstimator(
     , jump_step_sec_(ns_2_sec(config.jump_step))
     , jump_abs_sec_(ns_2_sec(config.jump_abs))
     , jump_release_sec_(ns_2_sec(config.jump_release_band))
-    , common_mode_baseline_()
     , newest_grid_cts_(0)
     , metrics_enabled_(prometheus_config.port > 0) {
     memset(slots_, 0, sizeof(slots_));
@@ -108,7 +103,6 @@ SessionSkewEstimator::SessionSkewEstimator(
     stddev_histogram_ = NULL;
     spread_gauge_ = NULL;
     spread_histogram_ = NULL;
-    common_mode_gauge_ = NULL;
     rows_full_counter_ = NULL;
     rows_partial_counter_ = NULL;
     rejected_counter_ = NULL;
@@ -143,11 +137,12 @@ SessionSkewEstimator::SessionSkewEstimator(
     static const char* pair_suffixes[3] = { "playout_skew_seconds", "playout_corr",
                                             "playout_cov_seconds2" };
     static const char* pair_helps[3] = {
-        "Clock-free playout skew, slot_a minus slot_b",
-        "Correlation of the two slots' latencies; mean and covariance are"
-        " exponential averages",
-        "Covariance of the two slots' latencies; mean and covariance are"
-        " exponential averages",
+        "E2E playout skew, slot_a minus slot_b",
+        "Correlation of the two slots' queue-depth (buffer margin)"
+        " fluctuations, a transport diagnostic, not a sync metric; mean"
+        " and covariance are exponential averages",
+        "Covariance of the two slots' queue-depth fluctuations; mean and"
+        " covariance are exponential averages",
     };
     for (size_t g = 0; g < 3; g++) {
         pair_gauge_families_[g] = &prometheus::BuildGauge()
@@ -158,22 +153,22 @@ SessionSkewEstimator::SessionSkewEstimator(
     }
 
     // Fleet cross-section statistics: mean, population stddev and
-    // max-min of the queue depths at one grid instant. Gauges carry
-    // the last row; histograms aggregate the rows over time. The
-    // stddev histogram shares the playout_spread bucket bounds; the
-    // mean has its own (it lives near the target latency, two decades
-    // above the spreads).
+    // max-min of the e2e latencies at one grid instant, over the slots
+    // that reported e2e. Gauges carry the last row; histograms
+    // aggregate the rows over time. The stddev histogram shares the
+    // playout_spread bucket bounds; the mean has its own (it lives near
+    // the target latency, two decades above the spreads).
     fleet_mean_gauge_ =
         &prometheus::BuildGauge()
              .Name(metrics::scope_metric_name(scope, "playout_fleet_mean_seconds"))
-             .Help("Mean queue depth across session slots at a common"
+             .Help("Mean e2e latency across session slots at a common"
                    " stream position")
              .Register(*registry)
              .Add(no_labels);
     fleet_mean_histogram_ =
         &prometheus::BuildHistogram()
              .Name(metrics::scope_metric_name(scope, "playout_fleet_mean"))
-             .Help("Distribution of the mean queue depth across session"
+             .Help("Distribution of the mean e2e latency across session"
                    " slots, in seconds; one sample per grid row")
              .Register(*registry)
              .Add(no_labels,
@@ -182,14 +177,14 @@ SessionSkewEstimator::SessionSkewEstimator(
     stddev_gauge_ =
         &prometheus::BuildGauge()
              .Name(metrics::scope_metric_name(scope, "playout_stddev_seconds"))
-             .Help("Population standard deviation of queue depth across"
+             .Help("Population standard deviation of e2e latency across"
                    " session slots at a common stream position")
              .Register(*registry)
              .Add(no_labels);
     stddev_histogram_ =
         &prometheus::BuildHistogram()
              .Name(metrics::scope_metric_name(scope, "playout_stddev"))
-             .Help("Distribution of the queue-depth standard deviation"
+             .Help("Distribution of the e2e latency standard deviation"
                    " across session slots, in seconds; one sample per grid row")
              .Register(*registry)
              .Add(no_labels,
@@ -197,22 +192,16 @@ SessionSkewEstimator::SessionSkewEstimator(
     spread_gauge_ = &prometheus::BuildGauge()
                          .Name(metrics::scope_metric_name(scope,
                                                           "playout_spread_seconds"))
-                         .Help("Max-min clock-free playout skew across session slots")
+                         .Help("Max-min e2e playout skew across session slots")
                          .Register(*registry)
                          .Add(no_labels);
     spread_histogram_ =
         &prometheus::BuildHistogram()
              .Name(metrics::scope_metric_name(scope, "playout_spread"))
-             .Help("Distribution of max-min clock-free playout skew in seconds")
+             .Help("Distribution of max-min e2e playout skew in seconds")
              .Register(*registry)
              .Add(no_labels,
                   metrics::generate_histogram_buckets(prometheus_config.playout_spread));
-    common_mode_gauge_ =
-        &prometheus::BuildGauge()
-             .Name(metrics::scope_metric_name(scope, "playout_common_mode_seconds"))
-             .Help("Fleet mean queue depth minus its slow baseline")
-             .Register(*registry)
-             .Add(no_labels);
 
     auto& rows_family =
         prometheus::BuildCounter()
@@ -424,9 +413,9 @@ void SessionSkewEstimator::process_snapshot(size_t slot_index,
     }
 
     if (sample.niq_mean < 0) {
-        // No interval mean. The row statistics compare interval means
-        // across slots; mixing in an instantaneous value would compare
-        // two different quantities.
+        // No interval mean. The correlation statistics compare interval
+        // means across slots; mixing in an instantaneous value would
+        // compare two different quantities.
         fleet_.rejected++;
 #ifdef ROC_TARGET_PROMETHEUS
         if (metrics_enabled_) {
@@ -579,71 +568,68 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
 #endif
     }
 
-    // Queue depths at the common position.
+    // Queue depths at the common position: the correlation base.
     double q[MaxSlots];
-    double q_sorted[MaxSlots];
     for (size_t n = 0; n < n_present; n++) {
-        const packet::StreamSnapshot& sample = row.samples[present[n]];
-        q[n] = ns_2_sec(sample.niq_mean);
-        q_sorted[n] = q[n];
+        q[n] = ns_2_sec(row.samples[present[n]].niq_mean);
     }
-    const double q_median = median_(q_sorted, n_present);
 
-    // E2E-based offsets (only slots that reported e2e).
+    // E2E latencies at the common position: the sync base. Sync
+    // statistics assume NTP-synchronized host clocks, under which e2e
+    // differences between receivers equal playout-timing differences.
+    // A slot without an RTCP clock mapping reports no e2e value and is
+    // absent from this row's sync statistics; a row needs two e2e
+    // slots for a cross-receiver comparison.
     double e2e[MaxSlots];
+    bool has_e2e[MaxSlots];
     double e2e_sorted[MaxSlots];
-    size_t n_e2e = 0;
+    size_t n_sync = 0;
     for (size_t n = 0; n < n_present; n++) {
         const packet::StreamSnapshot& sample = row.samples[present[n]];
-        if (sample.e2e_latency >= 0) {
-            e2e[n] = ns_2_sec(sample.e2e_latency);
-            e2e_sorted[n_e2e++] = e2e[n];
-        } else {
-            e2e[n] = -1;
+        has_e2e[n] = sample.e2e_latency >= 0;
+        e2e[n] = has_e2e[n] ? ns_2_sec(sample.e2e_latency) : 0;
+        if (has_e2e[n]) {
+            e2e_sorted[n_sync++] = e2e[n];
         }
     }
-    const double e2e_median = n_e2e >= 2 ? median_(e2e_sorted, n_e2e) : 0;
+    const bool sync_row = n_sync >= 2;
+    const double e2e_median = sync_row ? median_(e2e_sorted, n_sync) : 0;
 
-    // Fleet cross-section statistics and common mode.
-    double q_min = q[0], q_max = q[0], q_sum = 0;
-    for (size_t n = 0; n < n_present; n++) {
-        q_min = q[n] < q_min ? q[n] : q_min;
-        q_max = q[n] > q_max ? q[n] : q_max;
-        q_sum += q[n];
-    }
-    const double q_mean = q_sum / (double)n_present;
+    if (sync_row) {
+        // Fleet cross-section statistics over the e2e slots. median_()
+        // sorted the subset, so the extremes sit at its ends.
+        double l_sum = 0;
+        for (size_t n = 0; n < n_sync; n++) {
+            l_sum += e2e_sorted[n];
+        }
+        const double l_mean = l_sum / (double)n_sync;
 
-    double q_var = 0;
-    for (size_t n = 0; n < n_present; n++) {
-        q_var += (q[n] - q_mean) * (q[n] - q_mean);
-    }
-    q_var /= (double)n_present;
+        double l_var = 0;
+        for (size_t n = 0; n < n_sync; n++) {
+            l_var += (e2e_sorted[n] - l_mean) * (e2e_sorted[n] - l_mean);
+        }
+        l_var /= (double)n_sync;
 
-    const double cm_alpha = (double)row.grid_period / (double)config_.common_mode_tau;
-    common_mode_baseline_.update(cm_alpha, q_mean);
-
-    fleet_.valid = true;
-    fleet_.mean = q_mean;
-    fleet_.stddev = sqrt(q_var);
-    fleet_.spread = q_max - q_min;
-    fleet_.common_mode = q_mean - common_mode_baseline_.get();
+        fleet_.valid = true;
+        fleet_.mean = l_mean;
+        fleet_.stddev = sqrt(l_var);
+        fleet_.spread = e2e_sorted[n_sync - 1] - e2e_sorted[0];
 
 #ifdef ROC_TARGET_PROMETHEUS
-    if (metrics_enabled_) {
-        fleet_mean_gauge_->Set(fleet_.mean);
-        fleet_mean_histogram_->Observe(fleet_.mean);
-        stddev_gauge_->Set(fleet_.stddev);
-        stddev_histogram_->Observe(fleet_.stddev);
-        spread_gauge_->Set(fleet_.spread);
-        spread_histogram_->Observe(fleet_.spread);
-        common_mode_gauge_->Set(fleet_.common_mode);
-    }
+        if (metrics_enabled_) {
+            fleet_mean_gauge_->Set(fleet_.mean);
+            fleet_mean_histogram_->Observe(fleet_.mean);
+            stddev_gauge_->Set(fleet_.stddev);
+            stddev_histogram_->Observe(fleet_.stddev);
+            spread_gauge_->Set(fleet_.spread);
+            spread_histogram_->Observe(fleet_.spread);
+        }
 #endif
+    }
 
     // Per-slot offsets and EWMA statistics.
     const double alpha = (double)row.grid_period / (double)config_.stats_tau;
 
-    double offset[MaxSlots];
     double centered[MaxSlots];
     bool has_centered[MaxSlots];
     for (size_t n = 0; n < n_present; n++) {
@@ -651,14 +637,7 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
         Slot& slot = slots_[i];
         const packet::StreamSnapshot& sample = row.samples[i];
 
-        offset[n] = q[n] - q_median;
-
         slot.stats.valid = true;
-        slot.stats.offset = offset[n];
-        if (e2e[n] >= 0 && n_e2e >= 2) {
-            slot.stats.offset_e2e = e2e[n] - e2e_median;
-            slot.stats.mapping_error = slot.stats.offset - slot.stats.offset_e2e;
-        }
         if (sample.has_warp) {
             slot.stats.warp = (double)sample.warp_ppb / 1e9;
         }
@@ -668,22 +647,32 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
 
 #ifdef ROC_TARGET_PROMETHEUS
         if (metrics_enabled_) {
-            slot.gauges[Gauge_Offset]->Set(slot.stats.offset);
-            if (e2e[n] >= 0 && n_e2e >= 2) {
-                slot.gauges[Gauge_OffsetE2e]->Set(slot.stats.offset_e2e);
-                slot.gauges[Gauge_OffsetDisagreement]->Set(slot.stats.mapping_error);
-            }
             slot.gauges[Gauge_Warp]->Set(slot.stats.warp);
             slot.gauges[Gauge_TargetLatency]->Set(slot.stats.target_latency);
         }
 #endif
 
-        // The event detector compares against the mean BEFORE this
-        // row's offset enters it; otherwise the trigger references
-        // itself and desensitizes by alpha.
-        update_jump_(i, offset[n], row);
+        if (sync_row && has_e2e[n]) {
+            const double offset = e2e[n] - e2e_median;
 
-        slot.offset_mean.update(alpha, offset[n]);
+            slot.stats.offset = offset;
+
+#ifdef ROC_TARGET_PROMETHEUS
+            if (metrics_enabled_) {
+                slot.gauges[Gauge_Offset]->Set(slot.stats.offset);
+            }
+#endif
+
+            // The event detector compares against the mean BEFORE this
+            // row's offset enters it; otherwise the trigger references
+            // itself and desensitizes by alpha.
+            update_jump_(i, offset, row);
+
+            slot.offset_mean.update(alpha, offset);
+
+            slot.has_prev_offset = true;
+            slot.prev_offset = offset;
+        }
 
         // Covariance base: the slot's own queue-depth average. A fleet
         // reference (median or mean) mixes the slots' signals and
@@ -702,12 +691,10 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
             has_centered[n] = false;
         }
         slot.q_mean.update(alpha, q[n]);
-
-        slot.has_prev_offset = true;
-        slot.prev_offset = offset[n];
     }
 
-    // Pairwise skew and EWMA covariance/correlation of fluctuations.
+    // Pairwise statistics: e2e skew for pairs where both slots reported
+    // e2e; queue-depth covariance/correlation for all co-present pairs.
     for (size_t a = 0; a < n_present; a++) {
         for (size_t b = a; b < n_present; b++) {
             const size_t i = present[a];
@@ -721,11 +708,15 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
 
             if (i != j) {
                 pair.valid = true;
-                pair.skew = q[a] - q[b];
+                if (has_e2e[a] && has_e2e[b]) {
+                    pair.skew = e2e[a] - e2e[b];
+                }
 
 #ifdef ROC_TARGET_PROMETHEUS
                 if (metrics_enabled_ && pair.skew_gauge) {
-                    pair.skew_gauge->Set(pair.skew);
+                    if (has_e2e[a] && has_e2e[b]) {
+                        pair.skew_gauge->Set(pair.skew);
+                    }
                     pair.corr_gauge->Set(pair_corr_(i, j));
                     pair.cov_gauge->Set(pair.cov.has() ? pair.cov.get() : 0);
                 }
