@@ -64,7 +64,7 @@ const SlotGaugeDef* slot_gauge_defs() {
         { "playout_offset_disagreement_seconds",
           "Clock-free offset minus e2e offset; contains the differential"
           " clock-mapping error and constant per-receiver device buffering" },
-        { "playout_offset_rms_seconds", "EWMA RMS of queue-depth changes (own-mean centered)" },
+        { "playout_offset_rms_seconds", "EWMA RMS of playout offset changes" },
         { "recv_warp", "Receiver-reported warp (frequency coefficient - 1)" },
         { "recv_target_latency_seconds", "Receiver-reported target latency" },
         { "snapshot_timestamp_seconds",
@@ -140,8 +140,8 @@ SessionSkewEstimator::SessionSkewEstimator(
                                             "playout_cov_seconds2" };
     static const char* pair_helps[3] = {
         "Clock-free playout skew, slot_a minus slot_b",
-        "EWMA correlation of queue-depth changes (own-mean centered)",
-        "EWMA covariance of queue-depth changes (own-mean centered)",
+        "EWMA correlation of playout offset changes",
+        "EWMA covariance of playout offset changes",
     };
     for (size_t g = 0; g < 3; g++) {
         pair_gauge_families_[g] = &prometheus::BuildGauge()
@@ -640,20 +640,7 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
         } else {
             slot.ewma_mean += alpha * (offset[n] - slot.ewma_mean);
         }
-
-        // Covariance base: the slot's own queue-depth average. A fleet
-        // reference (median or mean) mixes the slots' signals and
-        // fabricates anti-correlation on the minority side of any
-        // correlated group; own-mean centering measures each pair
-        // alone. A genuinely global cause then shows in ALL pairs,
-        // which is the honest reading.
-        if (!slot.has_q_ewma) {
-            slot.q_ewma_mean = q[n];
-            slot.has_q_ewma = true;
-        } else {
-            slot.q_ewma_mean += alpha * (q[n] - slot.q_ewma_mean);
-        }
-        centered[n] = q[n] - slot.q_ewma_mean;
+        centered[n] = offset[n] - slot.ewma_mean;
 
         slot.has_prev_offset = true;
         slot.prev_offset = offset[n];

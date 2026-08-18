@@ -380,7 +380,7 @@ SessionSkewEstimator
      - Clock-free minus e2e offset (mapping error plus device buffering)
    * - ``roc_send_playout_offset_rms_seconds{slot=...}``
      - Gauge
-     - EWMA RMS of queue-depth changes (60s time constant)
+     - EWMA RMS of offset changes (60s time constant)
    * - ``roc_send_recv_warp{slot=...}``
      - Gauge
      - Receiver-reported warp (frequency coefficient - 1)
@@ -407,10 +407,10 @@ SessionSkewEstimator
      - Clock-free playout skew between two slots
    * - ``roc_send_playout_corr{slot_a=...,slot_b=...}``
      - Gauge
-     - EWMA correlation of queue-depth changes; own-mean centered, no fleet reference
+     - EWMA correlation of offset changes between the two slots
    * - ``roc_send_playout_cov_seconds2{slot_a=...,slot_b=...}``
      - Gauge
-     - EWMA covariance of queue-depth changes; own-mean centered
+     - EWMA covariance of offset changes between the two slots
    * - ``roc_send_playout_spread_seconds``
      - Gauge
      - Max-min clock-free skew across the fleet
