@@ -189,7 +189,9 @@ struct LatencyConfig {
     //! Receiver-only. When non-zero, the receiver samples telemetry
     //! snapshots each time playback crosses a grid point and reports
     //! them to the sender via RTCP (XR Stream Snapshot).
-    //! Zero disables snapshot sampling.
+    //! Zero (the default) disables snapshot sampling: the sampling and
+    //! the extra RTCP payload are opt-in for library users. roc-recv
+    //! turns it on through its own option default.
     core::nanoseconds_t snapshot_grid;
 
     //! Initialize.
@@ -211,7 +213,7 @@ struct LatencyConfig {
         , cooldown_inc_timeout(15 * core::Second)
         , max_jitter_overhead(1.2f)
         , mean_jitter_overhead(3.00f)
-        , snapshot_grid(500 * core::Millisecond) {
+        , snapshot_grid(0) {
     }
 
     //! Automatically fill missing settings.

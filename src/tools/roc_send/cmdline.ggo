@@ -128,6 +128,8 @@ section "Metrics options"
         typestr="TIME" string default="10us" optional
     option "prometheus-playout-spread-max" - "Maximum playout spread bucket boundary, TIME units"
         typestr="TIME" string default="50ms" optional
+    option "prometheus-playout-spread-scale" - "Bucket spacing for playout spread histogram"
+        values="log","linear" default="log" enum optional
 
 section "Memory options"
 

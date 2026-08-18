@@ -848,6 +848,14 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+    if (args.prometheus_playout_spread_scale_given) {
+        if (args.prometheus_playout_spread_scale_arg
+            == prometheus_playout_spread_scale_arg_linear) {
+            prometheus_config.playout_spread.scale = metrics::HistogramScale_Linear;
+        } else {
+            prometheus_config.playout_spread.scale = metrics::HistogramScale_Log;
+        }
+    }
 
     pipeline::SenderSinkConfig sender_config;
     if (!build_sender_config(args, sender_config, context, *input_source)) {

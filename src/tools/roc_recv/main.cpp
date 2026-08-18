@@ -224,7 +224,11 @@ bool build_receiver_config(const gengetopt_args_info& args,
         break;
     }
 
-    if (args.report_grid_given) {
+    // The option default applies even without the flag: roc-recv turns
+    // snapshot reporting on by default, the library leaves it off.
+    if (strcmp(args.report_grid_arg, "0") == 0) {
+        receiver_config.session_defaults.latency.snapshot_grid = 0;
+    } else {
         if (!core::parse_duration(args.report_grid_arg,
                                   receiver_config.session_defaults.latency
                                       .snapshot_grid)) {

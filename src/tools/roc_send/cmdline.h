@@ -43,6 +43,7 @@ enum enum_prometheus_niq_latency_scale { prometheus_niq_latency_scale__NULL = -1
 enum enum_prometheus_e2e_latency_scale { prometheus_e2e_latency_scale__NULL = -1, prometheus_e2e_latency_scale_arg_log = 0, prometheus_e2e_latency_scale_arg_linear };
 enum enum_prometheus_jitter_scale { prometheus_jitter_scale__NULL = -1, prometheus_jitter_scale_arg_log = 0, prometheus_jitter_scale_arg_linear };
 enum enum_prometheus_rtt_scale { prometheus_rtt_scale__NULL = -1, prometheus_rtt_scale_arg_log = 0, prometheus_rtt_scale_arg_linear };
+enum enum_prometheus_playout_spread_scale { prometheus_playout_spread_scale__NULL = -1, prometheus_playout_spread_scale_arg_log = 0, prometheus_playout_spread_scale_arg_linear };
 
 /** @brief Where the command line options are stored */
 struct gengetopt_args_info
@@ -203,6 +204,9 @@ struct gengetopt_args_info
   char * prometheus_playout_spread_max_arg;	/**< @brief Maximum playout spread bucket boundary, TIME units (default='50ms').  */
   char * prometheus_playout_spread_max_orig;	/**< @brief Maximum playout spread bucket boundary, TIME units original value given at command line.  */
   const char *prometheus_playout_spread_max_help; /**< @brief Maximum playout spread bucket boundary, TIME units help description.  */
+  enum enum_prometheus_playout_spread_scale prometheus_playout_spread_scale_arg;	/**< @brief Bucket spacing for playout spread histogram (default='log').  */
+  char * prometheus_playout_spread_scale_orig;	/**< @brief Bucket spacing for playout spread histogram original value given at command line.  */
+  const char *prometheus_playout_spread_scale_help; /**< @brief Bucket spacing for playout spread histogram help description.  */
   char * max_packet_size_arg;	/**< @brief Maximum network packet size, SIZE units.  */
   char * max_packet_size_orig;	/**< @brief Maximum network packet size, SIZE units original value given at command line.  */
   const char *max_packet_size_help; /**< @brief Maximum network packet size, SIZE units help description.  */
@@ -266,6 +270,7 @@ struct gengetopt_args_info
   unsigned int prometheus_playout_spread_buckets_given ;	/**< @brief Whether prometheus-playout-spread-buckets was given.  */
   unsigned int prometheus_playout_spread_min_given ;	/**< @brief Whether prometheus-playout-spread-min was given.  */
   unsigned int prometheus_playout_spread_max_given ;	/**< @brief Whether prometheus-playout-spread-max was given.  */
+  unsigned int prometheus_playout_spread_scale_given ;	/**< @brief Whether prometheus-playout-spread-scale was given.  */
   unsigned int max_packet_size_given ;	/**< @brief Whether max-packet-size was given.  */
   unsigned int max_frame_size_given ;	/**< @brief Whether max-frame-size was given.  */
   unsigned int prof_given ;	/**< @brief Whether prof was given.  */
@@ -403,6 +408,7 @@ extern const char *cmdline_parser_prometheus_niq_latency_scale_values[];  /**< @
 extern const char *cmdline_parser_prometheus_e2e_latency_scale_values[];  /**< @brief Possible values for prometheus-e2e-latency-scale. */
 extern const char *cmdline_parser_prometheus_jitter_scale_values[];  /**< @brief Possible values for prometheus-jitter-scale. */
 extern const char *cmdline_parser_prometheus_rtt_scale_values[];  /**< @brief Possible values for prometheus-rtt-scale. */
+extern const char *cmdline_parser_prometheus_playout_spread_scale_values[];  /**< @brief Possible values for prometheus-playout-spread-scale. */
 
 
 #ifdef __cplusplus
