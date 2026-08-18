@@ -50,8 +50,9 @@ namespace pipeline {
 //!
 //! Also maintained at row rate: the full pairwise skew matrix and an
 //! EWMA covariance/correlation matrix of offset fluctuations (Prometheus
-//! cannot reconstruct sub-scrape correlation from gauges), fleet spread
-//! and slow common-mode baseline, per-slot RMS, and a offset jump detector
+//! cannot reconstruct sub-scrape correlation from gauges), fleet
+//! cross-section statistics (mean, population stddev, max-min spread,
+//! slow common-mode baseline), per-slot RMS, and a offset jump detector
 //! (offset-step events with magnitude, duration and per-slot counts).
 //!
 //! Single-threaded: all calls run on the sender pipeline thread.
@@ -124,8 +125,13 @@ public:
     };
 
     //! Fleet-level statistics.
+    //! mean/stddev/spread are cross-section statistics of the queue
+    //! depths at one grid instant: location, scale (population stddev,
+    //! divide by N over present slots), and extremes (max-min).
     struct FleetStats {
         bool valid;         //!< Whether any row finalized yet.
+        double mean;        //!< Mean of q across slots, seconds.
+        double stddev;      //!< Population stddev of q across slots, seconds.
         double spread;      //!< Last max-min of q across slots, seconds.
         double common_mode; //!< Fleet mean minus slow baseline, seconds.
         uint64_t full_rows;    //!< Rows finalized with all slots present.
@@ -134,6 +140,8 @@ public:
 
         FleetStats()
             : valid(false)
+            , mean(0)
+            , stddev(0)
             , spread(0)
             , common_mode(0)
             , full_rows(0)
@@ -279,6 +287,10 @@ private:
     prometheus::Family<prometheus::Counter>* jump_counter_family_;
     prometheus::Family<prometheus::Gauge>* pair_gauge_families_[3];
 
+    prometheus::Gauge* fleet_mean_gauge_;
+    prometheus::Histogram* fleet_mean_histogram_;
+    prometheus::Gauge* stddev_gauge_;
+    prometheus::Histogram* stddev_histogram_;
     prometheus::Gauge* spread_gauge_;
     prometheus::Histogram* spread_histogram_;
     prometheus::Gauge* common_mode_gauge_;

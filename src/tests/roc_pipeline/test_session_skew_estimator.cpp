@@ -88,6 +88,8 @@ TEST(session_skew_estimator, zero_skew) {
     CHECK_EQUAL(5, fleet.full_rows);
     CHECK_EQUAL(0, fleet.partial_rows);
     CHECK_EQUAL(0, fleet.rejected);
+    DOUBLES_EQUAL(0.010, fleet.mean, 1e-9);
+    DOUBLES_EQUAL(0, fleet.stddev, 1e-9);
     DOUBLES_EQUAL(0, fleet.spread, 1e-9);
 
     for (size_t n = 0; n < 3; n++) {
@@ -126,6 +128,9 @@ TEST(session_skew_estimator, known_offsets_recovered) {
 
     Est::FleetStats fleet;
     est.fleet_stats(fleet);
+    DOUBLES_EQUAL(0.011, fleet.mean, 1e-9);
+    // Population stddev of {-1, +1, 0} ms around the mean.
+    DOUBLES_EQUAL(0.001 * sqrt(2.0 / 3.0), fleet.stddev, 1e-9);
     DOUBLES_EQUAL(0.002, fleet.spread, 1e-9);
 
     // Pairwise skew, both orientations.
@@ -213,6 +218,32 @@ TEST(session_skew_estimator, missing_slot_partial_row) {
     est.fleet_stats(fleet);
     CHECK_EQUAL(3, fleet.full_rows);
     CHECK_EQUAL(1, fleet.partial_rows);
+}
+
+TEST(session_skew_estimator, fleet_stats_over_present_slots) {
+    SessionSkewEstimatorConfig config;
+    Est est(config, metrics::PrometheusConfig());
+
+    ssize_t slots[3];
+    slots[0] = est.register_slot("a");
+    slots[1] = est.register_slot("b");
+    slots[2] = est.register_slot("c");
+
+    // Slot c never reports: every row finalizes late with N=2, and the
+    // cross-section statistics use the two present slots only.
+    const core::nanoseconds_t q2[2] = { 10 * core::Millisecond, 12 * core::Millisecond };
+    for (size_t row = 0; row <= 4; row++) {
+        feed_row(est, slots, q2, 2, row);
+    }
+
+    Est::FleetStats fleet;
+    est.fleet_stats(fleet);
+    CHECK_EQUAL(0, fleet.full_rows);
+    CHECK(fleet.partial_rows >= 1);
+    DOUBLES_EQUAL(0.011, fleet.mean, 1e-9);
+    // Population stddev of {10, 12} ms: N=2 divisor, not N-1.
+    DOUBLES_EQUAL(0.001, fleet.stddev, 1e-9);
+    DOUBLES_EQUAL(0.002, fleet.spread, 1e-9);
 }
 
 TEST(session_skew_estimator, idempotent_duplicates) {

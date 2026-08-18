@@ -102,6 +102,10 @@ SessionSkewEstimator::SessionSkewEstimator(
     memset(slot_gauge_families_, 0, sizeof(slot_gauge_families_));
     memset(pair_gauge_families_, 0, sizeof(pair_gauge_families_));
     jump_counter_family_ = NULL;
+    fleet_mean_gauge_ = NULL;
+    fleet_mean_histogram_ = NULL;
+    stddev_gauge_ = NULL;
+    stddev_histogram_ = NULL;
     spread_gauge_ = NULL;
     spread_histogram_ = NULL;
     common_mode_gauge_ = NULL;
@@ -151,6 +155,40 @@ SessionSkewEstimator::SessionSkewEstimator(
                                        .Register(*registry);
     }
 
+    // Fleet cross-section statistics: mean, population stddev and
+    // max-min of the queue depths at one grid instant. Gauges carry
+    // the last row; histograms aggregate the rows over time. All
+    // histograms share the playout_spread bucket bounds.
+    fleet_mean_gauge_ =
+        &prometheus::BuildGauge()
+             .Name(metrics::scope_metric_name(scope, "playout_fleet_mean_seconds"))
+             .Help("Mean queue depth across session slots at a common"
+                   " stream position")
+             .Register(*registry)
+             .Add(no_labels);
+    fleet_mean_histogram_ =
+        &prometheus::BuildHistogram()
+             .Name(metrics::scope_metric_name(scope, "playout_fleet_mean"))
+             .Help("Distribution of the mean queue depth across session"
+                   " slots, in seconds; one sample per grid row")
+             .Register(*registry)
+             .Add(no_labels,
+                  metrics::generate_histogram_buckets(prometheus_config.playout_spread));
+    stddev_gauge_ =
+        &prometheus::BuildGauge()
+             .Name(metrics::scope_metric_name(scope, "playout_stddev_seconds"))
+             .Help("Population standard deviation of queue depth across"
+                   " session slots at a common stream position")
+             .Register(*registry)
+             .Add(no_labels);
+    stddev_histogram_ =
+        &prometheus::BuildHistogram()
+             .Name(metrics::scope_metric_name(scope, "playout_stddev"))
+             .Help("Distribution of the queue-depth standard deviation"
+                   " across session slots, in seconds; one sample per grid row")
+             .Register(*registry)
+             .Add(no_labels,
+                  metrics::generate_histogram_buckets(prometheus_config.playout_spread));
     spread_gauge_ = &prometheus::BuildGauge()
                          .Name(metrics::scope_metric_name(scope,
                                                           "playout_spread_seconds"))
@@ -563,7 +601,7 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
     }
     const double e2e_median = n_e2e >= 2 ? median_(e2e_sorted, n_e2e) : 0;
 
-    // Fleet spread and common mode.
+    // Fleet cross-section statistics and common mode.
     double q_min = q[0], q_max = q[0], q_sum = 0;
     for (size_t n = 0; n < n_present; n++) {
         q_min = q[n] < q_min ? q[n] : q_min;
@@ -571,6 +609,12 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
         q_sum += q[n];
     }
     const double q_mean = q_sum / (double)n_present;
+
+    double q_var = 0;
+    for (size_t n = 0; n < n_present; n++) {
+        q_var += (q[n] - q_mean) * (q[n] - q_mean);
+    }
+    q_var /= (double)n_present;
 
     const double cm_alpha = (double)row.grid_period / (double)config_.common_mode_tau;
     if (!has_common_mode_baseline_) {
@@ -581,11 +625,17 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
     }
 
     fleet_.valid = true;
+    fleet_.mean = q_mean;
+    fleet_.stddev = sqrt(q_var);
     fleet_.spread = q_max - q_min;
     fleet_.common_mode = q_mean - common_mode_baseline_;
 
 #ifdef ROC_TARGET_PROMETHEUS
     if (metrics_enabled_) {
+        fleet_mean_gauge_->Set(fleet_.mean);
+        fleet_mean_histogram_->Observe(fleet_.mean);
+        stddev_gauge_->Set(fleet_.stddev);
+        stddev_histogram_->Observe(fleet_.stddev);
         spread_gauge_->Set(fleet_.spread);
         spread_histogram_->Observe(fleet_.spread);
         common_mode_gauge_->Set(fleet_.common_mode);

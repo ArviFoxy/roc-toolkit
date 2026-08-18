@@ -411,12 +411,24 @@ SessionSkewEstimator
    * - ``roc_send_playout_cov_seconds2{slot_a=...,slot_b=...}``
      - Gauge
      - EWMA covariance of queue-depth changes; own-mean centered
+   * - ``roc_send_playout_fleet_mean_seconds``
+     - Gauge
+     - Mean queue depth across the fleet at a common stream position
+   * - ``roc_send_playout_fleet_mean``
+     - Histogram
+     - Distribution of the fleet mean over time (one sample per grid row)
+   * - ``roc_send_playout_stddev_seconds``
+     - Gauge
+     - Population stddev of queue depth across the fleet at a common stream position
+   * - ``roc_send_playout_stddev``
+     - Histogram
+     - Distribution of the fleet stddev over time (one sample per grid row)
    * - ``roc_send_playout_spread_seconds``
      - Gauge
      - Max-min clock-free skew across the fleet
    * - ``roc_send_playout_spread``
      - Histogram
-     - Distribution of fleet spread (``--prometheus-playout-spread-*``)
+     - Distribution of fleet spread over time (one sample per grid row)
    * - ``roc_send_playout_common_mode_seconds``
      - Gauge
      - Fleet mean queue depth minus its slow baseline
@@ -426,6 +438,9 @@ SessionSkewEstimator
    * - ``roc_send_snapshot_rejected_total``
      - Counter
      - Snapshots rejected by the validity gates
+
+The three fleet histograms share the ``--prometheus-playout-spread-*``
+bucket bounds.
 
 Mixed versions are safe in both directions: an old sender skips the
 unknown XR block, and an old receiver simply never sends it (the
