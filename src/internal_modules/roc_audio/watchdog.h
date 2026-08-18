@@ -153,7 +153,8 @@ private:
     status::StatusCode init_status_;
 
 #ifdef ROC_TARGET_PROMETHEUS
-    prometheus::Counter* session_restarts_counter_;
+    prometheus::Counter* restarts_no_playback_counter_;
+    prometheus::Counter* restarts_choppy_playback_counter_;
 #endif
 };
 

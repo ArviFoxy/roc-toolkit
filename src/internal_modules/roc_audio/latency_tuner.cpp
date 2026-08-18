@@ -200,6 +200,8 @@ LatencyTuner::LatencyTuner(const LatencyConfig& latency_config,
     }
 
 #ifdef ROC_TARGET_PROMETHEUS
+    restarts_latency_counter_ = NULL;
+
     auto registry = metrics::prometheus_registry();
 
     const prometheus::Labels labels =
@@ -212,6 +214,23 @@ LatencyTuner::LatencyTuner(const LatencyConfig& latency_config,
                                  .Help("Current target latency in seconds")
                                  .Register(*registry)
                                  .Add(labels);
+
+    // A failed tolerance check aborts the session, which the receiver
+    // rebuilds from scratch. Counted in the same family as the watchdog
+    // restarts (registered in watchdog.cpp; name and help must stay
+    // identical in both places, or the registry rejects the second
+    // registration). Receiver-side only: on the sender a failed check
+    // breaks the slot permanently instead of restarting a session.
+    if (latency_config.prometheus.scope.side == metrics::MetricsScope::Side_Recv) {
+        prometheus::Labels restart_labels = labels;
+        restart_labels["cause"] = "latency_out_of_tolerance";
+        restarts_latency_counter_ =
+            &prometheus::BuildCounter()
+                 .Name("roc_recv_session_restarts_total")
+                 .Help("Total number of session restarts; cause label values: no_playback_timeout = every frame was blank for the whole no-play timeout; choppy_playback_timeout = frames with packet drops in every window for the whole choppy-play timeout; latency_out_of_tolerance = latency left the target +/- tolerance range")
+                 .Register(*registry)
+                 .Add(restart_labels);
+    }
 
     auto& niq_family = prometheus::BuildHistogram()
                            .Name(metrics::scope_metric_name(
@@ -417,6 +436,11 @@ bool LatencyTuner::check_actual_latency_(
                 sample_spec_.stream_timestamp_delta_2_ms(max_target_latency_),
                 (long)niq_stalling_,
                 sample_spec_.stream_timestamp_delta_2_ms(niq_stalling_));
+#ifdef ROC_TARGET_PROMETHEUS
+        if (restarts_latency_counter_) {
+            restarts_latency_counter_->Increment();
+        }
+#endif
         return false;
     }
 

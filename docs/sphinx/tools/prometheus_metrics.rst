@@ -131,9 +131,13 @@ Watchdog
    * - Metric
      - Type
      - Description
-   * - ``roc_recv_session_restarts_total``
+   * - ``roc_recv_session_restarts_total{cause=...}``
      - Counter
-     - Number of times a session was restarted due to timeout
+     - Session restarts by cause: ``no_playback_timeout`` (every frame blank
+       for the whole no-play timeout), ``choppy_playback_timeout`` (packet
+       drops in every window for the whole choppy-play timeout),
+       ``latency_out_of_tolerance`` (latency left target +/- tolerance;
+       incremented by the latency tuner, not the watchdog)
 
 FEC BlockReader
 ---------------

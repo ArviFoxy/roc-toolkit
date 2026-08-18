@@ -29,6 +29,7 @@
 
 #ifdef ROC_TARGET_PROMETHEUS
 #include <prometheus/family.h>
+#include <prometheus/counter.h>
 #include <prometheus/gauge.h>
 #include <prometheus/histogram.h>
 #endif
@@ -228,6 +229,7 @@ private:
 #ifdef ROC_TARGET_PROMETHEUS
     prometheus::Gauge* target_latency_gauge_;
     prometheus::Histogram* niq_latency_histogram_;
+    prometheus::Counter* restarts_latency_counter_;
     prometheus::Gauge* obj_error_mean_gauge_;
     prometheus::Gauge* obj_error_stddev_gauge_;
     prometheus::Gauge* obj_warp_deriv_rms_gauge_;

@@ -113,12 +113,18 @@ Watchdog::Watchdog(IFrameReader& reader,
 
 #ifdef ROC_TARGET_PROMETHEUS
     auto registry = metrics::prometheus_registry();
-    session_restarts_counter_ =
-        &prometheus::BuildCounter()
-             .Name("roc_recv_session_restarts_total")
-             .Help("Total number of times a session was terminated by the watchdog")
-             .Register(*registry)
-             .Add({ });
+    // The same family is also registered by LatencyTuner for its
+    // latency_out_of_tolerance cause; name and help must stay identical
+    // in both places, or the registry rejects the second registration.
+    auto& restarts_family =
+        prometheus::BuildCounter()
+            .Name("roc_recv_session_restarts_total")
+            .Help("Total number of session restarts; cause label values: no_playback_timeout = every frame was blank for the whole no-play timeout; choppy_playback_timeout = frames with packet drops in every window for the whole choppy-play timeout; latency_out_of_tolerance = latency left the target +/- tolerance range")
+            .Register(*registry);
+    restarts_no_playback_counter_ =
+        &restarts_family.Add({ { "cause", "no_playback_timeout" } });
+    restarts_choppy_playback_counter_ =
+        &restarts_family.Add({ { "cause", "choppy_playback_timeout" } });
 #endif
 
     init_status_ = status::StatusOK;
@@ -201,7 +207,7 @@ bool Watchdog::check_blank_timeout_() const {
             sample_spec_.stream_timestamp_2_ms(warmup_duration_));
 
 #ifdef ROC_TARGET_PROMETHEUS
-    session_restarts_counter_->Increment();
+    restarts_no_playback_counter_->Increment();
 #endif
     return false;
 }
@@ -253,7 +259,7 @@ bool Watchdog::check_drops_timeout_() {
             sample_spec_.stream_timestamp_2_ms(drops_detection_window_));
 
 #ifdef ROC_TARGET_PROMETHEUS
-    session_restarts_counter_->Increment();
+    restarts_choppy_playback_counter_->Increment();
 #endif
     return false;
 }
