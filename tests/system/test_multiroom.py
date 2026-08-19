@@ -120,6 +120,29 @@ def test_track_per_leg(pw, roc_send, roc_recv, tmp_path, num_legs):
                                     '{slot_a="leg_0",slot_b="leg_1"}')
         assert skew_01 is not None and abs(skew_01) < 0.1, skew_01
 
+        # Delay-process plane: each receiver observes per-packet delay
+        # deviations, exposes the event counter, and the queue drain
+        # validator produces samples.
+        for leg, recv in enumerate(recvs):
+            dev_count = recv.metric_value(
+                "roc_recv_delay_deviation_seconds_count")
+            assert dev_count is not None and dev_count > 0, (leg, dev_count)
+            assert recv.metric_value("roc_recv_delay_event_total") \
+                is not None, leg
+            drain_count = recv.metric_value("roc_recv_queue_drain_seconds_count")
+            assert drain_count is not None and drain_count > 0, (leg, drain_count)
+
+        # The receivers' interval deviation means reach the sender as
+        # per-slot gauges. Scheduling noise makes the mean positive in
+        # almost every interval; poll a few rows for a nonzero one.
+        for leg in range(NUM_LEGS):
+            wait_for(
+                lambda leg=leg: (send.metric_value(
+                    "roc_send_recv_deviation_mean_seconds",
+                    f'{{slot="leg_{leg}"}}') or 0) > 0,
+                timeout=10,
+                what=f"nonzero recv_deviation_mean for leg_{leg}")
+
         # Staleness attribution: kill one receiver; its snapshot clock
         # freezes while the others keep advancing.
         victim = NUM_LEGS - 1
