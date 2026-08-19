@@ -51,6 +51,11 @@ public:
         return raw_ / weight_;
     }
 
+    //! Get accumulated weight, in [0; 1]; converges to one.
+    double weight() const {
+        return weight_;
+    }
+
     //! Add sample @p x with discount factor @p alpha from (0; 1].
     void update(double alpha, double x) {
         raw_ += alpha * (x - raw_);

@@ -106,12 +106,21 @@ struct PrometheusConfig {
     HistogramConfig rtt;
     HistogramConfig playout_spread;
     HistogramConfig playout_fleet_mean;
+    HistogramConfig delay_deviation;
+    HistogramConfig event_height;
 
     // playout_spread bounds also serve the fleet stddev histogram:
     // both statistics live in the same sub-millisecond decade, with the
     // log midpoint near the observed modes (stddev ~0.3ms, spread
     // ~0.8ms). The fleet mean sits near the target latency, two
     // decades higher, so it has its own bounds (log midpoint ~22ms).
+    //
+    // delay_deviation resolves the BULK of the deviation process (that
+    // is the histogram's purpose: its shape tests the light-tail
+    // assumption), so its 1 us floor sits below the diffusion noise.
+    // event_height starts at 100 us: events smaller than that consume
+    // no meaningful margin. Both cap at 1 s, past the point where a
+    // session restarts anyway.
     PrometheusConfig()
         : port(0)
         , niq_latency(100, 5 * core::Millisecond, 50 * core::Millisecond)
@@ -119,7 +128,9 @@ struct PrometheusConfig {
         , jitter(100, 100 * core::Microsecond, 200 * core::Millisecond)
         , rtt(100, 1 * core::Millisecond, 100 * core::Millisecond)
         , playout_spread(40, 10 * core::Microsecond, 10 * core::Millisecond)
-        , playout_fleet_mean(40, 5 * core::Millisecond, 100 * core::Millisecond) {
+        , playout_fleet_mean(40, 5 * core::Millisecond, 100 * core::Millisecond)
+        , delay_deviation(90, 1 * core::Microsecond, 1 * core::Second)
+        , event_height(60, 100 * core::Microsecond, 1 * core::Second) {
     }
 };
 

@@ -57,6 +57,26 @@ TEST(exp_avg, single_sample) {
     }
 }
 
+TEST(exp_avg, weight_accumulates) {
+    // weight() starts at zero and follows w += alpha * (1 - w),
+    // converging to one.
+    const double alpha = 0.5;
+
+    ExpAvg comp;
+    DOUBLES_EQUAL(0.0, comp.weight(), Epsilon);
+
+    comp.update(alpha, 10.0);
+    DOUBLES_EQUAL(0.5, comp.weight(), Epsilon);
+
+    comp.update(alpha, 10.0);
+    DOUBLES_EQUAL(0.75, comp.weight(), Epsilon);
+
+    for (size_t i = 0; i < 100; i++) {
+        comp.update(alpha, 10.0);
+    }
+    DOUBLES_EQUAL(1.0, comp.weight(), Epsilon);
+}
+
 TEST(exp_avg, two_samples) {
     const double alpha = 0.25;
 
