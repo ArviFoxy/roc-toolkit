@@ -106,6 +106,14 @@ bool ReceiverSessionConfig::deduce_defaults(audio::ProcessorMap& processor_map) 
         return false;
     }
 
+    // Warmup suppresses the no-playback timeout; covering the whole
+    // aligned-start wait guarantees the watchdog cannot terminate the
+    // session before the start decision is made.
+    if (latency.wallclock_start_alignment
+        && watchdog.warmup_duration < latency.wallclock_start_timeout) {
+        watchdog.warmup_duration = latency.wallclock_start_timeout;
+    }
+
     return true;
 }
 

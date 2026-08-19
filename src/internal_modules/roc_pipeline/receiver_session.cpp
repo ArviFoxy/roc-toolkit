@@ -91,6 +91,13 @@ ReceiverSession::ReceiverSession(const ReceiverSessionConfig& session_config,
     delayed_reader_config.target_delay = session_config.latency.target_latency != 0
         ? session_config.latency.target_latency
         : session_config.latency.start_target_latency;
+    delayed_reader_config.start_alignment =
+        session_config.latency.wallclock_start_alignment;
+    delayed_reader_config.start_alignment_timeout =
+        session_config.latency.wallclock_start_timeout;
+    // The plausibility gate discards a start position that the latency
+    // tuner would abort the session on anyway.
+    delayed_reader_config.cut_tolerance = session_config.latency.latency_tolerance;
 
     delayed_reader_.reset(new (delayed_reader_) packet::DelayedReader(
         *pkt_reader, delayed_reader_config, pkt_encoding->sample_spec));
@@ -297,6 +304,10 @@ status::StatusCode ReceiverSession::refresh(core::nanoseconds_t current_time,
         return fail_status_;
     }
 
+    // Refresh runs before every read, so the pushed time is fresh to
+    // within one frame when the delayed reader decides its start.
+    delayed_reader_->update_local_time(current_time);
+
     return status::StatusOK;
 }
 
@@ -446,6 +457,11 @@ void ReceiverSession::process_report(const rtcp::SendReport& report) {
         // The snapshot sampler labels positions with the same SR pair.
         latency_monitor_->snapshot_sampler().update_mapping(report.report_timestamp,
                                                             report.stream_timestamp);
+
+        // The delayed reader locates its aligned start position with the
+        // same SR pair.
+        delayed_reader_->update_mapping(report.report_timestamp,
+                                        report.stream_timestamp);
     }
 }
 

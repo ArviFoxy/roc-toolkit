@@ -194,6 +194,29 @@ struct LatencyConfig {
     //! turns it on through its own option default.
     core::nanoseconds_t snapshot_grid;
 
+    //! Wall-clock-aligned session start.
+    //! Receiver-only. When enabled, a new session picks its playback
+    //! start position so that it plays the sample captured target_latency
+    //! before the local time, computed from the RTCP sender-report
+    //! mapping, instead of the position implied by the queue depth.
+    //! Receivers sharing a common target latency then start aligned.
+    //! @remarks
+    //!  Assumes sender and receiver clocks are synchronized (e.g. by
+    //!  NTP/chrony). Requires fixed latency mode (target_latency != 0).
+    //!  Falls back to the depth-based start when no sender report arrives
+    //!  within wallclock_start_timeout or when the mapping is implausible.
+    bool wallclock_start_alignment;
+
+    //! Timeout for the wall-clock-aligned start.
+    //! How long a starting session waits for the sender-report mapping
+    //! and for queue coverage of the aligned position before falling
+    //! back to the depth-based start.
+    //! @note
+    //!  If zero, deduced as target_latency plus one second: a mid-stream
+    //!  rejoin needs up to target_latency of coverage wait.
+    //!  Negative value is an error.
+    core::nanoseconds_t wallclock_start_timeout;
+
     //! Initialize.
     LatencyConfig()
         : tuner_backend(LatencyTunerBackend_Auto)
@@ -213,7 +236,9 @@ struct LatencyConfig {
         , cooldown_inc_timeout(15 * core::Second)
         , max_jitter_overhead(1.2f)
         , mean_jitter_overhead(3.00f)
-        , snapshot_grid(0) {
+        , snapshot_grid(0)
+        , wallclock_start_alignment(false)
+        , wallclock_start_timeout(0) {
     }
 
     //! Automatically fill missing settings.

@@ -200,8 +200,18 @@ bool LatencyConfig::deduce_defaults(core::nanoseconds_t default_latency,
     // Whether we're using adaptive latency mode.
     const bool is_adaptive = target_latency == 0;
 
+    if (wallclock_start_alignment && !is_receiver) {
+        roc_log(LogError,
+                "latency config: wallclock_start_alignment may be used only on receiver");
+        return false;
+    }
+
     if (tuner_backend == LatencyTunerBackend_Auto) {
-        tuner_backend = LatencyTunerBackend_Niq;
+        // Wall-clock-aligned start assumes synchronized clocks, the same
+        // assumption the e2e backend makes; with e2e tuning the wall-clock
+        // alignment also holds after the start.
+        tuner_backend = wallclock_start_alignment ? LatencyTunerBackend_E2e
+                                                  : LatencyTunerBackend_Niq;
     }
 
     if (tuner_profile == LatencyTunerProfile_Auto) {
@@ -249,6 +259,35 @@ bool LatencyConfig::deduce_defaults(core::nanoseconds_t default_latency,
 
         if (stale_tolerance == 0) {
             stale_tolerance = deduce_stale_tolerance(latency_tolerance);
+        }
+
+        if (wallclock_start_timeout < 0) {
+            roc_log(LogError, "latency config: wallclock_start_timeout must be >= 0");
+            return false;
+        }
+
+        if (wallclock_start_alignment) {
+            if (is_adaptive) {
+                roc_log(LogError,
+                        "latency config: wallclock_start_alignment requires fixed"
+                        " latency mode (i.e. target_latency != 0)");
+                return false;
+            }
+
+            if (tuner_backend != LatencyTunerBackend_E2e) {
+                roc_log(LogInfo,
+                        "latency config: wallclock_start_alignment aligns only the"
+                        " start position; without the e2e backend the tuner won't"
+                        " hold the wall-clock alignment afterwards");
+            }
+
+            if (wallclock_start_timeout == 0) {
+                // A mid-stream rejoin waits for the queue to cover the
+                // aligned position, which takes up to target_latency; the
+                // extra second covers several sender-report opportunities
+                // at the usual 200ms RTCP cadence.
+                wallclock_start_timeout = target_latency + core::Second;
+            }
         }
     } else {
         if (!validate_no_latency(target_latency, latency_tolerance, start_target_latency,

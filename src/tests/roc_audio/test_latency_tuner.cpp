@@ -445,6 +445,35 @@ TEST(latency_tuner_init, observation_accessors) {
     LONGLONGS_EQUAL(40 * Ms, tuner.tuner->last_target_latency());
 }
 
+TEST(latency_tuner_init, wallclock_alignment_deduction) {
+    // With wall-clock-aligned start, an auto backend resolves to E2e, and
+    // the start timeout deduces to target latency plus one second.
+    LatencyConfig config;
+    config.target_latency = 200 * Ms;
+    config.wallclock_start_alignment = true;
+    CHECK(config.deduce_defaults(200 * Ms, true));
+
+    CHECK_EQUAL(LatencyTunerBackend_E2e, config.tuner_backend);
+    LONGLONGS_EQUAL(200 * Ms + core::Second, config.wallclock_start_timeout);
+
+    // An explicitly chosen backend stays as chosen.
+    LatencyConfig niq_config;
+    niq_config.tuner_backend = LatencyTunerBackend_Niq;
+    niq_config.target_latency = 200 * Ms;
+    niq_config.wallclock_start_alignment = true;
+    CHECK(niq_config.deduce_defaults(200 * Ms, true));
+
+    CHECK_EQUAL(LatencyTunerBackend_Niq, niq_config.tuner_backend);
+}
+
+TEST(latency_tuner_init, wallclock_alignment_receiver_only) {
+    // Wall-clock-aligned start is a receiver setting.
+    LatencyConfig config;
+    config.target_latency = 200 * Ms;
+    config.wallclock_start_alignment = true;
+    CHECK(!config.deduce_defaults(200 * Ms, false));
+}
+
 TEST(latency_tuner_init, valid_configs) {
     // Every backend × profile combination should initialize successfully.
     const LatencyTunerBackend backends[] = {

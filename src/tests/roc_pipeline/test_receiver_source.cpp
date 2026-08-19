@@ -3399,6 +3399,147 @@ TEST(receiver_source, timestamp_mapping_remixing) {
     CHECK(first_ts);
 }
 
+// With wall-clock-aligned start enabled, the session starts at the position
+// captured target latency before the refresh time, computed from the
+// sender-report mapping. The resulting frame offset is the packet floor of
+// that position and differs from the depth-based offset of initial_trim.
+TEST(receiver_source, wallclock_aligned_initial_trim) {
+    enum {
+        StartOffset = Latency + 50,
+        AlignedTrim = StartOffset / SamplesPerPacket * SamplesPerPacket
+    };
+
+    init_with_defaults();
+
+    ReceiverSourceConfig config = make_default_config();
+    config.session_defaults.latency.wallclock_start_alignment = true;
+
+    ReceiverSource receiver(config, processor_map, encoding_map, packet_pool,
+                            packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
+    LONGS_EQUAL(status::StatusOK, receiver.init_status());
+
+    ReceiverSlot* slot = create_slot(receiver);
+
+    packet::IWriter* transport_endpoint = create_transport_endpoint(
+        slot, address::Iface_AudioSource, address::Proto_RTP, dst_addr1);
+
+    packet::FifoQueue control_outbound_queue;
+    packet::IWriter* control_endpoint =
+        create_control_endpoint(slot, address::Iface_AudioControl, address::Proto_RTCP,
+                                dst_addr2, control_outbound_queue);
+
+    test::FrameReader frame_reader(receiver, frame_factory);
+
+    test::PacketWriter packet_writer(arena, *transport_endpoint, encoding_map,
+                                     packet_factory, src_id1, src_addr1, dst_addr1,
+                                     PayloadType_Ch2);
+
+    test::ControlWriter control_writer(*control_endpoint, packet_factory, src_addr1,
+                                       dst_addr2);
+
+    control_writer.set_local_source(src_id1);
+
+    const core::nanoseconds_t capture_ts_base = 1000000000000000;
+    const packet::stream_timestamp_t rtp_base = 1000000;
+
+    // Local clock at the first read: the aligned position lands StartOffset
+    // samples into the stream, mid-packet, floored to AlignedTrim. The
+    // depth-based start would trim to Latency * 2 instead.
+    const core::nanoseconds_t target_latency =
+        Latency * core::Second / (int)output_sample_spec.sample_rate();
+    const core::nanoseconds_t refresh_base = capture_ts_base + target_latency
+        + output_sample_spec.samples_per_chan_2_ns(StartOffset);
+
+    packet_writer.set_timestamp(rtp_base);
+
+    packet_writer.write_packets(Latency * 3 / SamplesPerPacket, SamplesPerPacket,
+                                packet_sample_spec);
+
+    // Session is created on this refresh; no frames read yet.
+    refresh_source(receiver, frame_reader.refresh_ts(refresh_base));
+    UNSIGNED_LONGS_EQUAL(1, receiver.num_sessions());
+
+    // Deliver the mapping before the first read.
+    control_writer.write_sender_report(packet::unix_2_ntp(capture_ts_base), rtp_base);
+    refresh_source(receiver, frame_reader.refresh_ts(refresh_base));
+
+    frame_reader.set_offset(AlignedTrim);
+
+    for (size_t np = 0; np < ManyPackets; np++) {
+        for (size_t nf = 0; nf < FramesPerPacket; nf++) {
+            refresh_source(receiver, frame_reader.refresh_ts(refresh_base));
+            frame_reader.read_samples(SamplesPerFrame, 1, output_sample_spec,
+                                      capture_ts_base);
+
+            UNSIGNED_LONGS_EQUAL(1, receiver.num_sessions());
+        }
+
+        packet_writer.write_packets(1, SamplesPerPacket, packet_sample_spec);
+    }
+}
+
+// With wall-clock-aligned start enabled but no control packets, the session
+// plays silence until the refresh time passes the mapping timeout, then
+// starts with the exact depth-based trim offset.
+TEST(receiver_source, wallclock_aligned_no_mapping_fallback) {
+    enum { WatchdogTimeout = SampleRate * 3, WatchdogWarmup = SampleRate * 2 };
+
+    init_with_defaults();
+
+    ReceiverSourceConfig config =
+        make_custom_config(Latency, LatencyTolerance, WatchdogTimeout, WatchdogWarmup);
+    config.session_defaults.latency.wallclock_start_alignment = true;
+
+    ReceiverSource receiver(config, processor_map, encoding_map, packet_pool,
+                            packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
+    LONGS_EQUAL(status::StatusOK, receiver.init_status());
+
+    ReceiverSlot* slot = create_slot(receiver);
+    packet::IWriter* endpoint_writer =
+        create_transport_endpoint(slot, address::Iface_AudioSource, proto1, dst_addr1);
+
+    test::FrameReader frame_reader(receiver, frame_factory);
+
+    test::PacketWriter packet_writer(arena, *endpoint_writer, encoding_map,
+                                     packet_factory, src_id1, src_addr1, dst_addr1,
+                                     PayloadType_Ch2);
+
+    packet_writer.write_packets(Latency * 3 / SamplesPerPacket, SamplesPerPacket,
+                                packet_sample_spec);
+
+    // Zero frames until the pushed refresh time passes the deduced
+    // timeout of target latency plus one second, measured from the first
+    // refresh. The loop condition uses the same sample-to-time conversion
+    // as the refresh timestamps.
+    const core::nanoseconds_t start_timeout =
+        config.session_defaults.latency.target_latency + core::Second;
+
+    size_t n_silent = 0;
+    while (output_sample_spec.samples_per_chan_2_ns(n_silent * SamplesPerFrame)
+           < start_timeout) {
+        refresh_source(receiver, frame_reader.refresh_ts());
+        frame_reader.read_zero_samples(SamplesPerFrame, output_sample_spec);
+
+        UNSIGNED_LONGS_EQUAL(1, receiver.num_sessions());
+        n_silent++;
+    }
+    CHECK(n_silent > (size_t)(Latency / SamplesPerFrame));
+
+    // Depth-based start, exactly as in initial_trim.
+    frame_reader.set_offset(Latency * 2);
+
+    for (size_t np = 0; np < ManyPackets; np++) {
+        for (size_t nf = 0; nf < FramesPerPacket; nf++) {
+            refresh_source(receiver, frame_reader.refresh_ts());
+            frame_reader.read_samples(SamplesPerFrame, 1, output_sample_spec);
+
+            UNSIGNED_LONGS_EQUAL(1, receiver.num_sessions());
+        }
+
+        packet_writer.write_packets(1, SamplesPerPacket, packet_sample_spec);
+    }
+}
+
 // Set high jitter, wait until latency increases and stabilizes.
 TEST(receiver_source, adaptive_latency_increase) {
     const size_t stabilization_window = JitterMeterWindow * 5;

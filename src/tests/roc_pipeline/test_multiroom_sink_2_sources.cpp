@@ -514,5 +514,128 @@ TEST(multiroom_sink_2_sources, rtcp_snapshots_reach_estimator) {
     CHECK(after_leg0.last_update >= before_leg2.last_update);
 }
 
+TEST(multiroom_sink_2_sources, aligned_receivers_share_start_position) {
+    // Every leg gets its own sender report, but the reports label one
+    // shared capture timeline, and all legs see the same local time. With
+    // wall-clock-aligned start every receiver therefore chooses the same
+    // start position with zero coordination: the first frame of each leg
+    // carries the same stream offset, the packet floor of the position
+    // captured target latency before the local time.
+    enum {
+        PreFrames = 2 * Latency / SamplesPerFrame,
+        StartOffset = Latency + 50,
+        AlignedTrim = StartOffset / SamplesPerPacket * SamplesPerPacket,
+        PostFrames = FramesPerPacket * 4
+    };
+
+    const core::nanoseconds_t send_base_cts = 1000000000000000;
+
+    SenderSinkConfig sender_config = make_sender_config();
+    sender_config.rtcp.report_interval = SamplesPerPacket * core::Second / SampleRate;
+
+    SenderSink sender(sender_config, processor_map, encoding_map, packet_pool,
+                      packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
+    LONGS_EQUAL(status::StatusOK, sender.init_status());
+
+    packet::FifoQueue leg_queues[NumLegs];
+    packet::FifoQueue send_control_queues[NumLegs];
+    packet::FifoQueue recv_control_queues[NumLegs];
+    core::Optional<ReceiverSource> receivers[NumLegs];
+    core::Optional<test::FrameReader> frame_readers[NumLegs];
+    LegDeliverer deliverers[NumLegs];
+    ControlDeliverer control_to_recv[NumLegs];
+    CtsLog cts_log;
+
+    for (size_t leg = 0; leg < NumLegs; leg++) {
+        SenderSlot* sender_slot = create_track_slot(sender, leg);
+        SenderEndpoint* sender_endpoint =
+            sender_slot->add_endpoint(address::Iface_AudioSource, address::Proto_RTP,
+                                      test::new_address(10 + (int)leg),
+                                      leg_queues[leg]);
+        CHECK(sender_endpoint);
+        SenderEndpoint* sender_control_endpoint =
+            sender_slot->add_endpoint(address::Iface_AudioControl, address::Proto_RTCP,
+                                      test::new_address(60 + (int)leg),
+                                      send_control_queues[leg]);
+        CHECK(sender_control_endpoint);
+
+        ReceiverSourceConfig receiver_config = make_receiver_config();
+        receiver_config.session_defaults.latency.wallclock_start_alignment = true;
+
+        receivers[leg].reset(new (receivers[leg]) ReceiverSource(
+            receiver_config, processor_map, encoding_map, packet_pool,
+            packet_buffer_pool, frame_pool, frame_buffer_pool, arena));
+        LONGS_EQUAL(status::StatusOK, receivers[leg]->init_status());
+
+        ReceiverSlotConfig receiver_slot_config;
+        ReceiverSlot* receiver_slot =
+            receivers[leg]->create_slot(receiver_slot_config);
+        CHECK(receiver_slot);
+
+        ReceiverEndpoint* receiver_endpoint =
+            receiver_slot->add_endpoint(address::Iface_AudioSource, address::Proto_RTP,
+                                        test::new_address(10 + (int)leg), NULL);
+        CHECK(receiver_endpoint);
+        ReceiverEndpoint* receiver_control_endpoint = receiver_slot->add_endpoint(
+            address::Iface_AudioControl, address::Proto_RTCP,
+            test::new_address(60 + (int)leg), &recv_control_queues[leg]);
+        CHECK(receiver_control_endpoint);
+
+        deliverers[leg].init(test::new_address(44), receiver_endpoint->inbound_writer(),
+                             cts_log);
+        control_to_recv[leg].init(test::new_address(44),
+                                  receiver_control_endpoint->inbound_writer());
+
+        frame_readers[leg].reset(new (frame_readers[leg])
+                                     test::FrameReader(*receivers[leg], frame_factory));
+        frame_readers[leg]->expect_track(leg);
+    }
+
+    test::FrameWriter frame_writer(sender, frame_factory);
+
+    const audio::SampleSpec input_spec = make_sender_config().input_sample_spec;
+    const audio::SampleSpec output_spec =
+        make_receiver_config().common.output_sample_spec;
+
+    const core::nanoseconds_t target_latency = Latency * core::Second / SampleRate;
+
+    // Pump the sender, delivering packets and reports; receivers refresh
+    // (creating sessions and consuming reports) but read nothing yet, so
+    // no start decision is made in this phase.
+    for (size_t nf = 0; nf < PreFrames; nf++) {
+        frame_writer.write_distinct_samples(SamplesPerFrame, input_spec, send_base_cts);
+
+        LONGS_EQUAL(status::StatusOK,
+                    sender.refresh(frame_writer.refresh_ts(send_base_cts), NULL));
+
+        for (size_t leg = 0; leg < NumLegs; leg++) {
+            deliverers[leg].deliver_from(leg_queues[leg]);
+            control_to_recv[leg].deliver_from(send_control_queues[leg]);
+
+            LONGS_EQUAL(status::StatusOK,
+                        receivers[leg]->refresh(
+                            frame_writer.refresh_ts(send_base_cts), NULL));
+        }
+    }
+
+    // The same fake local time drives every leg's first read.
+    for (size_t nf = 0; nf < PostFrames; nf++) {
+        const core::nanoseconds_t local_now = send_base_cts + target_latency
+            + output_spec.samples_per_chan_2_ns(StartOffset + nf * SamplesPerFrame);
+
+        for (size_t leg = 0; leg < NumLegs; leg++) {
+            LONGS_EQUAL(status::StatusOK, receivers[leg]->refresh(local_now, NULL));
+
+            if (nf == 0) {
+                frame_readers[leg]->set_offset(AlignedTrim);
+            }
+            frame_readers[leg]->read_distinct_samples(SamplesPerFrame, output_spec,
+                                                      send_base_cts);
+
+            LONGS_EQUAL(1, receivers[leg]->num_sessions());
+        }
+    }
+}
+
 } // namespace pipeline
 } // namespace roc
