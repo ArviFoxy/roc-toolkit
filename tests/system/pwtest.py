@@ -225,9 +225,20 @@ class RocProc:
 
     def __init__(self, pw, binary, args, name, metrics_port=None):
         self.pw = pw
+        self.binary = binary
+        self.args = args
         self.name = name
         self.metrics_port = metrics_port
+        self.restarts = 0
         self.proc = pw.spawn([binary] + args, name)
+
+    def restart(self):
+        """Stops the process and spawns a fresh one with the same binary and
+        arguments. Each incarnation gets its own uniquely named log file."""
+        self.stop()
+        self.restarts += 1
+        self.proc = self.pw.spawn([self.binary] + self.args,
+                                  f"{self.name}-restart{self.restarts}")
 
     def alive(self):
         return self.proc.poll() is None
