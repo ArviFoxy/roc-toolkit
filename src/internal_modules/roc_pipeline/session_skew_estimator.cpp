@@ -71,6 +71,46 @@ const SlotGaugeDef* slot_gauge_defs() {
           "Peak offset excursion of the last jump event" },
         { "offset_jump_duration_seconds",
           "Duration of the last completed jump event" },
+        { "recv_deviation_mean_seconds",
+          "Receiver-reported mean arrival delay deviation over the last"
+          " snapshot interval" },
+        { "recv_deviation_max_seconds",
+          "Receiver-reported maximum arrival delay deviation over the last"
+          " snapshot interval" },
+        { "recv_event_count",
+          "Receiver-reported delay events closed during the last snapshot"
+          " interval" },
+    };
+    return defs;
+}
+
+// One table row per per-pair gauge, mirroring the slot gauge table.
+struct PairGaugeDef {
+    const char* suffix;
+    const char* help;
+};
+
+const PairGaugeDef* pair_gauge_defs() {
+    static const PairGaugeDef defs[SessionSkewEstimator::NumPairGauges] = {
+        { "playout_skew_seconds", "E2E playout skew, slot_a minus slot_b" },
+        { "playout_corr",
+          "Correlation of the two slots' queue-depth (buffer margin)"
+          " fluctuations, a transport diagnostic, not a sync metric; mean"
+          " and covariance are exponential averages" },
+        { "playout_cov_seconds2",
+          "Covariance of the two slots' queue-depth fluctuations; mean and"
+          " covariance are exponential averages" },
+        { "deviation_corr",
+          "Correlation of the two slots' mean arrival delay deviations;"
+          " mean and covariance are exponential averages. High correlation"
+          " means the bulk delay noise shares an upstream cause" },
+        { "deviation_cov_seconds2",
+          "Covariance of the two slots' mean arrival delay deviations;"
+          " mean and covariance are exponential averages" },
+        { "event_dependence_ratio",
+          "Joint event rows times total rows, divided by the product of"
+          " the two slots' event-row counts; 1 = independent, above 1 ="
+          " shared events" },
     };
     return defs;
 }
@@ -97,6 +137,8 @@ SessionSkewEstimator::SessionSkewEstimator(
     memset(slot_gauge_families_, 0, sizeof(slot_gauge_families_));
     memset(pair_gauge_families_, 0, sizeof(pair_gauge_families_));
     jump_counter_family_ = NULL;
+    event_rows_counter_family_ = NULL;
+    joint_event_counter_family_ = NULL;
     fleet_mean_gauge_ = NULL;
     fleet_mean_histogram_ = NULL;
     stddev_gauge_ = NULL;
@@ -133,23 +175,27 @@ SessionSkewEstimator::SessionSkewEstimator(
              .Help("Offset jump events per slot (trigger: offset step above"
                    " the configured threshold)")
              .Register(*registry);
+    event_rows_counter_family_ =
+        &prometheus::BuildCounter()
+             .Name(metrics::scope_metric_name(scope, "event_rows_total"))
+             .Help("Snapshot rows in which the slot reported at least one"
+                   " delay event")
+             .Register(*registry);
+    joint_event_counter_family_ =
+        &prometheus::BuildCounter()
+             .Name(metrics::scope_metric_name(scope, "joint_event_rows_total"))
+             .Help("Snapshot rows in which BOTH slots reported delay events."
+                   " Compare the joint rate with the product of the marginal"
+                   " event-row rates: equal means independent pauses; an"
+                   " excess means shared pauses from a common upstream cause")
+             .Register(*registry);
 
-    static const char* pair_suffixes[3] = { "playout_skew_seconds", "playout_corr",
-                                            "playout_cov_seconds2" };
-    static const char* pair_helps[3] = {
-        "E2E playout skew, slot_a minus slot_b",
-        "Correlation of the two slots' queue-depth (buffer margin)"
-        " fluctuations, a transport diagnostic, not a sync metric; mean"
-        " and covariance are exponential averages",
-        "Covariance of the two slots' queue-depth fluctuations; mean and"
-        " covariance are exponential averages",
-    };
-    for (size_t g = 0; g < 3; g++) {
-        pair_gauge_families_[g] = &prometheus::BuildGauge()
-                                       .Name(metrics::scope_metric_name(
-                                           scope, pair_suffixes[g]))
-                                       .Help(pair_helps[g])
-                                       .Register(*registry);
+    for (size_t g = 0; g < NumPairGauges; g++) {
+        pair_gauge_families_[g] =
+            &prometheus::BuildGauge()
+                 .Name(metrics::scope_metric_name(scope, pair_gauge_defs()[g].suffix))
+                 .Help(pair_gauge_defs()[g].help)
+                 .Register(*registry);
     }
 
     // Fleet cross-section statistics: mean, population stddev and
@@ -238,6 +284,7 @@ void SessionSkewEstimator::register_slot_metrics_(size_t slot_index) {
         slot.gauges[g] = &slot_gauge_families_[g]->Add(labels);
     }
     slot.jump_counter = &jump_counter_family_->Add(labels);
+    slot.event_rows_counter = &event_rows_counter_family_->Add(labels);
 }
 
 void SessionSkewEstimator::register_pair_metrics_(size_t slot_a, size_t slot_b) {
@@ -249,9 +296,10 @@ void SessionSkewEstimator::register_pair_metrics_(size_t slot_a, size_t slot_b) 
     const prometheus::Labels labels =
         metrics::pair_labels(slots_[slot_a].name, slots_[slot_b].name);
 
-    pair.skew_gauge = &pair_gauge_families_[0]->Add(labels);
-    pair.corr_gauge = &pair_gauge_families_[1]->Add(labels);
-    pair.cov_gauge = &pair_gauge_families_[2]->Add(labels);
+    for (size_t g = 0; g < NumPairGauges; g++) {
+        pair.gauges[g] = &pair_gauge_families_[g]->Add(labels);
+    }
+    pair.joint_event_counter = &joint_event_counter_family_->Add(labels);
 }
 
 void SessionSkewEstimator::remove_slot_metrics_(size_t slot_index) {
@@ -271,14 +319,22 @@ void SessionSkewEstimator::remove_slot_metrics_(size_t slot_index) {
         jump_counter_family_->Remove(slot.jump_counter);
         slot.jump_counter = NULL;
     }
+    if (slot.event_rows_counter) {
+        event_rows_counter_family_->Remove(slot.event_rows_counter);
+        slot.event_rows_counter = NULL;
+    }
 
     for (size_t j = 0; j < MaxSlots; j++) {
         Pair& lo = pairs_[j < slot_index ? j : slot_index][j < slot_index ? slot_index : j];
-        if (j != slot_index && lo.skew_gauge) {
-            pair_gauge_families_[0]->Remove(lo.skew_gauge);
-            pair_gauge_families_[1]->Remove(lo.corr_gauge);
-            pair_gauge_families_[2]->Remove(lo.cov_gauge);
-            lo.skew_gauge = lo.corr_gauge = lo.cov_gauge = NULL;
+        if (j != slot_index && lo.gauges[0]) {
+            for (size_t g = 0; g < NumPairGauges; g++) {
+                pair_gauge_families_[g]->Remove(lo.gauges[g]);
+                lo.gauges[g] = NULL;
+            }
+        }
+        if (j != slot_index && lo.joint_event_counter) {
+            joint_event_counter_family_->Remove(lo.joint_event_counter);
+            lo.joint_event_counter = NULL;
         }
     }
 }
@@ -305,11 +361,15 @@ void SessionSkewEstimator::clear_slot_state_(size_t slot_index) {
         lo.valid = false;
         lo.skew = 0;
         lo.cov = stat::ExpAvg();
+        lo.dev_cov = stat::ExpAvg();
+        lo.joint_event_rows = 0;
     }
     Pair& diag = pairs_[slot_index][slot_index];
     diag.valid = false;
     diag.skew = 0;
     diag.cov = stat::ExpAvg();
+    diag.dev_cov = stat::ExpAvg();
+    diag.joint_event_rows = 0;
 }
 
 ssize_t SessionSkewEstimator::register_slot(const char* name) {
@@ -632,6 +692,12 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
 
     double centered[MaxSlots];
     bool has_centered[MaxSlots];
+    // Delay deviation family, cloned from the queue-depth pattern.
+    // Missing values are soft (like a missing e2e): the row still
+    // finalizes and the slot merely skips this family.
+    double dev_centered[MaxSlots];
+    bool has_dev_centered[MaxSlots];
+    bool has_events[MaxSlots];
     for (size_t n = 0; n < n_present; n++) {
         const size_t i = present[n];
         Slot& slot = slots_[i];
@@ -651,6 +717,49 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
             slot.gauges[Gauge_TargetLatency]->Set(slot.stats.target_latency);
         }
 #endif
+
+        dev_centered[n] = 0;
+        has_dev_centered[n] = false;
+        if (sample.deviation_mean >= 0) {
+            const double dev = ns_2_sec(sample.deviation_mean);
+            slot.stats.deviation_mean = dev;
+#ifdef ROC_TARGET_PROMETHEUS
+            if (metrics_enabled_) {
+                slot.gauges[Gauge_DeviationMean]->Set(dev);
+            }
+#endif
+            // Own-mean centering, mean BEFORE this row's sample, same
+            // reasoning as the queue-depth family below.
+            if (slot.dev_mean.has()) {
+                dev_centered[n] = dev - slot.dev_mean.get();
+                has_dev_centered[n] = true;
+            }
+            slot.dev_mean.update(alpha, dev);
+        }
+        if (sample.deviation_max >= 0) {
+            slot.stats.deviation_max = ns_2_sec(sample.deviation_max);
+#ifdef ROC_TARGET_PROMETHEUS
+            if (metrics_enabled_) {
+                slot.gauges[Gauge_DeviationMax]->Set(slot.stats.deviation_max);
+            }
+#endif
+        }
+        has_events[n] = false;
+        if (sample.event_count >= 0) {
+            slot.stats.event_count = sample.event_count;
+            has_events[n] = sample.event_count > 0;
+            if (has_events[n]) {
+                slot.stats.event_rows++;
+            }
+#ifdef ROC_TARGET_PROMETHEUS
+            if (metrics_enabled_) {
+                slot.gauges[Gauge_EventCount]->Set((double)sample.event_count);
+                if (has_events[n]) {
+                    slot.event_rows_counter->Increment();
+                }
+            }
+#endif
+        }
 
         if (sync_row && has_e2e[n]) {
             const double offset = e2e[n] - e2e_median;
@@ -694,7 +803,9 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
     }
 
     // Pairwise statistics: e2e skew for pairs where both slots reported
-    // e2e; queue-depth covariance/correlation for all co-present pairs.
+    // e2e; queue-depth and delay-deviation covariance/correlation for
+    // all co-present pairs; joint event rows for pairs where both
+    // slots reported events.
     for (size_t a = 0; a < n_present; a++) {
         for (size_t b = a; b < n_present; b++) {
             const size_t i = present[a];
@@ -705,20 +816,49 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
             if (has_centered[a] && has_centered[b]) {
                 pair.cov.update(alpha, centered[a] * centered[b]);
             }
+            if (has_dev_centered[a] && has_dev_centered[b]) {
+                pair.dev_cov.update(alpha, dev_centered[a] * dev_centered[b]);
+            }
 
             if (i != j) {
                 pair.valid = true;
                 if (has_e2e[a] && has_e2e[b]) {
                     pair.skew = e2e[a] - e2e[b];
                 }
+                if (has_events[a] && has_events[b]) {
+                    pair.joint_event_rows++;
+#ifdef ROC_TARGET_PROMETHEUS
+                    if (metrics_enabled_ && pair.joint_event_counter) {
+                        pair.joint_event_counter->Increment();
+                    }
+#endif
+                }
 
 #ifdef ROC_TARGET_PROMETHEUS
-                if (metrics_enabled_ && pair.skew_gauge) {
+                if (metrics_enabled_ && pair.gauges[PairGauge_Skew]) {
                     if (has_e2e[a] && has_e2e[b]) {
-                        pair.skew_gauge->Set(pair.skew);
+                        pair.gauges[PairGauge_Skew]->Set(pair.skew);
                     }
-                    pair.corr_gauge->Set(pair_corr_(i, j));
-                    pair.cov_gauge->Set(pair.cov.has() ? pair.cov.get() : 0);
+                    pair.gauges[PairGauge_Corr]->Set(pair_corr_(i, j));
+                    pair.gauges[PairGauge_Cov]->Set(pair.cov.has() ? pair.cov.get()
+                                                                   : 0);
+                    pair.gauges[PairGauge_DeviationCorr]->Set(pair_dev_corr_(i, j));
+                    pair.gauges[PairGauge_DeviationCov]->Set(
+                        pair.dev_cov.has() ? pair.dev_cov.get() : 0);
+
+                    // Dependence ratio from the running counts: joint
+                    // rate over the product of the marginal rates,
+                    // which reduces to joint * total / (a * b).
+                    // Defined once both marginals are nonzero.
+                    const uint64_t total_rows =
+                        fleet_.full_rows + fleet_.partial_rows;
+                    const uint64_t rows_a = slots_[i].stats.event_rows;
+                    const uint64_t rows_b = slots_[j].stats.event_rows;
+                    if (rows_a > 0 && rows_b > 0) {
+                        pair.gauges[PairGauge_EventDependence]->Set(
+                            (double)pair.joint_event_rows * (double)total_rows
+                            / ((double)rows_a * (double)rows_b));
+                    }
                 }
 #endif
             }
@@ -739,12 +879,13 @@ void SessionSkewEstimator::finalize_row_(Row& row) {
     }
 }
 
-// Correlation from the covariance triangle; [-1; 1], zero when either
+namespace {
+
+// Correlation from a covariance triangle; [-1; 1], zero when either
 // variance is not yet established.
-double SessionSkewEstimator::pair_corr_(size_t slot_a, size_t slot_b) const {
-    const stat::ExpAvg& var_a = pairs_[slot_a][slot_a].cov;
-    const stat::ExpAvg& var_b = pairs_[slot_b][slot_b].cov;
-    const stat::ExpAvg& cov = pairs_[slot_a][slot_b].cov;
+double corr_of_(const stat::ExpAvg& var_a,
+                const stat::ExpAvg& var_b,
+                const stat::ExpAvg& cov) {
     if (!var_a.has() || !var_b.has() || !cov.has() || var_a.get() <= 0
         || var_b.get() <= 0) {
         return 0;
@@ -757,6 +898,18 @@ double SessionSkewEstimator::pair_corr_(size_t slot_a, size_t slot_b) const {
         corr = -1;
     }
     return corr;
+}
+
+} // namespace
+
+double SessionSkewEstimator::pair_corr_(size_t slot_a, size_t slot_b) const {
+    return corr_of_(pairs_[slot_a][slot_a].cov, pairs_[slot_b][slot_b].cov,
+                    pairs_[slot_a][slot_b].cov);
+}
+
+double SessionSkewEstimator::pair_dev_corr_(size_t slot_a, size_t slot_b) const {
+    return corr_of_(pairs_[slot_a][slot_a].dev_cov, pairs_[slot_b][slot_b].dev_cov,
+                    pairs_[slot_a][slot_b].dev_cov);
 }
 
 void SessionSkewEstimator::update_jump_(size_t slot_index,
@@ -880,6 +1033,9 @@ bool SessionSkewEstimator::pair_stats(size_t slot_a,
     stats.skew = slot_a < slot_b ? pairs_[lo][hi].skew : -pairs_[lo][hi].skew;
     stats.cov = pairs_[lo][hi].cov.has() ? pairs_[lo][hi].cov.get() : 0;
     stats.corr = pair_corr_(lo, hi);
+    stats.deviation_cov = pairs_[lo][hi].dev_cov.has() ? pairs_[lo][hi].dev_cov.get() : 0;
+    stats.deviation_corr = pair_dev_corr_(lo, hi);
+    stats.joint_event_rows = pairs_[lo][hi].joint_event_rows;
     return true;
 }
 

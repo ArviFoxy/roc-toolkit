@@ -622,5 +622,231 @@ TEST(session_skew_estimator, jump_closes_on_level_shift) {
     DOUBLES_EQUAL(3.0, stats.jump_duration, 1e-9);
 }
 
+namespace {
+
+// Feed one full row with delay statistics: deviation mean per slot,
+// and a per-slot event count (-1 = unavailable).
+void feed_dev_row(Est& est,
+                  const ssize_t* slots,
+                  const core::nanoseconds_t* dev,
+                  const int64_t* events,
+                  size_t n_slots,
+                  size_t row_index) {
+    const core::nanoseconds_t grid_cts =
+        BaseCts + (core::nanoseconds_t)row_index * Period;
+    for (size_t n = 0; n < n_slots; n++) {
+        packet::StreamSnapshot sample =
+            make_sample(10 * core::Millisecond, 32 * core::Millisecond);
+        sample.deviation_mean = dev[n];
+        sample.deviation_max = dev[n] >= 0 ? dev[n] * 2 : -1;
+        sample.event_count = events ? events[n] : 0;
+        est.process_snapshot((size_t)slots[n], grid_cts, Period, sample, 0, grid_cts);
+    }
+}
+
+} // namespace
+
+TEST(session_skew_estimator, deviation_family_cov_corr) {
+    SessionSkewEstimatorConfig config;
+    // Short tau so the EWMA converges within the test.
+    config.stats_tau = 10 * core::Second;
+    Est est(config, metrics::PrometheusConfig());
+
+    // Slots a and b share a dominant deviation fluctuation, c is
+    // independent: the deviation correlation finds the a/b pair. The
+    // queue depth is constant, so the queue-depth family stays silent:
+    // the two families are independent measurements.
+    ssize_t slots[3];
+    slots[0] = est.register_slot("a");
+    slots[1] = est.register_slot("b");
+    slots[2] = est.register_slot("c");
+
+    Lcg shared(1), own_a(2), own_b(3), own_c(4);
+
+    for (size_t row = 0; row < 400; row++) {
+        const double common = shared.next();
+        const core::nanoseconds_t dev[3] = {
+            core::Millisecond + (core::nanoseconds_t)(common * 5e5 + own_a.next() * 5e4),
+            core::Millisecond + (core::nanoseconds_t)(common * 5e5 + own_b.next() * 5e4),
+            core::Millisecond + (core::nanoseconds_t)(own_c.next() * 5e5),
+        };
+        feed_dev_row(est, slots, dev, NULL, 3, row);
+    }
+
+    Est::PairStats pair_ab, pair_ac;
+    CHECK(est.pair_stats((size_t)slots[0], (size_t)slots[1], pair_ab));
+    CHECK(est.pair_stats((size_t)slots[0], (size_t)slots[2], pair_ac));
+
+    CHECK(pair_ab.deviation_corr > 0.8);
+    CHECK(pair_ab.deviation_corr > pair_ac.deviation_corr + 0.4);
+    CHECK(pair_ab.deviation_cov > 0);
+    CHECK(pair_ab.deviation_corr <= 1.0);
+
+    // Constant queue depth: the queue-depth family reads zero.
+    DOUBLES_EQUAL(0, pair_ab.cov, 1e-12);
+
+    // Last-row gauges land in slot stats.
+    Est::SlotStats stats;
+    CHECK(est.slot_stats((size_t)slots[0], stats));
+    CHECK(stats.deviation_mean > 0);
+    CHECK(stats.deviation_max >= stats.deviation_mean);
+}
+
+TEST(session_skew_estimator, deviation_missing_soft) {
+    SessionSkewEstimatorConfig config;
+    Est est(config, metrics::PrometheusConfig());
+
+    ssize_t slots[2];
+    slots[0] = est.register_slot("a");
+    slots[1] = est.register_slot("b");
+
+    // Slot b never reports deviations (old receiver or no meter):
+    // rows still finalize as full and nothing is rejected.
+    for (size_t row = 0; row < 5; row++) {
+        const core::nanoseconds_t grid_cts =
+            BaseCts + (core::nanoseconds_t)row * Period;
+        packet::StreamSnapshot with_dev =
+            make_sample(10 * core::Millisecond, 32 * core::Millisecond);
+        with_dev.deviation_mean = core::Millisecond;
+        with_dev.deviation_max = 2 * core::Millisecond;
+        with_dev.event_count = 1;
+        packet::StreamSnapshot without_dev =
+            make_sample(10 * core::Millisecond, 32 * core::Millisecond);
+        est.process_snapshot((size_t)slots[0], grid_cts, Period, with_dev, 0,
+                             grid_cts);
+        est.process_snapshot((size_t)slots[1], grid_cts, Period, without_dev, 0,
+                             grid_cts);
+    }
+
+    Est::FleetStats fleet;
+    est.fleet_stats(fleet);
+    CHECK_EQUAL(5, fleet.full_rows);
+    CHECK_EQUAL(0, fleet.rejected);
+
+    Est::SlotStats stats_a, stats_b;
+    CHECK(est.slot_stats((size_t)slots[0], stats_a));
+    CHECK(est.slot_stats((size_t)slots[1], stats_b));
+    DOUBLES_EQUAL(1e-3, stats_a.deviation_mean, 1e-9);
+    CHECK_EQUAL(5, stats_a.event_rows);
+    DOUBLES_EQUAL(0, stats_b.deviation_mean, 1e-12);
+    CHECK_EQUAL(0, stats_b.event_rows);
+
+    // No pairwise deviation statistics without both sides.
+    Est::PairStats pair;
+    CHECK(est.pair_stats((size_t)slots[0], (size_t)slots[1], pair));
+    DOUBLES_EQUAL(0, pair.deviation_cov, 1e-12);
+    CHECK_EQUAL(0, pair.joint_event_rows);
+}
+
+TEST(session_skew_estimator, event_row_counters) {
+    SessionSkewEstimatorConfig config;
+    Est est(config, metrics::PrometheusConfig());
+
+    ssize_t slots[3];
+    slots[0] = est.register_slot("a");
+    slots[1] = est.register_slot("b");
+    slots[2] = est.register_slot("c");
+
+    const core::nanoseconds_t dev[3] = { core::Millisecond, core::Millisecond,
+                                         core::Millisecond };
+
+    // 3 rows where a and b both have events, c has none;
+    // 2 rows where only a has events;
+    // 1 row with no events anywhere.
+    size_t row = 0;
+    const int64_t both_ab[3] = { 2, 1, 0 };
+    for (size_t n = 0; n < 3; n++, row++) {
+        feed_dev_row(est, slots, dev, both_ab, 3, row);
+    }
+    const int64_t only_a[3] = { 1, 0, 0 };
+    for (size_t n = 0; n < 2; n++, row++) {
+        feed_dev_row(est, slots, dev, only_a, 3, row);
+    }
+    const int64_t none[3] = { 0, 0, 0 };
+    feed_dev_row(est, slots, dev, none, 3, row);
+
+    Est::SlotStats stats_a, stats_b, stats_c;
+    CHECK(est.slot_stats((size_t)slots[0], stats_a));
+    CHECK(est.slot_stats((size_t)slots[1], stats_b));
+    CHECK(est.slot_stats((size_t)slots[2], stats_c));
+
+    CHECK_EQUAL(5, stats_a.event_rows);
+    CHECK_EQUAL(3, stats_b.event_rows);
+    CHECK_EQUAL(0, stats_c.event_rows);
+    LONGLONGS_EQUAL(0, stats_a.event_count); // last row had none
+
+    Est::PairStats pair_ab, pair_ac, pair_bc;
+    CHECK(est.pair_stats((size_t)slots[0], (size_t)slots[1], pair_ab));
+    CHECK(est.pair_stats((size_t)slots[0], (size_t)slots[2], pair_ac));
+    CHECK(est.pair_stats((size_t)slots[1], (size_t)slots[2], pair_bc));
+
+    CHECK_EQUAL(3, pair_ab.joint_event_rows);
+    CHECK_EQUAL(0, pair_ac.joint_event_rows);
+    CHECK_EQUAL(0, pair_bc.joint_event_rows);
+}
+
+TEST(session_skew_estimator, event_rows_ignore_sentinel_rows) {
+    SessionSkewEstimatorConfig config;
+    Est est(config, metrics::PrometheusConfig());
+
+    ssize_t slots[2];
+    slots[0] = est.register_slot("a");
+    slots[1] = est.register_slot("b");
+
+    const core::nanoseconds_t dev[2] = { core::Millisecond, core::Millisecond };
+    const core::nanoseconds_t no_dev[2] = { -1, -1 };
+
+    // A catch-up read stamps the interval statistics into its first
+    // snapshot only; the trailing snapshots carry sentinels. The
+    // sentinel rows must contribute nothing, so one interval counts
+    // one event row however many snapshots the read emitted.
+    const int64_t events[2] = { 2, 1 };
+    feed_dev_row(est, slots, dev, events, 2, 0);
+    const int64_t sentinel[2] = { -1, -1 };
+    feed_dev_row(est, slots, no_dev, sentinel, 2, 1);
+    feed_dev_row(est, slots, no_dev, sentinel, 2, 2);
+
+    Est::SlotStats stats_a, stats_b;
+    CHECK(est.slot_stats((size_t)slots[0], stats_a));
+    CHECK(est.slot_stats((size_t)slots[1], stats_b));
+    CHECK_EQUAL(1, stats_a.event_rows);
+    CHECK_EQUAL(1, stats_b.event_rows);
+
+    Est::PairStats pair;
+    CHECK(est.pair_stats((size_t)slots[0], (size_t)slots[1], pair));
+    CHECK_EQUAL(1, pair.joint_event_rows);
+}
+
+TEST(session_skew_estimator, unregister_clears_deviation_state) {
+    SessionSkewEstimatorConfig config;
+    Est est(config, metrics::PrometheusConfig());
+
+    ssize_t slot_a = est.register_slot("a");
+    ssize_t slot_b = est.register_slot("b");
+
+    const ssize_t slots[2] = { slot_a, slot_b };
+    const core::nanoseconds_t dev[2] = { core::Millisecond, core::Millisecond };
+    const int64_t events[2] = { 1, 1 };
+    for (size_t row = 0; row < 5; row++) {
+        feed_dev_row(est, slots, dev, events, 2, row);
+    }
+
+    Est::PairStats pair;
+    CHECK(est.pair_stats((size_t)slot_a, (size_t)slot_b, pair));
+    CHECK_EQUAL(5, pair.joint_event_rows);
+
+    // A departed slot's accumulated deviation state must not leak to
+    // the next occupant of the index.
+    est.unregister_slot((size_t)slot_b);
+    ssize_t slot_b2 = est.register_slot("b2");
+    CHECK_EQUAL(slot_b, slot_b2);
+
+    CHECK(est.pair_stats((size_t)slot_a, (size_t)slot_b2, pair));
+    CHECK(!pair.valid);
+    CHECK_EQUAL(0, pair.joint_event_rows);
+    DOUBLES_EQUAL(0, pair.deviation_cov, 1e-12);
+    DOUBLES_EQUAL(0, pair.deviation_corr, 1e-12);
+}
+
 } // namespace pipeline
 } // namespace roc

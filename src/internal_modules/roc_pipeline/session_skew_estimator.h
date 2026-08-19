@@ -76,7 +76,21 @@ public:
         Gauge_JumpActive,
         Gauge_JumpMagnitude,
         Gauge_JumpDuration,
+        Gauge_DeviationMean,
+        Gauge_DeviationMax,
+        Gauge_EventCount,
         NumSlotGauges
+    };
+
+    //! Per-pair gauge identifiers; table-driven like the slot gauges.
+    enum PairGauge {
+        PairGauge_Skew = 0,
+        PairGauge_Corr,
+        PairGauge_Cov,
+        PairGauge_DeviationCorr,
+        PairGauge_DeviationCov,
+        PairGauge_EventDependence,
+        NumPairGauges
     };
 
 
@@ -92,6 +106,10 @@ public:
         double jump_duration; //!< Duration of last completed event, seconds.
         uint64_t jump_count;  //!< Total offset jump events.
         core::nanoseconds_t last_update; //!< Arrival time of last snapshot.
+        double deviation_mean; //!< Last reported interval deviation mean, seconds.
+        double deviation_max;  //!< Last reported interval deviation max, seconds.
+        int64_t event_count;   //!< Last reported interval delay event count.
+        uint64_t event_rows;   //!< Rows in which the slot reported events.
 
         SlotStats()
             : valid(false)
@@ -103,7 +121,11 @@ public:
             , jump_magnitude(0)
             , jump_duration(0)
             , jump_count(0)
-            , last_update(0) {
+            , last_update(0)
+            , deviation_mean(0)
+            , deviation_max(0)
+            , event_count(0)
+            , event_rows(0) {
         }
     };
 
@@ -114,12 +136,18 @@ public:
                      //!< slots reported e2e in a common row.
         double cov;  //!< EWMA covariance of queue-depth fluctuations, seconds^2.
         double corr; //!< EWMA correlation coefficient, [-1; 1].
+        double deviation_cov;  //!< EWMA covariance of delay deviations, seconds^2.
+        double deviation_corr; //!< EWMA correlation of delay deviations, [-1; 1].
+        uint64_t joint_event_rows; //!< Rows in which BOTH slots reported events.
 
         PairStats()
             : valid(false)
             , skew(0)
             , cov(0)
-            , corr(0) {
+            , corr(0)
+            , deviation_cov(0)
+            , deviation_corr(0)
+            , joint_event_rows(0) {
         }
     };
 
@@ -214,6 +242,11 @@ private:
         // so pair correlation is a pure two-slot measurement.
         stat::ExpAvg q_mean;
 
+        // Mean of the reported delay deviation: the centering base for
+        // the deviation covariance/correlation family, cloned from the
+        // queue-depth pattern.
+        stat::ExpAvg dev_mean;
+
         // Jump state.
         double jump_baseline;
         core::nanoseconds_t jump_start_cts;
@@ -223,6 +256,7 @@ private:
 #ifdef ROC_TARGET_PROMETHEUS
         prometheus::Gauge* gauges[NumSlotGauges];
         prometheus::Counter* jump_counter;
+        prometheus::Counter* event_rows_counter;
 #endif
     };
 
@@ -232,6 +266,7 @@ private:
     void remove_slot_metrics_(size_t slot_index);
     void clear_slot_state_(size_t slot_index);
     double pair_corr_(size_t slot_a, size_t slot_b) const;
+    double pair_dev_corr_(size_t slot_a, size_t slot_b) const;
 
     Row* find_or_create_row_(core::nanoseconds_t grid_cts,
                              core::nanoseconds_t grid_period);
@@ -253,17 +288,22 @@ private:
     double jump_abs_sec_;
     double jump_release_sec_;
 
-    // One record per slot pair, upper triangle; the diagonal holds the
-    // EWMA variance. skew/valid mirror the PairStats API; cov is the
-    // one source for both the correlation denominator and the gauge.
+    // One record per slot pair, upper triangle; the diagonals hold the
+    // EWMA variances. skew/valid mirror the PairStats API; each cov is
+    // the one source for both its correlation denominator and its
+    // gauge. joint_event_rows counts rows where both slots reported
+    // delay events (tail dependence as a counter; the receiver's
+    // hysteresis detector defines "event", so no sender-side threshold
+    // exists).
     struct Pair {
         bool valid;
         double skew;
         stat::ExpAvg cov;
+        stat::ExpAvg dev_cov;
+        uint64_t joint_event_rows;
 #ifdef ROC_TARGET_PROMETHEUS
-        prometheus::Gauge* skew_gauge;
-        prometheus::Gauge* corr_gauge;
-        prometheus::Gauge* cov_gauge;
+        prometheus::Gauge* gauges[NumPairGauges];
+        prometheus::Counter* joint_event_counter;
 #endif
     };
 
@@ -280,7 +320,9 @@ private:
 #ifdef ROC_TARGET_PROMETHEUS
     prometheus::Family<prometheus::Gauge>* slot_gauge_families_[NumSlotGauges];
     prometheus::Family<prometheus::Counter>* jump_counter_family_;
-    prometheus::Family<prometheus::Gauge>* pair_gauge_families_[3];
+    prometheus::Family<prometheus::Counter>* event_rows_counter_family_;
+    prometheus::Family<prometheus::Gauge>* pair_gauge_families_[NumPairGauges];
+    prometheus::Family<prometheus::Counter>* joint_event_counter_family_;
 
     prometheus::Gauge* fleet_mean_gauge_;
     prometheus::Histogram* fleet_mean_histogram_;
