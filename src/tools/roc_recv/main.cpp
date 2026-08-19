@@ -421,6 +421,41 @@ bool build_receiver_config(const gengetopt_args_info& args,
     return true;
 }
 
+// Applies one --prometheus-<name>-{buckets,min,max,scale} flag quartet
+// to a histogram config; flags that were not given keep the defaults.
+// @p flag_prefix names the flag family in error messages.
+bool parse_histogram_flags(const char* flag_prefix,
+                           unsigned int buckets_given,
+                           int buckets_arg,
+                           unsigned int min_given,
+                           const char* min_arg,
+                           unsigned int max_given,
+                           const char* max_arg,
+                           unsigned int scale_given,
+                           bool scale_is_linear,
+                           metrics::HistogramConfig& config) {
+    if (buckets_given) {
+        config.buckets = buckets_arg;
+    }
+    if (min_given) {
+        if (!core::parse_duration(min_arg, config.min)) {
+            roc_log(LogError, "invalid --%s-min: bad format", flag_prefix);
+            return false;
+        }
+    }
+    if (max_given) {
+        if (!core::parse_duration(max_arg, config.max)) {
+            roc_log(LogError, "invalid --%s-max: bad format", flag_prefix);
+            return false;
+        }
+    }
+    if (scale_given) {
+        config.scale = scale_is_linear ? metrics::HistogramScale_Linear
+                                       : metrics::HistogramScale_Log;
+    }
+    return true;
+}
+
 bool parse_output_uri(const gengetopt_args_info& args, address::IoUri& output_uri) {
     if (args.output_given) {
         if (!address::parse_io_uri(args.output_arg, output_uri)) {
@@ -735,103 +770,82 @@ int main(int argc, char** argv) {
     if (args.prometheus_metrics_port_given) {
         prometheus_config.port = args.prometheus_metrics_port_arg;
     }
-    if (args.prometheus_niq_latency_buckets_given) {
-        prometheus_config.niq_latency.buckets = args.prometheus_niq_latency_buckets_arg;
+    if (!parse_histogram_flags(
+            "prometheus-niq-latency", args.prometheus_niq_latency_buckets_given,
+            args.prometheus_niq_latency_buckets_arg,
+            args.prometheus_niq_latency_min_given, args.prometheus_niq_latency_min_arg,
+            args.prometheus_niq_latency_max_given, args.prometheus_niq_latency_max_arg,
+            args.prometheus_niq_latency_scale_given,
+            args.prometheus_niq_latency_scale_arg
+                == prometheus_niq_latency_scale_arg_linear,
+            prometheus_config.niq_latency)) {
+        return 1;
     }
-    if (args.prometheus_niq_latency_min_given) {
-        if (!core::parse_duration(args.prometheus_niq_latency_min_arg,
-                                  prometheus_config.niq_latency.min)) {
-            roc_log(LogError, "invalid --prometheus-niq-latency-min: bad format");
-            return 1;
-        }
+    if (!parse_histogram_flags(
+            "prometheus-e2e-latency", args.prometheus_e2e_latency_buckets_given,
+            args.prometheus_e2e_latency_buckets_arg,
+            args.prometheus_e2e_latency_min_given, args.prometheus_e2e_latency_min_arg,
+            args.prometheus_e2e_latency_max_given, args.prometheus_e2e_latency_max_arg,
+            args.prometheus_e2e_latency_scale_given,
+            args.prometheus_e2e_latency_scale_arg
+                == prometheus_e2e_latency_scale_arg_linear,
+            prometheus_config.e2e_latency)) {
+        return 1;
     }
-    if (args.prometheus_niq_latency_max_given) {
-        if (!core::parse_duration(args.prometheus_niq_latency_max_arg,
-                                  prometheus_config.niq_latency.max)) {
-            roc_log(LogError, "invalid --prometheus-niq-latency-max: bad format");
-            return 1;
-        }
+    if (!parse_histogram_flags(
+            "prometheus-jitter", args.prometheus_jitter_buckets_given,
+            args.prometheus_jitter_buckets_arg, args.prometheus_jitter_min_given,
+            args.prometheus_jitter_min_arg, args.prometheus_jitter_max_given,
+            args.prometheus_jitter_max_arg, args.prometheus_jitter_scale_given,
+            args.prometheus_jitter_scale_arg == prometheus_jitter_scale_arg_linear,
+            prometheus_config.jitter)) {
+        return 1;
     }
-    if (args.prometheus_niq_latency_scale_given) {
-        if (args.prometheus_niq_latency_scale_arg
-            == prometheus_niq_latency_scale_arg_linear) {
-            prometheus_config.niq_latency.scale = metrics::HistogramScale_Linear;
-        } else {
-            prometheus_config.niq_latency.scale = metrics::HistogramScale_Log;
-        }
+    if (!parse_histogram_flags(
+            "prometheus-rtt", args.prometheus_rtt_buckets_given,
+            args.prometheus_rtt_buckets_arg, args.prometheus_rtt_min_given,
+            args.prometheus_rtt_min_arg, args.prometheus_rtt_max_given,
+            args.prometheus_rtt_max_arg, args.prometheus_rtt_scale_given,
+            args.prometheus_rtt_scale_arg == prometheus_rtt_scale_arg_linear,
+            prometheus_config.rtt)) {
+        return 1;
     }
-    if (args.prometheus_e2e_latency_buckets_given) {
-        prometheus_config.e2e_latency.buckets = args.prometheus_e2e_latency_buckets_arg;
+    if (!parse_histogram_flags(
+            "prometheus-delay-deviation", args.prometheus_delay_deviation_buckets_given,
+            args.prometheus_delay_deviation_buckets_arg,
+            args.prometheus_delay_deviation_min_given,
+            args.prometheus_delay_deviation_min_arg,
+            args.prometheus_delay_deviation_max_given,
+            args.prometheus_delay_deviation_max_arg,
+            args.prometheus_delay_deviation_scale_given,
+            args.prometheus_delay_deviation_scale_arg
+                == prometheus_delay_deviation_scale_arg_linear,
+            prometheus_config.delay_deviation)) {
+        return 1;
     }
-    if (args.prometheus_e2e_latency_min_given) {
-        if (!core::parse_duration(args.prometheus_e2e_latency_min_arg,
-                                  prometheus_config.e2e_latency.min)) {
-            roc_log(LogError, "invalid --prometheus-e2e-latency-min: bad format");
-            return 1;
-        }
+    if (!parse_histogram_flags(
+            "prometheus-event-height", args.prometheus_event_height_buckets_given,
+            args.prometheus_event_height_buckets_arg,
+            args.prometheus_event_height_min_given,
+            args.prometheus_event_height_min_arg,
+            args.prometheus_event_height_max_given,
+            args.prometheus_event_height_max_arg,
+            args.prometheus_event_height_scale_given,
+            args.prometheus_event_height_scale_arg
+                == prometheus_event_height_scale_arg_linear,
+            prometheus_config.event_height)) {
+        return 1;
     }
-    if (args.prometheus_e2e_latency_max_given) {
-        if (!core::parse_duration(args.prometheus_e2e_latency_max_arg,
-                                  prometheus_config.e2e_latency.max)) {
-            roc_log(LogError, "invalid --prometheus-e2e-latency-max: bad format");
-            return 1;
-        }
-    }
-    if (args.prometheus_e2e_latency_scale_given) {
-        if (args.prometheus_e2e_latency_scale_arg
-            == prometheus_e2e_latency_scale_arg_linear) {
-            prometheus_config.e2e_latency.scale = metrics::HistogramScale_Linear;
-        } else {
-            prometheus_config.e2e_latency.scale = metrics::HistogramScale_Log;
-        }
-    }
-    if (args.prometheus_jitter_buckets_given) {
-        prometheus_config.jitter.buckets = args.prometheus_jitter_buckets_arg;
-    }
-    if (args.prometheus_jitter_min_given) {
-        if (!core::parse_duration(args.prometheus_jitter_min_arg,
-                                  prometheus_config.jitter.min)) {
-            roc_log(LogError, "invalid --prometheus-jitter-min: bad format");
-            return 1;
-        }
-    }
-    if (args.prometheus_jitter_max_given) {
-        if (!core::parse_duration(args.prometheus_jitter_max_arg,
-                                  prometheus_config.jitter.max)) {
-            roc_log(LogError, "invalid --prometheus-jitter-max: bad format");
-            return 1;
-        }
-    }
-    if (args.prometheus_jitter_scale_given) {
-        if (args.prometheus_jitter_scale_arg == prometheus_jitter_scale_arg_linear) {
-            prometheus_config.jitter.scale = metrics::HistogramScale_Linear;
-        } else {
-            prometheus_config.jitter.scale = metrics::HistogramScale_Log;
-        }
-    }
-    if (args.prometheus_rtt_buckets_given) {
-        prometheus_config.rtt.buckets = args.prometheus_rtt_buckets_arg;
-    }
-    if (args.prometheus_rtt_min_given) {
-        if (!core::parse_duration(args.prometheus_rtt_min_arg,
-                                  prometheus_config.rtt.min)) {
-            roc_log(LogError, "invalid --prometheus-rtt-min: bad format");
-            return 1;
-        }
-    }
-    if (args.prometheus_rtt_max_given) {
-        if (!core::parse_duration(args.prometheus_rtt_max_arg,
-                                  prometheus_config.rtt.max)) {
-            roc_log(LogError, "invalid --prometheus-rtt-max: bad format");
-            return 1;
-        }
-    }
-    if (args.prometheus_rtt_scale_given) {
-        if (args.prometheus_rtt_scale_arg == prometheus_rtt_scale_arg_linear) {
-            prometheus_config.rtt.scale = metrics::HistogramScale_Linear;
-        } else {
-            prometheus_config.rtt.scale = metrics::HistogramScale_Log;
-        }
+    if (!parse_histogram_flags(
+            "prometheus-queue-drain", args.prometheus_queue_drain_buckets_given,
+            args.prometheus_queue_drain_buckets_arg,
+            args.prometheus_queue_drain_min_given, args.prometheus_queue_drain_min_arg,
+            args.prometheus_queue_drain_max_given, args.prometheus_queue_drain_max_arg,
+            args.prometheus_queue_drain_scale_given,
+            args.prometheus_queue_drain_scale_arg
+                == prometheus_queue_drain_scale_arg_linear,
+            prometheus_config.queue_drain)) {
+        return 1;
     }
 
     pipeline::ReceiverSourceConfig receiver_config;
@@ -841,6 +855,7 @@ int main(int argc, char** argv) {
 
     receiver_config.session_defaults.latency.prometheus = prometheus_config;
     receiver_config.session_defaults.jitter_meter.prometheus = prometheus_config;
+    receiver_config.session_defaults.delay_meter.prometheus = prometheus_config;
 
     core::ScopedPtr<sndio::ISource> backup_source;
     core::ScopedPtr<pipeline::TranscoderSource> backup_transcoder;

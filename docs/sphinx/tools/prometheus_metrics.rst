@@ -100,6 +100,51 @@ The bucket boundaries can be tuned via CLI flags:
    * - ``--prometheus-rtt-scale``
      - log
      - Bucket spacing: ``log`` or ``linear``
+   * - ``--prometheus-delay-deviation-buckets``
+     - 90
+     - Number of histogram buckets for delay deviation
+   * - ``--prometheus-delay-deviation-min``
+     - 1us
+     - Minimum delay deviation bucket boundary
+   * - ``--prometheus-delay-deviation-max``
+     - 1s
+     - Maximum delay deviation bucket boundary
+   * - ``--prometheus-delay-deviation-scale``
+     - log
+     - Bucket spacing: ``log`` or ``linear``
+   * - ``--prometheus-event-height-buckets``
+     - 60
+     - Number of histogram buckets for delay event height
+   * - ``--prometheus-event-height-min``
+     - 100us
+     - Minimum delay event height bucket boundary
+   * - ``--prometheus-event-height-max``
+     - 1s
+     - Maximum delay event height bucket boundary
+   * - ``--prometheus-event-height-scale``
+     - log
+     - Bucket spacing: ``log`` or ``linear``
+   * - ``--prometheus-queue-drain-buckets``
+     - 40
+     - Number of histogram buckets for queue drain
+   * - ``--prometheus-queue-drain-min``
+     - 100us
+     - Minimum queue drain bucket boundary
+   * - ``--prometheus-queue-drain-max``
+     - 100ms
+     - Maximum queue drain bucket boundary
+   * - ``--prometheus-queue-drain-scale``
+     - log
+     - Bucket spacing: ``log`` or ``linear``
+
+The delay deviation histogram resolves the BULK of the deviation
+process - that is its purpose: the bulk shape tests the light-tail
+assumption behind the event thresholds - so its default floor (1us)
+sits below the diffusion noise. Event height starts at 100us: smaller
+events consume no meaningful margin. Both cap at 1s, past the point
+where a session restarts anyway. The event duration and gap
+histograms use fixed log buckets (1ms to 10s and 100ms to 1000s) and
+have no flags yet.
 
 Receiver metrics
 ================
@@ -204,6 +249,65 @@ JitterMeter
    * - ``roc_recv_jitter_mean_seconds``
      - Gauge
      - Moving window average of recent jitter
+
+Delay process
+-------------
+
+The ``jitter_*`` metrics above are the absolute FIRST DIFFERENCE of the
+arrival process (change of delay between consecutive packets, RFC 3550
+style). They indicate link quality, but the delay LEVEL's behavior is
+not recoverable from them: a slow queue drain is invisible, oscillation
+is double-counted, and the recovery flush after a pause is counted as
+jitter. The ``delay_*`` family below measures the LEVEL itself: per
+packet, arrival time minus schedule time on the RTP timeline.
+
+The level is CLOCK-FREE: it compares the local receive clock with the
+RTP packet spacing. The unknown constant (network transit plus clock
+offset) cancels against the baseline, so no clock synchronization
+between hosts is assumed for this family.
+
+``roc_recv_queue_drain_seconds`` is the model-free validator: per
+snapshot grid interval, the mean minus the minimum of the queue depth.
+The event statistics (rate, height distribution, gap structure) must
+predict its distribution, or the delay model is wrong.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 45 12 43
+
+   * - Metric
+     - Type
+     - Description
+   * - ``roc_recv_delay_deviation_seconds``
+     - Histogram
+     - Per-packet delay deviation (level minus baseline, clamped at zero); the bulk shape tests the light-tail assumption behind the event thresholds
+   * - ``roc_recv_delay_event_height_seconds``
+     - Histogram
+     - Peak deviation per detected event = buffer margin the event consumed
+   * - ``roc_recv_delay_event_duration_seconds``
+     - Histogram
+     - Time per event above the close threshold; height ~ duration is the pause-shape prediction
+   * - ``roc_recv_delay_event_gap_seconds``
+     - Histogram
+     - Time from one event's close to the next event's open; exponential gaps mean Poisson events, excess short gaps mean clustering
+   * - ``roc_recv_delay_baseline_seconds``
+     - Gauge
+     - Exponential mean of the delay level (constant part arbitrary; only changes meaningful)
+   * - ``roc_recv_delay_floor_seconds``
+     - Gauge
+     - Rolling minimum of the delay level; baseline minus floor = standing latency cost of the jitter bulk
+   * - ``roc_recv_delay_bulk_stddev_seconds``
+     - Gauge
+     - Exponential stddev of the SIGNED deviation outside events (frozen while an event is open); the signed second moment measures the symmetric bulk at its full scale, which is what justifies the 6 sigma false-event rate
+   * - ``roc_recv_delay_deviation_max_seconds``
+     - Gauge
+     - Rolling maximum of the deviation (diagnostic)
+   * - ``roc_recv_delay_event_total``
+     - Counter
+     - Detected delay events (6/3 sigma hysteresis; false-event rate ~1e-9 per packet for light-tailed bulk)
+   * - ``roc_recv_queue_drain_seconds``
+     - Histogram
+     - Queue drain depth per grid interval (mean minus min of queue depth); the model-free validator
 
 Depacketizer
 ------------
@@ -412,6 +516,30 @@ SessionSkewEstimator
    * - ``roc_send_playout_cov_seconds2{slot_a=...,slot_b=...}``
      - Gauge
      - Covariance of the two slots' queue-depth fluctuations (exponential averages, 15min time constant)
+   * - ``roc_send_recv_deviation_mean_seconds{slot=...}``
+     - Gauge
+     - Receiver-reported mean delay deviation over the last snapshot interval
+   * - ``roc_send_recv_deviation_max_seconds{slot=...}``
+     - Gauge
+     - Receiver-reported maximum delay deviation over the last snapshot interval
+   * - ``roc_send_recv_event_count{slot=...}``
+     - Gauge
+     - Receiver-reported delay events closed in the last snapshot interval
+   * - ``roc_send_event_rows_total{slot=...}``
+     - Counter
+     - Snapshot rows in which the slot reported at least one delay event
+   * - ``roc_send_joint_event_rows_total{slot_a=...,slot_b=...}``
+     - Counter
+     - Snapshot rows in which both slots reported delay events
+   * - ``roc_send_event_dependence_ratio{slot_a=...,slot_b=...}``
+     - Gauge
+     - Joint event rows times total rows over the product of the two slots' event-row counts; 1 = independent, above 1 = shared events
+   * - ``roc_send_deviation_corr{slot_a=...,slot_b=...}``
+     - Gauge
+     - Correlation of the two slots' mean delay deviations (exponential averages)
+   * - ``roc_send_deviation_cov_seconds2{slot_a=...,slot_b=...}``
+     - Gauge
+     - Covariance of the two slots' mean delay deviations (exponential averages)
    * - ``roc_send_playout_fleet_mean_seconds``
      - Gauge
      - Mean e2e latency across the fleet at a common stream position
@@ -442,9 +570,24 @@ bounds (default log, 10us to 10ms); the fleet mean histogram has its own
 ``--prometheus-playout-fleet-mean-*`` flags (default log, 5ms to 100ms).
 Defaults put the log midpoint near each statistic's observed mode.
 
-Mixed versions are safe in both directions: an old sender skips the
-unknown XR block, and an old receiver simply never sends it (the
-sender's snapshot timestamps go stale, which is itself visible).
+Tail dependence is read directly off the event-row counters. If the
+slots' pause processes are independent Poisson processes, the joint
+rate equals the product of the marginal event-row rates (per row).
+An excess of ``joint_event_rows`` over that product means shared
+pauses: a common upstream cause (sender host, shared network segment)
+rather than receiver-local ones. The corresponding underrun link: with
+margin ``m``, event rate ``lambda`` and height distribution ``F``,
+``P(underrun by time T) = 1 - exp(-lambda * T * (1 - F(m)))`` under
+the Poisson null; the gap histogram measures the deviation from that
+null.
+
+Mixed versions are safe in both directions. The snapshot block
+carries its on-wire entry size: an old sender reads the seven-word
+prefix of a new receiver's larger entries by striding, and a new
+sender accepts an old receiver's seven-word entries with the delay
+fields reported unavailable (the sender-side delay gauges and
+counters for that slot simply stay silent). No deploy ordering is
+required.
 
 IO metrics
 ==========

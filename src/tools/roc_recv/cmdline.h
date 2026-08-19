@@ -44,6 +44,9 @@ enum enum_prometheus_niq_latency_scale { prometheus_niq_latency_scale__NULL = -1
 enum enum_prometheus_e2e_latency_scale { prometheus_e2e_latency_scale__NULL = -1, prometheus_e2e_latency_scale_arg_log = 0, prometheus_e2e_latency_scale_arg_linear };
 enum enum_prometheus_jitter_scale { prometheus_jitter_scale__NULL = -1, prometheus_jitter_scale_arg_log = 0, prometheus_jitter_scale_arg_linear };
 enum enum_prometheus_rtt_scale { prometheus_rtt_scale__NULL = -1, prometheus_rtt_scale_arg_log = 0, prometheus_rtt_scale_arg_linear };
+enum enum_prometheus_delay_deviation_scale { prometheus_delay_deviation_scale__NULL = -1, prometheus_delay_deviation_scale_arg_log = 0, prometheus_delay_deviation_scale_arg_linear };
+enum enum_prometheus_event_height_scale { prometheus_event_height_scale__NULL = -1, prometheus_event_height_scale_arg_log = 0, prometheus_event_height_scale_arg_linear };
+enum enum_prometheus_queue_drain_scale { prometheus_queue_drain_scale__NULL = -1, prometheus_queue_drain_scale_arg_log = 0, prometheus_queue_drain_scale_arg_linear };
 
 /** @brief Where the command line options are stored */
 struct gengetopt_args_info
@@ -195,6 +198,42 @@ struct gengetopt_args_info
   enum enum_prometheus_rtt_scale prometheus_rtt_scale_arg;	/**< @brief Bucket spacing for RTT histogram (default='log').  */
   char * prometheus_rtt_scale_orig;	/**< @brief Bucket spacing for RTT histogram original value given at command line.  */
   const char *prometheus_rtt_scale_help; /**< @brief Bucket spacing for RTT histogram help description.  */
+  int prometheus_delay_deviation_buckets_arg;	/**< @brief Number of histogram buckets for delay deviation metrics (default='90').  */
+  char * prometheus_delay_deviation_buckets_orig;	/**< @brief Number of histogram buckets for delay deviation metrics original value given at command line.  */
+  const char *prometheus_delay_deviation_buckets_help; /**< @brief Number of histogram buckets for delay deviation metrics help description.  */
+  char * prometheus_delay_deviation_min_arg;	/**< @brief Minimum delay deviation bucket boundary, TIME units (default='1us').  */
+  char * prometheus_delay_deviation_min_orig;	/**< @brief Minimum delay deviation bucket boundary, TIME units original value given at command line.  */
+  const char *prometheus_delay_deviation_min_help; /**< @brief Minimum delay deviation bucket boundary, TIME units help description.  */
+  char * prometheus_delay_deviation_max_arg;	/**< @brief Maximum delay deviation bucket boundary, TIME units (default='1s').  */
+  char * prometheus_delay_deviation_max_orig;	/**< @brief Maximum delay deviation bucket boundary, TIME units original value given at command line.  */
+  const char *prometheus_delay_deviation_max_help; /**< @brief Maximum delay deviation bucket boundary, TIME units help description.  */
+  enum enum_prometheus_delay_deviation_scale prometheus_delay_deviation_scale_arg;	/**< @brief Bucket spacing for delay deviation histogram (default='log').  */
+  char * prometheus_delay_deviation_scale_orig;	/**< @brief Bucket spacing for delay deviation histogram original value given at command line.  */
+  const char *prometheus_delay_deviation_scale_help; /**< @brief Bucket spacing for delay deviation histogram help description.  */
+  int prometheus_event_height_buckets_arg;	/**< @brief Number of histogram buckets for delay event height metrics (default='60').  */
+  char * prometheus_event_height_buckets_orig;	/**< @brief Number of histogram buckets for delay event height metrics original value given at command line.  */
+  const char *prometheus_event_height_buckets_help; /**< @brief Number of histogram buckets for delay event height metrics help description.  */
+  char * prometheus_event_height_min_arg;	/**< @brief Minimum delay event height bucket boundary, TIME units (default='100us').  */
+  char * prometheus_event_height_min_orig;	/**< @brief Minimum delay event height bucket boundary, TIME units original value given at command line.  */
+  const char *prometheus_event_height_min_help; /**< @brief Minimum delay event height bucket boundary, TIME units help description.  */
+  char * prometheus_event_height_max_arg;	/**< @brief Maximum delay event height bucket boundary, TIME units (default='1s').  */
+  char * prometheus_event_height_max_orig;	/**< @brief Maximum delay event height bucket boundary, TIME units original value given at command line.  */
+  const char *prometheus_event_height_max_help; /**< @brief Maximum delay event height bucket boundary, TIME units help description.  */
+  enum enum_prometheus_event_height_scale prometheus_event_height_scale_arg;	/**< @brief Bucket spacing for delay event height histogram (default='log').  */
+  char * prometheus_event_height_scale_orig;	/**< @brief Bucket spacing for delay event height histogram original value given at command line.  */
+  const char *prometheus_event_height_scale_help; /**< @brief Bucket spacing for delay event height histogram help description.  */
+  int prometheus_queue_drain_buckets_arg;	/**< @brief Number of histogram buckets for queue drain metrics (default='40').  */
+  char * prometheus_queue_drain_buckets_orig;	/**< @brief Number of histogram buckets for queue drain metrics original value given at command line.  */
+  const char *prometheus_queue_drain_buckets_help; /**< @brief Number of histogram buckets for queue drain metrics help description.  */
+  char * prometheus_queue_drain_min_arg;	/**< @brief Minimum queue drain bucket boundary, TIME units (default='100us').  */
+  char * prometheus_queue_drain_min_orig;	/**< @brief Minimum queue drain bucket boundary, TIME units original value given at command line.  */
+  const char *prometheus_queue_drain_min_help; /**< @brief Minimum queue drain bucket boundary, TIME units help description.  */
+  char * prometheus_queue_drain_max_arg;	/**< @brief Maximum queue drain bucket boundary, TIME units (default='100ms').  */
+  char * prometheus_queue_drain_max_orig;	/**< @brief Maximum queue drain bucket boundary, TIME units original value given at command line.  */
+  const char *prometheus_queue_drain_max_help; /**< @brief Maximum queue drain bucket boundary, TIME units help description.  */
+  enum enum_prometheus_queue_drain_scale prometheus_queue_drain_scale_arg;	/**< @brief Bucket spacing for queue drain histogram (default='log').  */
+  char * prometheus_queue_drain_scale_orig;	/**< @brief Bucket spacing for queue drain histogram original value given at command line.  */
+  const char *prometheus_queue_drain_scale_help; /**< @brief Bucket spacing for queue drain histogram help description.  */
   char * max_packet_size_arg;	/**< @brief Maximum network packet size, SIZE units.  */
   char * max_packet_size_orig;	/**< @brief Maximum network packet size, SIZE units original value given at command line.  */
   const char *max_packet_size_help; /**< @brief Maximum network packet size, SIZE units help description.  */
@@ -256,6 +295,18 @@ struct gengetopt_args_info
   unsigned int prometheus_rtt_min_given ;	/**< @brief Whether prometheus-rtt-min was given.  */
   unsigned int prometheus_rtt_max_given ;	/**< @brief Whether prometheus-rtt-max was given.  */
   unsigned int prometheus_rtt_scale_given ;	/**< @brief Whether prometheus-rtt-scale was given.  */
+  unsigned int prometheus_delay_deviation_buckets_given ;	/**< @brief Whether prometheus-delay-deviation-buckets was given.  */
+  unsigned int prometheus_delay_deviation_min_given ;	/**< @brief Whether prometheus-delay-deviation-min was given.  */
+  unsigned int prometheus_delay_deviation_max_given ;	/**< @brief Whether prometheus-delay-deviation-max was given.  */
+  unsigned int prometheus_delay_deviation_scale_given ;	/**< @brief Whether prometheus-delay-deviation-scale was given.  */
+  unsigned int prometheus_event_height_buckets_given ;	/**< @brief Whether prometheus-event-height-buckets was given.  */
+  unsigned int prometheus_event_height_min_given ;	/**< @brief Whether prometheus-event-height-min was given.  */
+  unsigned int prometheus_event_height_max_given ;	/**< @brief Whether prometheus-event-height-max was given.  */
+  unsigned int prometheus_event_height_scale_given ;	/**< @brief Whether prometheus-event-height-scale was given.  */
+  unsigned int prometheus_queue_drain_buckets_given ;	/**< @brief Whether prometheus-queue-drain-buckets was given.  */
+  unsigned int prometheus_queue_drain_min_given ;	/**< @brief Whether prometheus-queue-drain-min was given.  */
+  unsigned int prometheus_queue_drain_max_given ;	/**< @brief Whether prometheus-queue-drain-max was given.  */
+  unsigned int prometheus_queue_drain_scale_given ;	/**< @brief Whether prometheus-queue-drain-scale was given.  */
   unsigned int max_packet_size_given ;	/**< @brief Whether max-packet-size was given.  */
   unsigned int max_frame_size_given ;	/**< @brief Whether max-frame-size was given.  */
   unsigned int prof_given ;	/**< @brief Whether prof was given.  */
@@ -394,6 +445,9 @@ extern const char *cmdline_parser_prometheus_niq_latency_scale_values[];  /**< @
 extern const char *cmdline_parser_prometheus_e2e_latency_scale_values[];  /**< @brief Possible values for prometheus-e2e-latency-scale. */
 extern const char *cmdline_parser_prometheus_jitter_scale_values[];  /**< @brief Possible values for prometheus-jitter-scale. */
 extern const char *cmdline_parser_prometheus_rtt_scale_values[];  /**< @brief Possible values for prometheus-rtt-scale. */
+extern const char *cmdline_parser_prometheus_delay_deviation_scale_values[];  /**< @brief Possible values for prometheus-delay-deviation-scale. */
+extern const char *cmdline_parser_prometheus_event_height_scale_values[];  /**< @brief Possible values for prometheus-event-height-scale. */
+extern const char *cmdline_parser_prometheus_queue_drain_scale_values[];  /**< @brief Possible values for prometheus-queue-drain-scale. */
 
 
 #ifdef __cplusplus

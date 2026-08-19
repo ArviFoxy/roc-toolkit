@@ -129,6 +129,33 @@ section "Metrics options"
     option "prometheus-rtt-scale" - "Bucket spacing for RTT histogram"
         values="log","linear" default="log" enum optional
 
+    option "prometheus-delay-deviation-buckets" - "Number of histogram buckets for delay deviation metrics"
+        int default="90" optional
+    option "prometheus-delay-deviation-min" - "Minimum delay deviation bucket boundary, TIME units"
+        typestr="TIME" string default="1us" optional
+    option "prometheus-delay-deviation-max" - "Maximum delay deviation bucket boundary, TIME units"
+        typestr="TIME" string default="1s" optional
+    option "prometheus-delay-deviation-scale" - "Bucket spacing for delay deviation histogram"
+        values="log","linear" default="log" enum optional
+
+    option "prometheus-event-height-buckets" - "Number of histogram buckets for delay event height metrics"
+        int default="60" optional
+    option "prometheus-event-height-min" - "Minimum delay event height bucket boundary, TIME units"
+        typestr="TIME" string default="100us" optional
+    option "prometheus-event-height-max" - "Maximum delay event height bucket boundary, TIME units"
+        typestr="TIME" string default="1s" optional
+    option "prometheus-event-height-scale" - "Bucket spacing for delay event height histogram"
+        values="log","linear" default="log" enum optional
+
+    option "prometheus-queue-drain-buckets" - "Number of histogram buckets for queue drain metrics"
+        int default="40" optional
+    option "prometheus-queue-drain-min" - "Minimum queue drain bucket boundary, TIME units"
+        typestr="TIME" string default="100us" optional
+    option "prometheus-queue-drain-max" - "Maximum queue drain bucket boundary, TIME units"
+        typestr="TIME" string default="100ms" optional
+    option "prometheus-queue-drain-scale" - "Bucket spacing for queue drain histogram"
+        values="log","linear" default="log" enum optional
+
 section "Memory options"
 
     option "max-packet-size" - "Maximum network packet size, SIZE units"

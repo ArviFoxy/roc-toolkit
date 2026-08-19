@@ -91,6 +91,18 @@ const char *gengetopt_args_info_help[] = {
   "      --prometheus-rtt-min=TIME Minimum RTT bucket boundary, TIME units\n                                  (default=`1ms')",
   "      --prometheus-rtt-max=TIME Maximum RTT bucket boundary, TIME units\n                                  (default=`100ms')",
   "      --prometheus-rtt-scale=ENUM\n                                Bucket spacing for RTT histogram  (possible\n                                  values=\"log\", \"linear\" default=`log')",
+  "      --prometheus-delay-deviation-buckets=INT\n                                Number of histogram buckets for delay deviation\n                                  metrics  (default=`90')",
+  "      --prometheus-delay-deviation-min=TIME\n                                Minimum delay deviation bucket boundary, TIME\n                                  units  (default=`1us')",
+  "      --prometheus-delay-deviation-max=TIME\n                                Maximum delay deviation bucket boundary, TIME\n                                  units  (default=`1s')",
+  "      --prometheus-delay-deviation-scale=ENUM\n                                Bucket spacing for delay deviation histogram\n                                  (possible values=\"log\", \"linear\"\n                                  default=`log')",
+  "      --prometheus-event-height-buckets=INT\n                                Number of histogram buckets for delay event\n                                  height metrics  (default=`60')",
+  "      --prometheus-event-height-min=TIME\n                                Minimum delay event height bucket boundary,\n                                  TIME units  (default=`100us')",
+  "      --prometheus-event-height-max=TIME\n                                Maximum delay event height bucket boundary,\n                                  TIME units  (default=`1s')",
+  "      --prometheus-event-height-scale=ENUM\n                                Bucket spacing for delay event height histogram\n                                  (possible values=\"log\", \"linear\"\n                                  default=`log')",
+  "      --prometheus-queue-drain-buckets=INT\n                                Number of histogram buckets for queue drain\n                                  metrics  (default=`40')",
+  "      --prometheus-queue-drain-min=TIME\n                                Minimum queue drain bucket boundary, TIME units\n                                  (default=`100us')",
+  "      --prometheus-queue-drain-max=TIME\n                                Maximum queue drain bucket boundary, TIME units\n                                  (default=`100ms')",
+  "      --prometheus-queue-drain-scale=ENUM\n                                Bucket spacing for queue drain histogram\n                                  (possible values=\"log\", \"linear\"\n                                  default=`log')",
   "\nMemory options:",
   "      --max-packet-size=SIZE    Maximum network packet size, SIZE units",
   "      --max-frame-size=SIZE     Maximum I/O and processing frame size, SIZE\n                                  units",
@@ -131,6 +143,9 @@ const char *cmdline_parser_prometheus_niq_latency_scale_values[] = {"log", "line
 const char *cmdline_parser_prometheus_e2e_latency_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-e2e-latency-scale. */
 const char *cmdline_parser_prometheus_jitter_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-jitter-scale. */
 const char *cmdline_parser_prometheus_rtt_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-rtt-scale. */
+const char *cmdline_parser_prometheus_delay_deviation_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-delay-deviation-scale. */
+const char *cmdline_parser_prometheus_event_height_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-event-height-scale. */
+const char *cmdline_parser_prometheus_queue_drain_scale_values[] = {"log", "linear", 0}; /*< Possible values for prometheus-queue-drain-scale. */
 
 static char *
 gengetopt_strdup (const char *s);
@@ -187,6 +202,18 @@ void clear_given (struct gengetopt_args_info *args_info)
   args_info->prometheus_rtt_min_given = 0 ;
   args_info->prometheus_rtt_max_given = 0 ;
   args_info->prometheus_rtt_scale_given = 0 ;
+  args_info->prometheus_delay_deviation_buckets_given = 0 ;
+  args_info->prometheus_delay_deviation_min_given = 0 ;
+  args_info->prometheus_delay_deviation_max_given = 0 ;
+  args_info->prometheus_delay_deviation_scale_given = 0 ;
+  args_info->prometheus_event_height_buckets_given = 0 ;
+  args_info->prometheus_event_height_min_given = 0 ;
+  args_info->prometheus_event_height_max_given = 0 ;
+  args_info->prometheus_event_height_scale_given = 0 ;
+  args_info->prometheus_queue_drain_buckets_given = 0 ;
+  args_info->prometheus_queue_drain_min_given = 0 ;
+  args_info->prometheus_queue_drain_max_given = 0 ;
+  args_info->prometheus_queue_drain_scale_given = 0 ;
   args_info->max_packet_size_given = 0 ;
   args_info->max_frame_size_given = 0 ;
   args_info->prof_given = 0 ;
@@ -283,6 +310,30 @@ void clear_args (struct gengetopt_args_info *args_info)
   args_info->prometheus_rtt_max_orig = NULL;
   args_info->prometheus_rtt_scale_arg = prometheus_rtt_scale_arg_log;
   args_info->prometheus_rtt_scale_orig = NULL;
+  args_info->prometheus_delay_deviation_buckets_arg = 90;
+  args_info->prometheus_delay_deviation_buckets_orig = NULL;
+  args_info->prometheus_delay_deviation_min_arg = gengetopt_strdup ("1us");
+  args_info->prometheus_delay_deviation_min_orig = NULL;
+  args_info->prometheus_delay_deviation_max_arg = gengetopt_strdup ("1s");
+  args_info->prometheus_delay_deviation_max_orig = NULL;
+  args_info->prometheus_delay_deviation_scale_arg = prometheus_delay_deviation_scale_arg_log;
+  args_info->prometheus_delay_deviation_scale_orig = NULL;
+  args_info->prometheus_event_height_buckets_arg = 60;
+  args_info->prometheus_event_height_buckets_orig = NULL;
+  args_info->prometheus_event_height_min_arg = gengetopt_strdup ("100us");
+  args_info->prometheus_event_height_min_orig = NULL;
+  args_info->prometheus_event_height_max_arg = gengetopt_strdup ("1s");
+  args_info->prometheus_event_height_max_orig = NULL;
+  args_info->prometheus_event_height_scale_arg = prometheus_event_height_scale_arg_log;
+  args_info->prometheus_event_height_scale_orig = NULL;
+  args_info->prometheus_queue_drain_buckets_arg = 40;
+  args_info->prometheus_queue_drain_buckets_orig = NULL;
+  args_info->prometheus_queue_drain_min_arg = gengetopt_strdup ("100us");
+  args_info->prometheus_queue_drain_min_orig = NULL;
+  args_info->prometheus_queue_drain_max_arg = gengetopt_strdup ("100ms");
+  args_info->prometheus_queue_drain_max_orig = NULL;
+  args_info->prometheus_queue_drain_scale_arg = prometheus_queue_drain_scale_arg_log;
+  args_info->prometheus_queue_drain_scale_orig = NULL;
   args_info->max_packet_size_arg = NULL;
   args_info->max_packet_size_orig = NULL;
   args_info->max_frame_size_arg = NULL;
@@ -359,10 +410,22 @@ void init_args_info(struct gengetopt_args_info *args_info)
   args_info->prometheus_rtt_min_help = gengetopt_args_info_help[54] ;
   args_info->prometheus_rtt_max_help = gengetopt_args_info_help[55] ;
   args_info->prometheus_rtt_scale_help = gengetopt_args_info_help[56] ;
-  args_info->max_packet_size_help = gengetopt_args_info_help[58] ;
-  args_info->max_frame_size_help = gengetopt_args_info_help[59] ;
-  args_info->prof_help = gengetopt_args_info_help[61] ;
-  args_info->dump_help = gengetopt_args_info_help[62] ;
+  args_info->prometheus_delay_deviation_buckets_help = gengetopt_args_info_help[57] ;
+  args_info->prometheus_delay_deviation_min_help = gengetopt_args_info_help[58] ;
+  args_info->prometheus_delay_deviation_max_help = gengetopt_args_info_help[59] ;
+  args_info->prometheus_delay_deviation_scale_help = gengetopt_args_info_help[60] ;
+  args_info->prometheus_event_height_buckets_help = gengetopt_args_info_help[61] ;
+  args_info->prometheus_event_height_min_help = gengetopt_args_info_help[62] ;
+  args_info->prometheus_event_height_max_help = gengetopt_args_info_help[63] ;
+  args_info->prometheus_event_height_scale_help = gengetopt_args_info_help[64] ;
+  args_info->prometheus_queue_drain_buckets_help = gengetopt_args_info_help[65] ;
+  args_info->prometheus_queue_drain_min_help = gengetopt_args_info_help[66] ;
+  args_info->prometheus_queue_drain_max_help = gengetopt_args_info_help[67] ;
+  args_info->prometheus_queue_drain_scale_help = gengetopt_args_info_help[68] ;
+  args_info->max_packet_size_help = gengetopt_args_info_help[70] ;
+  args_info->max_frame_size_help = gengetopt_args_info_help[71] ;
+  args_info->prof_help = gengetopt_args_info_help[73] ;
+  args_info->dump_help = gengetopt_args_info_help[74] ;
   
 }
 
@@ -561,6 +624,24 @@ cmdline_parser_release (struct gengetopt_args_info *args_info)
   free_string_field (&(args_info->prometheus_rtt_max_arg));
   free_string_field (&(args_info->prometheus_rtt_max_orig));
   free_string_field (&(args_info->prometheus_rtt_scale_orig));
+  free_string_field (&(args_info->prometheus_delay_deviation_buckets_orig));
+  free_string_field (&(args_info->prometheus_delay_deviation_min_arg));
+  free_string_field (&(args_info->prometheus_delay_deviation_min_orig));
+  free_string_field (&(args_info->prometheus_delay_deviation_max_arg));
+  free_string_field (&(args_info->prometheus_delay_deviation_max_orig));
+  free_string_field (&(args_info->prometheus_delay_deviation_scale_orig));
+  free_string_field (&(args_info->prometheus_event_height_buckets_orig));
+  free_string_field (&(args_info->prometheus_event_height_min_arg));
+  free_string_field (&(args_info->prometheus_event_height_min_orig));
+  free_string_field (&(args_info->prometheus_event_height_max_arg));
+  free_string_field (&(args_info->prometheus_event_height_max_orig));
+  free_string_field (&(args_info->prometheus_event_height_scale_orig));
+  free_string_field (&(args_info->prometheus_queue_drain_buckets_orig));
+  free_string_field (&(args_info->prometheus_queue_drain_min_arg));
+  free_string_field (&(args_info->prometheus_queue_drain_min_orig));
+  free_string_field (&(args_info->prometheus_queue_drain_max_arg));
+  free_string_field (&(args_info->prometheus_queue_drain_max_orig));
+  free_string_field (&(args_info->prometheus_queue_drain_scale_orig));
   free_string_field (&(args_info->max_packet_size_arg));
   free_string_field (&(args_info->max_packet_size_orig));
   free_string_field (&(args_info->max_frame_size_arg));
@@ -738,6 +819,30 @@ cmdline_parser_dump(FILE *outfile, struct gengetopt_args_info *args_info)
     write_into_file(outfile, "prometheus-rtt-max", args_info->prometheus_rtt_max_orig, 0);
   if (args_info->prometheus_rtt_scale_given)
     write_into_file(outfile, "prometheus-rtt-scale", args_info->prometheus_rtt_scale_orig, cmdline_parser_prometheus_rtt_scale_values);
+  if (args_info->prometheus_delay_deviation_buckets_given)
+    write_into_file(outfile, "prometheus-delay-deviation-buckets", args_info->prometheus_delay_deviation_buckets_orig, 0);
+  if (args_info->prometheus_delay_deviation_min_given)
+    write_into_file(outfile, "prometheus-delay-deviation-min", args_info->prometheus_delay_deviation_min_orig, 0);
+  if (args_info->prometheus_delay_deviation_max_given)
+    write_into_file(outfile, "prometheus-delay-deviation-max", args_info->prometheus_delay_deviation_max_orig, 0);
+  if (args_info->prometheus_delay_deviation_scale_given)
+    write_into_file(outfile, "prometheus-delay-deviation-scale", args_info->prometheus_delay_deviation_scale_orig, cmdline_parser_prometheus_delay_deviation_scale_values);
+  if (args_info->prometheus_event_height_buckets_given)
+    write_into_file(outfile, "prometheus-event-height-buckets", args_info->prometheus_event_height_buckets_orig, 0);
+  if (args_info->prometheus_event_height_min_given)
+    write_into_file(outfile, "prometheus-event-height-min", args_info->prometheus_event_height_min_orig, 0);
+  if (args_info->prometheus_event_height_max_given)
+    write_into_file(outfile, "prometheus-event-height-max", args_info->prometheus_event_height_max_orig, 0);
+  if (args_info->prometheus_event_height_scale_given)
+    write_into_file(outfile, "prometheus-event-height-scale", args_info->prometheus_event_height_scale_orig, cmdline_parser_prometheus_event_height_scale_values);
+  if (args_info->prometheus_queue_drain_buckets_given)
+    write_into_file(outfile, "prometheus-queue-drain-buckets", args_info->prometheus_queue_drain_buckets_orig, 0);
+  if (args_info->prometheus_queue_drain_min_given)
+    write_into_file(outfile, "prometheus-queue-drain-min", args_info->prometheus_queue_drain_min_orig, 0);
+  if (args_info->prometheus_queue_drain_max_given)
+    write_into_file(outfile, "prometheus-queue-drain-max", args_info->prometheus_queue_drain_max_orig, 0);
+  if (args_info->prometheus_queue_drain_scale_given)
+    write_into_file(outfile, "prometheus-queue-drain-scale", args_info->prometheus_queue_drain_scale_orig, cmdline_parser_prometheus_queue_drain_scale_values);
   if (args_info->max_packet_size_given)
     write_into_file(outfile, "max-packet-size", args_info->max_packet_size_orig, 0);
   if (args_info->max_frame_size_given)
@@ -1398,6 +1503,18 @@ cmdline_parser_internal (
         { "prometheus-rtt-min",	1, NULL, 0 },
         { "prometheus-rtt-max",	1, NULL, 0 },
         { "prometheus-rtt-scale",	1, NULL, 0 },
+        { "prometheus-delay-deviation-buckets",	1, NULL, 0 },
+        { "prometheus-delay-deviation-min",	1, NULL, 0 },
+        { "prometheus-delay-deviation-max",	1, NULL, 0 },
+        { "prometheus-delay-deviation-scale",	1, NULL, 0 },
+        { "prometheus-event-height-buckets",	1, NULL, 0 },
+        { "prometheus-event-height-min",	1, NULL, 0 },
+        { "prometheus-event-height-max",	1, NULL, 0 },
+        { "prometheus-event-height-scale",	1, NULL, 0 },
+        { "prometheus-queue-drain-buckets",	1, NULL, 0 },
+        { "prometheus-queue-drain-min",	1, NULL, 0 },
+        { "prometheus-queue-drain-max",	1, NULL, 0 },
+        { "prometheus-queue-drain-scale",	1, NULL, 0 },
         { "max-packet-size",	1, NULL, 0 },
         { "max-frame-size",	1, NULL, 0 },
         { "prof",	0, NULL, 0 },
@@ -2037,6 +2154,174 @@ cmdline_parser_internal (
                 &(local_args_info.prometheus_rtt_scale_given), optarg, cmdline_parser_prometheus_rtt_scale_values, "log", ARG_ENUM,
                 check_ambiguity, override, 0, 0,
                 "prometheus-rtt-scale", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Number of histogram buckets for delay deviation metrics.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-delay-deviation-buckets") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_delay_deviation_buckets_arg), 
+                 &(args_info->prometheus_delay_deviation_buckets_orig), &(args_info->prometheus_delay_deviation_buckets_given),
+                &(local_args_info.prometheus_delay_deviation_buckets_given), optarg, 0, "90", ARG_INT,
+                check_ambiguity, override, 0, 0,
+                "prometheus-delay-deviation-buckets", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Minimum delay deviation bucket boundary, TIME units.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-delay-deviation-min") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_delay_deviation_min_arg), 
+                 &(args_info->prometheus_delay_deviation_min_orig), &(args_info->prometheus_delay_deviation_min_given),
+                &(local_args_info.prometheus_delay_deviation_min_given), optarg, 0, "1us", ARG_STRING,
+                check_ambiguity, override, 0, 0,
+                "prometheus-delay-deviation-min", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Maximum delay deviation bucket boundary, TIME units.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-delay-deviation-max") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_delay_deviation_max_arg), 
+                 &(args_info->prometheus_delay_deviation_max_orig), &(args_info->prometheus_delay_deviation_max_given),
+                &(local_args_info.prometheus_delay_deviation_max_given), optarg, 0, "1s", ARG_STRING,
+                check_ambiguity, override, 0, 0,
+                "prometheus-delay-deviation-max", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Bucket spacing for delay deviation histogram.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-delay-deviation-scale") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_delay_deviation_scale_arg), 
+                 &(args_info->prometheus_delay_deviation_scale_orig), &(args_info->prometheus_delay_deviation_scale_given),
+                &(local_args_info.prometheus_delay_deviation_scale_given), optarg, cmdline_parser_prometheus_delay_deviation_scale_values, "log", ARG_ENUM,
+                check_ambiguity, override, 0, 0,
+                "prometheus-delay-deviation-scale", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Number of histogram buckets for delay event height metrics.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-event-height-buckets") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_event_height_buckets_arg), 
+                 &(args_info->prometheus_event_height_buckets_orig), &(args_info->prometheus_event_height_buckets_given),
+                &(local_args_info.prometheus_event_height_buckets_given), optarg, 0, "60", ARG_INT,
+                check_ambiguity, override, 0, 0,
+                "prometheus-event-height-buckets", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Minimum delay event height bucket boundary, TIME units.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-event-height-min") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_event_height_min_arg), 
+                 &(args_info->prometheus_event_height_min_orig), &(args_info->prometheus_event_height_min_given),
+                &(local_args_info.prometheus_event_height_min_given), optarg, 0, "100us", ARG_STRING,
+                check_ambiguity, override, 0, 0,
+                "prometheus-event-height-min", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Maximum delay event height bucket boundary, TIME units.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-event-height-max") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_event_height_max_arg), 
+                 &(args_info->prometheus_event_height_max_orig), &(args_info->prometheus_event_height_max_given),
+                &(local_args_info.prometheus_event_height_max_given), optarg, 0, "1s", ARG_STRING,
+                check_ambiguity, override, 0, 0,
+                "prometheus-event-height-max", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Bucket spacing for delay event height histogram.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-event-height-scale") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_event_height_scale_arg), 
+                 &(args_info->prometheus_event_height_scale_orig), &(args_info->prometheus_event_height_scale_given),
+                &(local_args_info.prometheus_event_height_scale_given), optarg, cmdline_parser_prometheus_event_height_scale_values, "log", ARG_ENUM,
+                check_ambiguity, override, 0, 0,
+                "prometheus-event-height-scale", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Number of histogram buckets for queue drain metrics.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-queue-drain-buckets") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_queue_drain_buckets_arg), 
+                 &(args_info->prometheus_queue_drain_buckets_orig), &(args_info->prometheus_queue_drain_buckets_given),
+                &(local_args_info.prometheus_queue_drain_buckets_given), optarg, 0, "40", ARG_INT,
+                check_ambiguity, override, 0, 0,
+                "prometheus-queue-drain-buckets", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Minimum queue drain bucket boundary, TIME units.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-queue-drain-min") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_queue_drain_min_arg), 
+                 &(args_info->prometheus_queue_drain_min_orig), &(args_info->prometheus_queue_drain_min_given),
+                &(local_args_info.prometheus_queue_drain_min_given), optarg, 0, "100us", ARG_STRING,
+                check_ambiguity, override, 0, 0,
+                "prometheus-queue-drain-min", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Maximum queue drain bucket boundary, TIME units.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-queue-drain-max") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_queue_drain_max_arg), 
+                 &(args_info->prometheus_queue_drain_max_orig), &(args_info->prometheus_queue_drain_max_given),
+                &(local_args_info.prometheus_queue_drain_max_given), optarg, 0, "100ms", ARG_STRING,
+                check_ambiguity, override, 0, 0,
+                "prometheus-queue-drain-max", '-',
+                additional_error))
+              goto failure;
+          
+          }
+          /* Bucket spacing for queue drain histogram.  */
+          else if (strcmp (long_options[option_index].name, "prometheus-queue-drain-scale") == 0)
+          {
+          
+          
+            if (update_arg( (void *)&(args_info->prometheus_queue_drain_scale_arg), 
+                 &(args_info->prometheus_queue_drain_scale_orig), &(args_info->prometheus_queue_drain_scale_given),
+                &(local_args_info.prometheus_queue_drain_scale_given), optarg, cmdline_parser_prometheus_queue_drain_scale_values, "log", ARG_ENUM,
+                check_ambiguity, override, 0, 0,
+                "prometheus-queue-drain-scale", '-',
                 additional_error))
               goto failure;
           
