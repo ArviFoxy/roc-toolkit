@@ -133,6 +133,8 @@ struct gengetopt_args_info
   char * max_latency_arg;	/**< @brief Maximum target latency in adaptive mode, TIME units.  */
   char * max_latency_orig;	/**< @brief Maximum target latency in adaptive mode, TIME units original value given at command line.  */
   const char *max_latency_help; /**< @brief Maximum target latency in adaptive mode, TIME units help description.  */
+  int wallclock_start_flag;	/**< @brief Align session start position to the wall clock (requires fixed --target-latency and NTP-synchronized clocks) (default=off).  */
+  const char *wallclock_start_help; /**< @brief Align session start position to the wall clock (requires fixed --target-latency and NTP-synchronized clocks) help description.  */
   char * no_play_timeout_arg;	/**< @brief No-playback timeout, TIME units.  */
   char * no_play_timeout_orig;	/**< @brief No-playback timeout, TIME units original value given at command line.  */
   const char *no_play_timeout_help; /**< @brief No-playback timeout, TIME units help description.  */
@@ -233,6 +235,7 @@ struct gengetopt_args_info
   unsigned int start_latency_given ;	/**< @brief Whether start-latency was given.  */
   unsigned int min_latency_given ;	/**< @brief Whether min-latency was given.  */
   unsigned int max_latency_given ;	/**< @brief Whether max-latency was given.  */
+  unsigned int wallclock_start_given ;	/**< @brief Whether wallclock-start was given.  */
   unsigned int no_play_timeout_given ;	/**< @brief Whether no-play-timeout was given.  */
   unsigned int choppy_play_timeout_given ;	/**< @brief Whether choppy-play-timeout was given.  */
   unsigned int report_grid_given ;	/**< @brief Whether report-grid was given.  */

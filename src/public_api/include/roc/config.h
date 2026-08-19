@@ -1136,6 +1136,24 @@ typedef struct roc_receiver_config {
      * If zero, default value is used. If negative, the check is disabled.
      */
     long long choppy_playback_timeout;
+
+    /** Wall-clock-aligned session start.
+     *
+     * If non-zero, a new session picks its playback start position so that it
+     * plays the sample captured \c target_latency before the local time, using
+     * the RTCP sender-report mapping, instead of the position implied by the
+     * receiver queue depth. Receivers sharing the same target latency then
+     * start aligned with each other without any coordination.
+     *
+     * Requires fixed latency mode (\c target_latency non-zero) and assumes
+     * sender and receiver clocks are synchronized (e.g. by NTP), the same
+     * assumption used by \ref ROC_LATENCY_TUNER_BACKEND_E2E. The receiver
+     * falls back to the depth-based start when no sender report arrives
+     * within a timeout or when the report mapping is implausible.
+     *
+     * If zero, sessions start at the position implied by the queue depth.
+     */
+    unsigned int wallclock_start_alignment;
 } roc_receiver_config;
 
 /** Interface configuration.

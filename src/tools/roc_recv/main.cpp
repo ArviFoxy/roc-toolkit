@@ -365,6 +365,17 @@ bool build_receiver_config(const gengetopt_args_info& args,
         }
     }
 
+    if (args.wallclock_start_flag) {
+        if (receiver_config.session_defaults.latency.target_latency == 0) {
+            roc_log(LogError,
+                    "--wallclock-start can be specified only in"
+                    " fixed latency mode (i.e. --target-latency is given"
+                    " and not 'auto')");
+            return false;
+        }
+        receiver_config.session_defaults.latency.wallclock_start_alignment = true;
+    }
+
     if (args.no_play_timeout_given) {
         if (!core::parse_duration(
                 args.no_play_timeout_arg,

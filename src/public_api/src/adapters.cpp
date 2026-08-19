@@ -268,6 +268,10 @@ bool receiver_config_from_user(node::Context&,
             in.choppy_playback_timeout;
     }
 
+    if (in.wallclock_start_alignment != 0) {
+        out.session_defaults.latency.wallclock_start_alignment = true;
+    }
+
     out.common.enable_auto_reclock = true;
 
     return true;

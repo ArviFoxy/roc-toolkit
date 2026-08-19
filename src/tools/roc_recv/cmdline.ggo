@@ -75,6 +75,8 @@ section "Latency options"
         typestr="TIME" string optional
     option "max-latency" - "Maximum target latency in adaptive mode, TIME units"
         typestr="TIME" string optional
+    option "wallclock-start" - "Align session start position to the wall clock (requires fixed --target-latency and NTP-synchronized clocks)"
+        flag off
 
 
 section "Timeout options"

@@ -71,6 +71,7 @@ Latency options
 --start-latency=TIME      Starting target latency in adaptive mode, TIME units
 --min-latency=TIME        Minimum target latency in adaptive mode, TIME units
 --max-latency=TIME        Maximum target latency in adaptive mode, TIME units
+--wallclock-start         Align session start position to the wall clock (requires fixed --target-latency and NTP-synchronized clocks)  (default=off)
 --latency-backend=ENUM    Which latency to measure and tune  (possible values="niq" default=`niq')
 --latency-profile=ENUM    Latency tuning profile  (possible values="auto", "responsive", "gradual", "intact" default=`auto')
 
@@ -288,6 +289,12 @@ By default, latency tuning is performed on receiver side: ``--latency-profile`` 
 * If option is omitted or set to ``auto``, *adaptive latency* mode is activated. The latency is chosen dynamically. Initial latency is ``--start-latency``, and the allowed range is ``--min-latency`` to ``--max-latency``.
 
 ``--latency-tolerance`` option defines maximum allowed deviation of the actual latency from the (current) target latency. If this limit is exceeded for some reason (typically due to poor network conditions), connection is restarted.
+
+``--wallclock-start`` option aligns the session start position to the wall clock. When a session starts (including the automatic restart after an interruption), the receiver waits for the first RTCP sender report and begins playback at the sample that was captured ``--target-latency`` before the current local time. Receivers that share the same target latency then start already aligned with each other, instead of each starting at an arbitrary phase that the latency tuner has to correct slowly.
+
+This option requires fixed latency mode: ``--target-latency`` must be set to a value, not ``auto``. It assumes that sender and receiver clocks are synchronized with NTP (e.g. by chrony), which is the same assumption made by the ``e2e`` latency backend.
+
+The receiver falls back to the start position implied by the queue depth (the behavior without this option) when no usable sender report arrives, or the received queue does not cover the aligned position, within a timeout of ``--target-latency`` plus one second. A sender report whose mapping is implausible compared to the received queue contents, or disagrees with the local clock so much that clock synchronization is evidently broken, is discarded; a later report within the timeout can still align the start. In addition, if the stream is younger than the target latency, playback starts at the oldest available packet.
 
 How latency is measured (and so which latency is tuned) is defined by ``--latency-backend`` option. The following backends are available:
 
