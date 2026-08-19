@@ -610,6 +610,18 @@ void Reporter::process_stream_snapshot_block(const header::XrPacket& xr,
         if (e.has_target_latency()) {
             snap.target_latency = packet::ntp_2_nanoseconds(e.target_latency());
         }
+        // The delay fields live past the minimum entry prefix: an old
+        // peer's shorter entries do not carry them, and the struct
+        // sentinels stay at -1.
+        if (e.has_deviation_mean(blk.entry_words())) {
+            snap.deviation_mean = (core::nanoseconds_t)e.deviation_mean_ns();
+        }
+        if (e.has_deviation_max(blk.entry_words())) {
+            snap.deviation_max = (core::nanoseconds_t)e.deviation_max_ns();
+        }
+        if (e.has_event_count(blk.entry_words())) {
+            snap.event_count = (int64_t)e.event_count();
+        }
         n_out++;
     }
     report.n_snapshots = n_out;
@@ -968,6 +980,15 @@ void Reporter::generate_stream_snapshot_block(size_t addr_index,
         }
         if (snap.target_latency >= 0) {
             e.set_target_latency(packet::nanoseconds_2_ntp(snap.target_latency));
+        }
+        if (snap.deviation_mean >= 0) {
+            e.set_deviation_mean_ns((uint64_t)snap.deviation_mean);
+        }
+        if (snap.deviation_max >= 0) {
+            e.set_deviation_max_ns((uint64_t)snap.deviation_max);
+        }
+        if (snap.event_count >= 0) {
+            e.set_event_count((uint64_t)snap.event_count);
         }
         n_entries++;
     }

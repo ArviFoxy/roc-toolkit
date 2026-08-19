@@ -259,8 +259,11 @@ bool XrTraverser::Iterator::check_stream_snapshot_() {
     const header::XrStreamSnapshotBlock* blk =
         (const header::XrStreamSnapshotBlock*)cur_blk_header_;
 
-    if (blk->entry_words() < header::XrStreamSnapshotBlock::EntryWords) {
-        // Entries too small to carry the fields we know.
+    if (blk->entry_words() < header::XrStreamSnapshotBlock::MinEntryWords) {
+        // Entries too small to carry even the minimum prefix. Larger
+        // entries than ours are fine (we read the prefix we know), and
+        // smaller ones down to the minimum are fine too (fields beyond
+        // the received entry size read as unavailable).
         return false;
     }
 

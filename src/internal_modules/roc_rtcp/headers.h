@@ -1782,7 +1782,25 @@ public:
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //! |                    Target Latency (NTP32)                     |
 //! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |         Delay Deviation Interval Mean (nanoseconds)           |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |         Delay Deviation Interval Max (nanoseconds)            |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//! |                   Delay Event Count                           |
+//! +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //! @endcode
+//!
+//! The three delay words extend the seven-word prefix (through Target
+//! Latency). A peer whose entries are shorter does not carry a field
+//! whatever the bytes at its offset hold, so the has_ accessors for
+//! these fields take the on-wire entry word count of the enclosing
+//! block and report the field unavailable when the entry is shorter
+//! than its offset.
+//!
+//! The delay fields are raw unsigned nanoseconds (and a raw count),
+//! not NTP32: the deviation statistics live in the sub-millisecond
+//! range where the 15.26 us NTP32 quantum is too coarse. 0xFFFFFFFF
+//! is the unavailable sentinel; set values saturate just below it.
 ROC_PACKED_BEGIN class XrStreamSnapshotEntry {
 private:
     uint32_t grid_index_;
@@ -1792,10 +1810,25 @@ private:
     NtpTimestamp32 e2e_latency_;
     uint32_t warp_ppb_;
     NtpTimestamp32 target_latency_;
+    uint32_t deviation_mean_ns_;
+    uint32_t deviation_max_ns_;
+    uint32_t event_count_;
 
 public:
     //! Sentinel for unavailable warp.
     static const int32_t WarpUnavail = -2147483647 - 1;
+
+    //! Sentinel for unavailable raw uint32 fields.
+    static const uint32_t RawUnavail_32 = 0xFFFFFFFFu;
+
+    //! Entry words required to carry the deviation interval mean.
+    static const size_t DeviationMeanWords = 8;
+
+    //! Entry words required to carry the deviation interval max.
+    static const size_t DeviationMaxWords = 9;
+
+    //! Entry words required to carry the event count.
+    static const size_t EventCountWords = 10;
 
     XrStreamSnapshotEntry() {
         reset();
@@ -1810,6 +1843,9 @@ public:
         e2e_latency_.set_value(MetricUnavail_32);
         warp_ppb_ = core::hton32u((uint32_t)WarpUnavail);
         target_latency_.set_value(MetricUnavail_32);
+        deviation_mean_ns_ = core::hton32u(RawUnavail_32);
+        deviation_max_ns_ = core::hton32u(RawUnavail_32);
+        event_count_ = core::hton32u(RawUnavail_32);
     }
 
     //! Get grid index (snapshot sequence number on the sender CTS grid).
@@ -1907,6 +1943,63 @@ public:
         target_latency_.set_value(ntp_clamp_32(t, MetricUnavail_32 - 1));
     }
 
+    //! Check if interval-mean delay deviation is present and set.
+    //! @p entry_words is the on-wire entry size of the enclosing
+    //! block: entries shorter than the field's offset do not carry it.
+    bool has_deviation_mean(const size_t entry_words) const {
+        return entry_words >= DeviationMeanWords
+            && deviation_mean_ns() != RawUnavail_32;
+    }
+
+    //! Get delay deviation averaged over the grid interval, nanoseconds.
+    uint32_t deviation_mean_ns() const {
+        return core::ntoh32u(deviation_mean_ns_);
+    }
+
+    //! Set interval-mean delay deviation in nanoseconds (saturated).
+    void set_deviation_mean_ns(const uint64_t ns) {
+        deviation_mean_ns_ = core::hton32u(saturate_raw_(ns));
+    }
+
+    //! Check if interval-max delay deviation is present and set.
+    //! @p entry_words is the on-wire entry size of the enclosing block.
+    bool has_deviation_max(const size_t entry_words) const {
+        return entry_words >= DeviationMaxWords
+            && deviation_max_ns() != RawUnavail_32;
+    }
+
+    //! Get maximum delay deviation over the grid interval, nanoseconds.
+    uint32_t deviation_max_ns() const {
+        return core::ntoh32u(deviation_max_ns_);
+    }
+
+    //! Set interval-max delay deviation in nanoseconds (saturated).
+    void set_deviation_max_ns(const uint64_t ns) {
+        deviation_max_ns_ = core::hton32u(saturate_raw_(ns));
+    }
+
+    //! Check if delay event count is present and set.
+    //! @p entry_words is the on-wire entry size of the enclosing block.
+    bool has_event_count(const size_t entry_words) const {
+        return entry_words >= EventCountWords && event_count() != RawUnavail_32;
+    }
+
+    //! Get delay events closed during the grid interval.
+    uint32_t event_count() const {
+        return core::ntoh32u(event_count_);
+    }
+
+    //! Set delay event count (saturated).
+    void set_event_count(const uint64_t count) {
+        event_count_ = core::hton32u(saturate_raw_(count));
+    }
+
+private:
+    // Saturate a value just below the unavailable sentinel.
+    static uint32_t saturate_raw_(const uint64_t value) {
+        return value >= (uint64_t)RawUnavail_32 ? RawUnavail_32 - 1 : (uint32_t)value;
+    }
+
 } ROC_PACKED_END;
 
 //! XR Stream Snapshot Report Block.
@@ -1918,8 +2011,12 @@ public:
 //! loss robustness.
 //!
 //! Versioning: the low 4 bits of type-specific carry the block version
-//! (currently 1). Entries may grow in later versions: parsers must
-//! stride by the on-wire entry size and read only the prefix they know.
+//! (currently 1), reserved for changes in the SEMANTICS of existing
+//! fields. Entry growth is NOT a version change: the block carries the
+//! on-wire entry size, parsers stride by it, read the prefix they
+//! know, and treat fields beyond the received entry size as
+//! unavailable. Mixed peers therefore interoperate in both directions,
+//! as long as entries keep at least the seven-word minimum prefix.
 //!
 //! @code
 //!  0                   1                   2                   3
@@ -1957,6 +2054,12 @@ public:
 
     //! Number of 32-bit words per entry written by this implementation.
     static const size_t EntryWords = sizeof(XrStreamSnapshotEntry) / 4;
+
+    //! Minimum acceptable on-wire entry size in 32-bit words: the
+    //! seven-word prefix through Target Latency. Fields beyond a
+    //! peer's entry size are unavailable, so larger entries need no
+    //! version change; smaller ones lack the prefix and are rejected.
+    static const size_t MinEntryWords = 7;
 
     //! Maximum entries carried in one block.
     static const size_t MaxEntries = 4;

@@ -412,8 +412,10 @@ TEST(headers, metrics) {
 TEST(headers, stream_snapshot) {
     { // block sizes are wire-format constants
         CHECK_EQUAL(16, sizeof(header::XrStreamSnapshotBlock));
-        CHECK_EQUAL(28, sizeof(header::XrStreamSnapshotEntry));
-        CHECK_EQUAL(7, header::XrStreamSnapshotBlock::EntryWords);
+        CHECK_EQUAL(40, sizeof(header::XrStreamSnapshotEntry));
+        CHECK_EQUAL(10, header::XrStreamSnapshotBlock::EntryWords);
+        CHECK_EQUAL(7, header::XrStreamSnapshotBlock::MinEntryWords);
+        CHECK_EQUAL(1, header::XrStreamSnapshotBlock::Version);
     }
     { // fixed part defaults and fields
         header::XrStreamSnapshotBlock blk;
@@ -509,6 +511,64 @@ TEST(headers, stream_snapshot) {
 
         e.reset();
         CHECK(!e.has_warp());
+    }
+    { // entry: raw uint32 delay fields with sentinel + saturation
+        const size_t full = header::XrStreamSnapshotBlock::EntryWords;
+
+        header::XrStreamSnapshotEntry e;
+
+        CHECK(!e.has_deviation_mean(full));
+        CHECK(!e.has_deviation_max(full));
+        CHECK(!e.has_event_count(full));
+
+        e.set_deviation_mean_ns(1234567);
+        CHECK(e.has_deviation_mean(full));
+        CHECK_EQUAL(1234567, e.deviation_mean_ns());
+
+        // Exact nanoseconds: no NTP32 quantization.
+        e.set_deviation_max_ns(1);
+        CHECK(e.has_deviation_max(full));
+        CHECK_EQUAL(1, e.deviation_max_ns());
+
+        // Saturation just below the sentinel.
+        e.set_deviation_max_ns((uint64_t)10 * 1000000000ull);
+        CHECK(e.has_deviation_max(full));
+        CHECK_EQUAL(0xFFFFFFFE, e.deviation_max_ns());
+
+        e.set_event_count(0);
+        CHECK(e.has_event_count(full));
+        CHECK_EQUAL(0, e.event_count());
+
+        e.set_event_count(0xFFFFFFFFFFFFFFFFull);
+        CHECK(e.has_event_count(full));
+        CHECK_EQUAL(0xFFFFFFFE, e.event_count());
+
+        e.reset();
+        CHECK(!e.has_deviation_mean(full));
+        CHECK(!e.has_deviation_max(full));
+        CHECK(!e.has_event_count(full));
+    }
+    { // entry: delay fields bounded by the on-wire entry size
+        header::XrStreamSnapshotEntry e;
+
+        // All three set in memory; availability still follows the
+        // received entry size word by word.
+        e.set_deviation_mean_ns(1);
+        e.set_deviation_max_ns(2);
+        e.set_event_count(3);
+
+        CHECK(!e.has_deviation_mean(header::XrStreamSnapshotBlock::MinEntryWords));
+        CHECK(!e.has_deviation_max(header::XrStreamSnapshotBlock::MinEntryWords));
+        CHECK(!e.has_event_count(header::XrStreamSnapshotBlock::MinEntryWords));
+
+        CHECK(e.has_deviation_mean(header::XrStreamSnapshotEntry::DeviationMeanWords));
+        CHECK(!e.has_deviation_max(header::XrStreamSnapshotEntry::DeviationMeanWords));
+        CHECK(!e.has_event_count(header::XrStreamSnapshotEntry::DeviationMeanWords));
+
+        CHECK(e.has_deviation_max(header::XrStreamSnapshotEntry::DeviationMaxWords));
+        CHECK(!e.has_event_count(header::XrStreamSnapshotEntry::DeviationMaxWords));
+
+        CHECK(e.has_event_count(header::XrStreamSnapshotEntry::EventCountWords));
     }
 }
 

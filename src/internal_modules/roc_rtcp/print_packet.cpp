@@ -227,6 +227,12 @@ void print_xr_stream_snapshot(core::Printer& p,
                  (unsigned long long)e.e2e_latency(), (long)e.warp_ppb());
         p.writef("|---- target_latency: %016llx\n",
                  (unsigned long long)e.target_latency());
+        if (blk.entry_words() >= header::XrStreamSnapshotEntry::EventCountWords) {
+            p.writef(
+                "|---- deviation_mean_ns: %lu deviation_max_ns: %lu event_count: %lu\n",
+                (unsigned long)e.deviation_mean_ns(),
+                (unsigned long)e.deviation_max_ns(), (unsigned long)e.event_count());
+        }
     }
 }
 

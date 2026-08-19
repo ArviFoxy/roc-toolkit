@@ -865,6 +865,9 @@ TEST(builder_traverser, xr_stream_snapshot_batches) {
     header::XrStreamSnapshotEntry entries_1[1];
     entries_1[0].set_grid_index(9001);
     entries_1[0].set_niq_instant(0xC300000);
+    entries_1[0].set_deviation_mean_ns(150000);
+    entries_1[0].set_deviation_max_ns(2500000);
+    entries_1[0].set_event_count(3);
 
     header::XrStreamSnapshotBlock snap_4;
     snap_4.set_ssrc(703);
@@ -924,15 +927,29 @@ TEST(builder_traverser, xr_stream_snapshot_batches) {
     CHECK_EQUAL(9001, xr_it.get_stream_snapshot().entry(0).grid_index());
     CHECK_EQUAL(0xC300000, xr_it.get_stream_snapshot().entry(0).niq_instant());
     CHECK(!xr_it.get_stream_snapshot().entry(0).has_warp());
+    // Full-size (10-word) entries round-trip the delay fields.
+    const size_t words_702 = xr_it.get_stream_snapshot().entry_words();
+    CHECK_EQUAL(header::XrStreamSnapshotBlock::EntryWords, words_702);
+    CHECK(xr_it.get_stream_snapshot().entry(0).has_deviation_mean(words_702));
+    CHECK_EQUAL(150000, xr_it.get_stream_snapshot().entry(0).deviation_mean_ns());
+    CHECK(xr_it.get_stream_snapshot().entry(0).has_deviation_max(words_702));
+    CHECK_EQUAL(2500000, xr_it.get_stream_snapshot().entry(0).deviation_max_ns());
+    CHECK(xr_it.get_stream_snapshot().entry(0).has_event_count(words_702));
+    CHECK_EQUAL(3, xr_it.get_stream_snapshot().entry(0).event_count());
 
     CHECK_EQUAL(XrTraverser::Iterator::STREAM_SNAPSHOT_BLOCK, xr_it.next());
     CHECK_EQUAL(703, xr_it.get_stream_snapshot().ssrc());
     CHECK_EQUAL(header::XrStreamSnapshotBlock::MaxEntries,
                 xr_it.get_stream_snapshot().n_entries());
+    const size_t words_703 = xr_it.get_stream_snapshot().entry_words();
     for (size_t n = 0; n < header::XrStreamSnapshotBlock::MaxEntries; n++) {
         CHECK_EQUAL(9100 + n, xr_it.get_stream_snapshot().entry(n).grid_index());
         CHECK_EQUAL((int32_t)n * 1000 - 2000,
                     xr_it.get_stream_snapshot().entry(n).warp_ppb());
+        // Untouched delay fields survive the trip as sentinels.
+        CHECK(!xr_it.get_stream_snapshot().entry(n).has_deviation_mean(words_703));
+        CHECK(!xr_it.get_stream_snapshot().entry(n).has_deviation_max(words_703));
+        CHECK(!xr_it.get_stream_snapshot().entry(n).has_event_count(words_703));
     }
 
     CHECK_EQUAL(XrTraverser::Iterator::END, xr_it.next());
@@ -979,9 +996,9 @@ TEST(builder_traverser, xr_stream_snapshot_forward_compat) {
     builder.end_xr();
     CHECK(builder.is_ok());
 
-    // Hand-append a grown snapshot block to the XR packet: entry_words=11
-    // (two extra words per entry), one entry.
-    const size_t grown_entry_words = 9;
+    // Hand-append a grown snapshot block to the XR packet: two extra
+    // words per entry, one entry.
+    const size_t grown_entry_words = header::XrStreamSnapshotBlock::EntryWords + 2;
     const size_t grown_size =
         sizeof(header::XrStreamSnapshotBlock) + grown_entry_words * 4;
 
@@ -1069,6 +1086,52 @@ TEST(builder_traverser, xr_stream_snapshot_forward_compat) {
 
         XrTraverser::Iterator xr_it = pxr.iter();
         CHECK_EQUAL(XrTraverser::Iterator::RRTR_BLOCK, xr_it.next());
+        CHECK_EQUAL(XrTraverser::Iterator::END, xr_it.next());
+        CHECK_FALSE(xr_it.error());
+    }
+
+    // A block with minimum (7-word) entries, as an older peer sends
+    // them: accepted, the prefix fields are readable, and the three
+    // delay fields report unavailable because the entry is shorter
+    // than their offsets. This pins the compatibility stance: mixed
+    // entry sizes interoperate in both directions.
+    {
+        const size_t old_entry_words = header::XrStreamSnapshotBlock::MinEntryWords;
+
+        header::XrStreamSnapshotBlock* on_wire =
+            (header::XrStreamSnapshotBlock*)&buff[old_size];
+        on_wire->set_version(header::XrStreamSnapshotBlock::Version);
+        on_wire->set_entry_words(old_entry_words);
+        on_wire->set_n_entries(1);
+        // Keep the on-wire length as-is: it is larger than the 7-word
+        // block needs, which the `<' length checks tolerate.
+
+        Traverser traverser(buff);
+        CHECK(traverser.parse());
+
+        Traverser::Iterator it = traverser.iter();
+        CHECK_EQUAL(Traverser::Iterator::RR, it.next());
+        CHECK_EQUAL(Traverser::Iterator::SDES, it.next());
+        CHECK_EQUAL(Traverser::Iterator::XR, it.next());
+
+        XrTraverser pxr = it.get_xr();
+        CHECK(pxr.parse());
+
+        XrTraverser::Iterator xr_it = pxr.iter();
+        CHECK_EQUAL(XrTraverser::Iterator::RRTR_BLOCK, xr_it.next());
+        CHECK_EQUAL(XrTraverser::Iterator::STREAM_SNAPSHOT_BLOCK, xr_it.next());
+
+        CHECK_EQUAL(801, xr_it.get_stream_snapshot().ssrc());
+        CHECK_EQUAL(old_entry_words, xr_it.get_stream_snapshot().entry_words());
+        CHECK_EQUAL(1, xr_it.get_stream_snapshot().n_entries());
+        CHECK_EQUAL(9500, xr_it.get_stream_snapshot().entry(0).grid_index());
+        CHECK_EQUAL(0xD200000, xr_it.get_stream_snapshot().entry(0).niq_mean());
+        CHECK(!xr_it.get_stream_snapshot().entry(0).has_deviation_mean(
+            old_entry_words));
+        CHECK(
+            !xr_it.get_stream_snapshot().entry(0).has_deviation_max(old_entry_words));
+        CHECK(!xr_it.get_stream_snapshot().entry(0).has_event_count(old_entry_words));
+
         CHECK_EQUAL(XrTraverser::Iterator::END, xr_it.next());
         CHECK_FALSE(xr_it.error());
     }
