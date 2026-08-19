@@ -53,8 +53,11 @@ ReceiverSession::ReceiverSession(const ReceiverSessionConfig& session_config,
     }
     pkt_writer = source_queue_.get();
 
+    // Only the source meter measures arrival delay: repair packets have
+    // no own schedule on the media timeline.
     source_meter_.reset(new (source_meter_) rtp::LinkMeter(
-        *pkt_writer, session_config.jitter_meter, encoding_map, arena, dumper_));
+        *pkt_writer, session_config.jitter_meter, &session_config.delay_meter,
+        encoding_map, arena, dumper_));
     if ((init_status_ = source_meter_->init_status()) != status::StatusOK) {
         return;
     }
@@ -117,7 +120,7 @@ ReceiverSession::ReceiverSession(const ReceiverSessionConfig& session_config,
         repair_pkt_writer = repair_queue_.get();
 
         repair_meter_.reset(new (repair_meter_) rtp::LinkMeter(
-            *repair_pkt_writer, session_config.jitter_meter, encoding_map, arena,
+            *repair_pkt_writer, session_config.jitter_meter, NULL, encoding_map, arena,
             dumper_));
         if ((init_status_ = repair_meter_->init_status()) != status::StatusOK) {
             return;

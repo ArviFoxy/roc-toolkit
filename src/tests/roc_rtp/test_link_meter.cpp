@@ -82,7 +82,7 @@ TEST_GROUP(link_meter) {};
 
 TEST(link_meter, has_metrics) {
     packet::FifoQueue queue;
-    LinkMeter meter(queue, make_config(), encoding_map, arena, NULL);
+    LinkMeter meter(queue, make_config(), NULL, encoding_map, arena, NULL);
 
     CHECK(!meter.has_metrics());
 
@@ -94,7 +94,7 @@ TEST(link_meter, has_metrics) {
 
 TEST(link_meter, last_seqnum) {
     packet::FifoQueue queue;
-    LinkMeter meter(queue, make_config(), encoding_map, arena, NULL);
+    LinkMeter meter(queue, make_config(), NULL, encoding_map, arena, NULL);
 
     core::nanoseconds_t qts = qts_start;
     packet::stream_timestamp_t sts = sts_start;
@@ -126,7 +126,7 @@ TEST(link_meter, last_seqnum) {
 
 TEST(link_meter, last_seqnum_wrap) {
     packet::FifoQueue queue;
-    LinkMeter meter(queue, make_config(), encoding_map, arena, NULL);
+    LinkMeter meter(queue, make_config(), NULL, encoding_map, arena, NULL);
 
     core::nanoseconds_t qts = qts_start;
     packet::stream_timestamp_t sts = sts_start;
@@ -167,7 +167,7 @@ TEST(link_meter, last_seqnum_wrap) {
 
 TEST(link_meter, jitter_test) {
     packet::FifoQueue queue;
-    LinkMeter meter(queue, make_config(), encoding_map, arena, NULL);
+    LinkMeter meter(queue, make_config(), NULL, encoding_map, arena, NULL);
 
     const size_t num_packets = Duration * 100;
     core::nanoseconds_t ts_store[num_packets];
@@ -218,7 +218,7 @@ TEST(link_meter, jitter_test) {
 
 TEST(link_meter, ascending_test) {
     packet::FifoQueue queue;
-    LinkMeter meter(queue, make_config(), encoding_map, arena, NULL);
+    LinkMeter meter(queue, make_config(), NULL, encoding_map, arena, NULL);
 
     const size_t num_packets = Duration * 100;
     core::nanoseconds_t ts_store[num_packets];
@@ -252,7 +252,7 @@ TEST(link_meter, ascending_test) {
 
 TEST(link_meter, descending_test) {
     packet::FifoQueue queue;
-    LinkMeter meter(queue, make_config(), encoding_map, arena, NULL);
+    LinkMeter meter(queue, make_config(), NULL, encoding_map, arena, NULL);
 
     const size_t num_packets = Duration * 100;
     core::nanoseconds_t ts_store[num_packets];
@@ -286,7 +286,7 @@ TEST(link_meter, descending_test) {
 
 TEST(link_meter, saw_test) {
     packet::FifoQueue queue;
-    LinkMeter meter(queue, make_config(), encoding_map, arena, NULL);
+    LinkMeter meter(queue, make_config(), NULL, encoding_map, arena, NULL);
 
     const size_t num_packets = Duration * 100;
     core::nanoseconds_t ts_store[num_packets];
@@ -324,7 +324,7 @@ TEST(link_meter, saw_test) {
 
 TEST(link_meter, losses_test) {
     packet::FifoQueue queue;
-    LinkMeter meter(queue, make_config(), encoding_map, arena, NULL);
+    LinkMeter meter(queue, make_config(), NULL, encoding_map, arena, NULL);
 
     const size_t num_packets = Duration * 2 * (1 << 16);
     int64_t total_losses = 0;
@@ -360,7 +360,7 @@ TEST(link_meter, losses_test) {
 
 TEST(link_meter, total_counter) {
     packet::FifoQueue queue;
-    LinkMeter meter(queue, make_config(), encoding_map, arena, NULL);
+    LinkMeter meter(queue, make_config(), NULL, encoding_map, arena, NULL);
 
     core::nanoseconds_t ts = qts_start;
     packet::stream_timestamp_t sts = sts_start;
@@ -392,11 +392,129 @@ TEST(link_meter, forward_error) {
 
     for (size_t st_n = 0; st_n < ROC_ARRAY_SIZE(status_list); st_n++) {
         test::StatusWriter writer(status_list[st_n]);
-        LinkMeter meter(writer, make_config(), encoding_map, arena, NULL);
+        LinkMeter meter(writer, make_config(), NULL, encoding_map, arena, NULL);
 
         LONGS_EQUAL(status_list[st_n],
                     meter.write(new_packet(100, qts_start, sts_start)));
     }
+}
+
+TEST(link_meter, delay_meter_disabled) {
+    packet::FifoQueue queue;
+    LinkMeter meter(queue, make_config(), NULL, encoding_map, arena, NULL);
+    LONGS_EQUAL(status::StatusOK, meter.init_status());
+
+    POINTERS_EQUAL(NULL, meter.delay_meter());
+
+    core::nanoseconds_t qts = qts_start;
+    packet::stream_timestamp_t sts = sts_start;
+    for (packet::seqnum_t sn = 0; sn < 10; sn++) {
+        LONGS_EQUAL(status::StatusOK, meter.write(new_packet(sn, qts, sts)));
+        qts += qts_step;
+        sts += sts_step;
+    }
+    POINTERS_EQUAL(NULL, meter.delay_meter());
+}
+
+TEST(link_meter, delay_level_flat) {
+    packet::FifoQueue queue;
+    audio::ArrivalDelayMeterConfig delay_config;
+    LinkMeter meter(queue, make_config(), &delay_config, encoding_map, arena, NULL);
+    LONGS_EQUAL(status::StatusOK, meter.init_status());
+
+    CHECK(meter.delay_meter() != NULL);
+
+    // Arrival spacing equals stream spacing: the level stays near zero
+    // (only per-advance rounding of the stream-to-nanoseconds
+    // conversion remains).
+    core::nanoseconds_t qts = qts_start;
+    packet::stream_timestamp_t sts = sts_start;
+    for (packet::seqnum_t sn = 0; sn < 200; sn++) {
+        LONGS_EQUAL(status::StatusOK, meter.write(new_packet(sn, qts, sts)));
+        qts += qts_step;
+        sts += sts_step;
+    }
+
+    const audio::ArrivalDelayMetrics& metrics = meter.delay_meter()->metrics();
+    CHECK(metrics.curr_deviation < 10 * core::Microsecond);
+    CHECK(metrics.baseline > -10 * core::Microsecond);
+    CHECK(metrics.baseline < 10 * core::Microsecond);
+}
+
+TEST(link_meter, delay_level_late_packet) {
+    packet::FifoQueue queue;
+    audio::ArrivalDelayMeterConfig delay_config;
+    LinkMeter meter(queue, make_config(), &delay_config, encoding_map, arena, NULL);
+    LONGS_EQUAL(status::StatusOK, meter.init_status());
+
+    core::nanoseconds_t qts = qts_start;
+    packet::stream_timestamp_t sts = sts_start;
+    packet::seqnum_t sn = 0;
+    for (; sn < 100; sn++) {
+        LONGS_EQUAL(status::StatusOK, meter.write(new_packet(sn, qts, sts)));
+        qts += qts_step;
+        sts += sts_step;
+    }
+
+    // A packet delayed by 5 ms on the wire: same schedule, late arrival.
+    const core::nanoseconds_t lateness = 5 * core::Millisecond;
+    LONGS_EQUAL(status::StatusOK,
+                meter.write(new_packet(sn, qts + lateness, sts)));
+
+    const audio::ArrivalDelayMetrics& metrics = meter.delay_meter()->metrics();
+    CHECK(metrics.curr_deviation > lateness - 100 * core::Microsecond);
+    CHECK(metrics.curr_deviation < lateness + 100 * core::Microsecond);
+}
+
+TEST(link_meter, delay_level_reordered_packet) {
+    packet::FifoQueue queue;
+    audio::ArrivalDelayMeterConfig delay_config;
+    LinkMeter meter(queue, make_config(), &delay_config, encoding_map, arena, NULL);
+    LONGS_EQUAL(status::StatusOK, meter.init_status());
+
+    core::nanoseconds_t qts = qts_start;
+    packet::stream_timestamp_t sts = sts_start;
+    packet::seqnum_t sn = 0;
+    for (; sn < 100; sn++) {
+        LONGS_EQUAL(status::StatusOK, meter.write(new_packet(sn, qts, sts)));
+        qts += qts_step;
+        sts += sts_step;
+    }
+
+    // A reordered packet: stream position 3 packets back, arriving now.
+    // Its deviation is its own lateness (3 periods); the anchors must
+    // not move, so the next in-order packet is back at level zero.
+    LONGS_EQUAL(status::StatusOK,
+                meter.write(new_packet(sn - 3, qts, sts - 3 * sts_step)));
+
+    const audio::ArrivalDelayMetrics& metrics = meter.delay_meter()->metrics();
+    CHECK(metrics.curr_deviation > 3 * qts_step - 100 * core::Microsecond);
+    CHECK(metrics.curr_deviation < 3 * qts_step + 100 * core::Microsecond);
+
+    LONGS_EQUAL(status::StatusOK, meter.write(new_packet(sn, qts, sts)));
+    CHECK(meter.delay_meter()->metrics().curr_deviation < 100 * core::Microsecond);
+}
+
+TEST(link_meter, delay_level_stream_timestamp_wrap) {
+    packet::FifoQueue queue;
+    audio::ArrivalDelayMeterConfig delay_config;
+    LinkMeter meter(queue, make_config(), &delay_config, encoding_map, arena, NULL);
+    LONGS_EQUAL(status::StatusOK, meter.init_status());
+
+    // Start close to the 32-bit stream timestamp wrap and cross it: the
+    // forward-advancing accumulator keeps the level near zero.
+    core::nanoseconds_t qts = qts_start;
+    packet::stream_timestamp_t sts = (packet::stream_timestamp_t)0 - 50 * sts_step;
+    for (packet::seqnum_t sn = 0; sn < 100; sn++) {
+        LONGS_EQUAL(status::StatusOK, meter.write(new_packet(sn, qts, sts)));
+        qts += qts_step;
+        sts += sts_step;
+    }
+
+    const audio::ArrivalDelayMetrics& metrics = meter.delay_meter()->metrics();
+    CHECK(metrics.curr_deviation < 10 * core::Microsecond);
+    CHECK(metrics.baseline > -10 * core::Microsecond);
+    CHECK(metrics.baseline < 10 * core::Microsecond);
 }
 
 } // namespace rtp

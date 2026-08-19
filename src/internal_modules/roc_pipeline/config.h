@@ -13,6 +13,7 @@
 #define ROC_PIPELINE_CONFIG_H_
 
 #include "roc_address/protocol.h"
+#include "roc_audio/arrival_delay_meter.h"
 #include "roc_audio/feedback_monitor.h"
 #include "roc_audio/jitter_meter.h"
 #include "roc_audio/latency_config.h"
@@ -251,6 +252,9 @@ struct ReceiverSessionConfig {
 
     //! Jitter meter parameters.
     audio::JitterMeterConfig jitter_meter;
+
+    //! Arrival delay meter parameters (source packet path only).
+    audio::ArrivalDelayMeterConfig delay_meter;
 
     //! Freq estimator parameters.
     audio::FreqEstimatorConfig freq_est;

@@ -12,10 +12,12 @@
 #ifndef ROC_RTP_LINK_METER_H_
 #define ROC_RTP_LINK_METER_H_
 
+#include "roc_audio/arrival_delay_meter.h"
 #include "roc_audio/jitter_meter.h"
 #include "roc_audio/sample_spec.h"
 #include "roc_core/iarena.h"
 #include "roc_core/noncopyable.h"
+#include "roc_core/optional.h"
 #include "roc_core/time.h"
 #include "roc_dbgio/csv_dumper.h"
 #include "roc_packet/ilink_meter.h"
@@ -43,14 +45,24 @@ class LinkMeter : public packet::ILinkMeter,
                   public core::NonCopyable<> {
 public:
     //! Initialize.
+    //! @p delay_config enables the arrival delay meter; NULL disables it.
+    //! The call site decides structurally: only the source (audio) meter
+    //! of a session carries a delay meter. The repair meter passes NULL,
+    //! both because repair packets have no own schedule on the media
+    //! timeline and because a second instance would alias the unlabeled
+    //! Prometheus series of the first.
     LinkMeter(packet::IWriter& writer,
               const audio::JitterMeterConfig& jitter_config,
+              const audio::ArrivalDelayMeterConfig* delay_config,
               const EncodingMap& encoding_map,
               core::IArena& arena,
               dbgio::CsvDumper* dumper);
 
     //! Check if the object was successfully constructed.
     status::StatusCode init_status() const;
+
+    //! Get arrival delay meter; NULL when disabled.
+    audio::ArrivalDelayMeter* delay_meter();
 
     //! Check if metrics are already gathered and can be reported.
     virtual bool has_metrics() const;
@@ -80,7 +92,8 @@ private:
     void update_metrics_(const packet::Packet& packet);
 
     void update_seqnums_(const packet::Packet& packet);
-    void update_jitter_(const packet::Packet& packet);
+    void update_jitter_(const packet::Packet& packet, core::nanoseconds_t d_s_ns);
+    void update_delay_(const packet::Packet& packet, core::nanoseconds_t d_s_ns);
 
     void dump_(const packet::Packet& packet);
 
@@ -102,7 +115,21 @@ private:
     core::nanoseconds_t prev_queue_timestamp_;
     packet::stream_timestamp_t prev_stream_timestamp_;
 
+    // Arrival delay level reference: the delay level of a packet is
+    // (queue_timestamp - first_queue_timestamp_) minus the packet's
+    // stream position in nanoseconds relative to the first packet.
+    // The stream position is kept as a forward-advancing accumulator
+    // (stream_offset_ns_ is the position of the current anchor,
+    // prev_stream_timestamp_): advancing with the anchor avoids the
+    // wrap ambiguity of a fixed stream anchor, and the sub-ppm rounding
+    // bias of per-advance conversion is absorbed by the meter baseline.
+    core::nanoseconds_t first_queue_timestamp_;
+    int64_t stream_offset_ns_;
+
     audio::JitterMeter jitter_meter_;
+    core::Optional<audio::ArrivalDelayMeter> delay_meter_;
+
+    status::StatusCode init_status_;
 
     dbgio::CsvDumper* dumper_;
 
