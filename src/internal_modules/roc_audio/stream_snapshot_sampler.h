@@ -12,6 +12,7 @@
 #ifndef ROC_AUDIO_STREAM_SNAPSHOT_SAMPLER_H_
 #define ROC_AUDIO_STREAM_SNAPSHOT_SAMPLER_H_
 
+#include "roc_audio/arrival_delay_meter.h"
 #include "roc_audio/sample_spec.h"
 #include "roc_core/noncopyable.h"
 #include "roc_core/stddefs.h"
@@ -51,8 +52,11 @@ public:
     //! Initialize.
     //! @p grid_period is the grid step on the sender CTS timeline;
     //! zero disables the sampler entirely.
+    //! @p delay_meter supplies per-interval arrival delay statistics
+    //! for the snapshots; NULL leaves those fields unavailable.
     StreamSnapshotSampler(const SampleSpec& sample_spec,
-                          core::nanoseconds_t grid_period);
+                          core::nanoseconds_t grid_period,
+                          ArrivalDelayMeter* delay_meter);
 
     //! Check if sampling is enabled (non-zero grid period).
     bool is_enabled() const;
@@ -70,11 +74,21 @@ public:
     //! the current queue depth (negative if unavailable); @p e2e_latency
     //! and @p target_latency are negative if unavailable; @p freq_coeff
     //! is zero if not yet computed.
-    void process_read(packet::stream_timestamp_t position,
-                      core::nanoseconds_t niq_latency,
-                      core::nanoseconds_t e2e_latency,
-                      double freq_coeff,
-                      core::nanoseconds_t target_latency);
+    //! Returns the number of snapshots emitted by this read.
+    size_t process_read(packet::stream_timestamp_t position,
+                        core::nanoseconds_t niq_latency,
+                        core::nanoseconds_t e2e_latency,
+                        double freq_coeff,
+                        core::nanoseconds_t target_latency);
+
+    //! Queue drain depth of the last closed grid interval: interval
+    //! mean minus interval minimum of the queue depth. Negative when
+    //! no interval closed since the last (re)sync, or the last closed
+    //! interval had fewer than two accepted queue readings (one
+    //! reading makes mean minus min identically zero). A read that
+    //! returns a positive process_read() count closed exactly one
+    //! interval, and this is its drain.
+    core::nanoseconds_t last_interval_drain() const;
 
     //! Read up to @p max_snapshots snapshots, oldest first, newest last.
     //! Non-destructive; returns the number of snapshots copied.
@@ -84,13 +98,16 @@ private:
     void emit_(core::nanoseconds_t niq_latency,
                core::nanoseconds_t e2e_latency,
                double freq_coeff,
-               core::nanoseconds_t target_latency);
+               core::nanoseconds_t target_latency,
+               const ArrivalDelayIntervalStats& delay_stats);
     void resync_(core::nanoseconds_t cts_now);
     void update_rtp_cursor_();
     void reset_accum_();
 
     const SampleSpec sample_spec_;
     const core::nanoseconds_t grid_period_;
+
+    ArrivalDelayMeter* delay_meter_;
 
     packet::CaptureTimestampMapping mapping_;
 
@@ -105,6 +122,12 @@ private:
     // niq accumulation over the current grid interval.
     core::nanoseconds_t niq_accum_;
     size_t niq_accum_count_;
+    core::nanoseconds_t niq_min_;
+
+    // Drain depth of the last closed interval; -1 until an interval
+    // with at least two queue readings closed. Assigned at every
+    // interval close and reset on resync.
+    core::nanoseconds_t last_drain_;
 
     packet::StreamSnapshot ring_[MaxSnapshots];
     size_t ring_size_;

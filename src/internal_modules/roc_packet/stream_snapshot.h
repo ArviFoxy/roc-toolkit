@@ -58,6 +58,18 @@ struct StreamSnapshot {
     //! Target latency at the crossing; negative if unavailable.
     core::nanoseconds_t target_latency;
 
+    //! Arrival delay deviation averaged over the grid interval;
+    //! negative if unavailable.
+    core::nanoseconds_t deviation_mean;
+
+    //! Maximum arrival delay deviation over the grid interval;
+    //! negative if unavailable.
+    core::nanoseconds_t deviation_max;
+
+    //! Delay events closed during the grid interval;
+    //! negative if unavailable.
+    int64_t event_count;
+
     StreamSnapshot()
         : grid_index(0)
         , position(0)
@@ -66,7 +78,10 @@ struct StreamSnapshot {
         , e2e_latency(-1)
         , has_warp(false)
         , warp_ppb(0)
-        , target_latency(-1) {
+        , target_latency(-1)
+        , deviation_mean(-1)
+        , deviation_max(-1)
+        , event_count(-1) {
     }
 };
 

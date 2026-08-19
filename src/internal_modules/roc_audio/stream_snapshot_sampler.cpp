@@ -26,9 +26,11 @@ const int64_t MaxLagPeriods = 2;
 } // namespace
 
 StreamSnapshotSampler::StreamSnapshotSampler(const SampleSpec& sample_spec,
-                                             core::nanoseconds_t grid_period)
+                                             core::nanoseconds_t grid_period,
+                                             ArrivalDelayMeter* delay_meter)
     : sample_spec_(sample_spec)
     , grid_period_(grid_period)
+    , delay_meter_(delay_meter)
     , mapping_(sample_spec)
     , synced_(false)
     , next_grid_cts_(0)
@@ -39,6 +41,8 @@ StreamSnapshotSampler::StreamSnapshotSampler(const SampleSpec& sample_spec,
     , candidate_step_(0)
     , niq_accum_(0)
     , niq_accum_count_(0)
+    , niq_min_(0)
+    , last_drain_(-1)
     , ring_size_(0)
     , ring_head_(0) {
     roc_panic_if_msg(grid_period < 0, "stream snapshot sampler: negative grid period");
@@ -67,16 +71,19 @@ void StreamSnapshotSampler::update_mapping(core::nanoseconds_t capture_ts,
     }
 }
 
-void StreamSnapshotSampler::process_read(packet::stream_timestamp_t position,
-                                         core::nanoseconds_t niq_latency,
-                                         core::nanoseconds_t e2e_latency,
-                                         double freq_coeff,
-                                         core::nanoseconds_t target_latency) {
+size_t StreamSnapshotSampler::process_read(packet::stream_timestamp_t position,
+                                           core::nanoseconds_t niq_latency,
+                                           core::nanoseconds_t e2e_latency,
+                                           double freq_coeff,
+                                           core::nanoseconds_t target_latency) {
     if (!is_enabled() || !mapping_.has_mapping()) {
-        return;
+        return 0;
     }
 
     if (niq_latency >= 0) {
+        if (niq_accum_count_ == 0 || niq_latency < niq_min_) {
+            niq_min_ = niq_latency;
+        }
         niq_accum_ += niq_latency;
         niq_accum_count_++;
     }
@@ -85,14 +92,14 @@ void StreamSnapshotSampler::process_read(packet::stream_timestamp_t position,
     // compare; the nanosecond conversion below runs only on crossings
     // and on the first read after sync.
     if (synced_ && packet::stream_timestamp_lt(position, next_grid_rtp_)) {
-        return;
+        return 0;
     }
 
     // Position on the sender CTS timeline (wrap-safe RTP delta).
     const core::nanoseconds_t cts_now = mapping_.capture_ts(position);
 
     if (cts_now <= 0) {
-        return;
+        return 0;
     }
 
     // Discontinuity bound: larger of the grid scale and the LAST
@@ -139,9 +146,39 @@ void StreamSnapshotSampler::process_read(packet::stream_timestamp_t position,
         next_grid_cts_ += (pending - (int64_t)MaxSnapshots) * grid_period_;
     }
 
-    while (cts_now >= next_grid_cts_) {
-        emit_(niq_latency, e2e_latency, freq_coeff, target_latency);
-        next_grid_cts_ += grid_period_;
+    size_t n_emitted = 0;
+
+    if (cts_now >= next_grid_cts_) {
+        // The interval closes with this read. Pull-and-reset the delay
+        // statistics once. The meter accumulates at packet arrival and
+        // resets only here, so no spike between frame reads can be
+        // missed.
+        ArrivalDelayIntervalStats delay_stats;
+        if (delay_meter_) {
+            delay_meter_->take_interval_stats(delay_stats);
+        }
+
+        // Drain of the interval that closes with this read. Fewer than
+        // two accepted queue readings define no drain (one reading
+        // makes mean minus min identically zero), so such an interval
+        // yields no value.
+        if (niq_accum_count_ >= 2) {
+            last_drain_ = niq_accum_ / (core::nanoseconds_t)niq_accum_count_ - niq_min_;
+        } else {
+            last_drain_ = -1;
+        }
+
+        while (cts_now >= next_grid_cts_) {
+            emit_(niq_latency, e2e_latency, freq_coeff, target_latency, delay_stats);
+            // The delay statistics are extensive (sums and counts over
+            // the one closed interval): they ride in the first
+            // snapshot only, and the other crossings of a catch-up
+            // read carry the unavailable sentinels. Replicated copies
+            // would multiply-count events at the sender.
+            delay_stats = ArrivalDelayIntervalStats();
+            next_grid_cts_ += grid_period_;
+            n_emitted++;
+        }
     }
 
     if (ring_size_ > 0) {
@@ -151,6 +188,12 @@ void StreamSnapshotSampler::process_read(packet::stream_timestamp_t position,
     }
 
     update_rtp_cursor_();
+
+    return n_emitted;
+}
+
+core::nanoseconds_t StreamSnapshotSampler::last_interval_drain() const {
+    return last_drain_;
 }
 
 size_t StreamSnapshotSampler::get_snapshots(packet::StreamSnapshot* snapshots,
@@ -171,7 +214,8 @@ size_t StreamSnapshotSampler::get_snapshots(packet::StreamSnapshot* snapshots,
 void StreamSnapshotSampler::emit_(core::nanoseconds_t niq_latency,
                                   core::nanoseconds_t e2e_latency,
                                   double freq_coeff,
-                                  core::nanoseconds_t target_latency) {
+                                  core::nanoseconds_t target_latency,
+                                  const ArrivalDelayIntervalStats& delay_stats) {
     packet::StreamSnapshot snap;
 
     snap.grid_index = (uint32_t)(next_grid_cts_ / grid_period_);
@@ -190,6 +234,9 @@ void StreamSnapshotSampler::emit_(core::nanoseconds_t niq_latency,
         snap.warp_ppb = (int32_t)(ppb >= 0 ? ppb + 0.5 : ppb - 0.5);
     }
     snap.target_latency = target_latency >= 0 ? target_latency : -1;
+    snap.deviation_mean = delay_stats.deviation_mean;
+    snap.deviation_max = delay_stats.deviation_max;
+    snap.event_count = delay_stats.event_count;
 
     ring_[ring_head_] = snap;
     ring_head_ = (ring_head_ + 1) % MaxSnapshots;
@@ -201,6 +248,7 @@ void StreamSnapshotSampler::emit_(core::nanoseconds_t niq_latency,
 void StreamSnapshotSampler::resync_(core::nanoseconds_t cts_now) {
     synced_ = true;
     next_grid_cts_ = (cts_now / grid_period_ + 1) * grid_period_;
+    last_drain_ = -1;
     reset_accum_();
     update_rtp_cursor_();
 }
@@ -212,6 +260,7 @@ void StreamSnapshotSampler::update_rtp_cursor_() {
 void StreamSnapshotSampler::reset_accum_() {
     niq_accum_ = 0;
     niq_accum_count_ = 0;
+    niq_min_ = 0;
 }
 
 } // namespace audio

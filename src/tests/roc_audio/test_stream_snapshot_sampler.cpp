@@ -9,6 +9,7 @@
 #include <CppUTest/TestHarness.h>
 
 #include "roc_audio/stream_snapshot_sampler.h"
+#include "roc_core/heap_arena.h"
 #include "roc_core/time.h"
 
 namespace roc {
@@ -51,7 +52,7 @@ void feed_reads(StreamSnapshotSampler& sampler,
 TEST_GROUP(stream_snapshot_sampler) {};
 
 TEST(stream_snapshot_sampler, disabled) {
-    StreamSnapshotSampler sampler(sample_spec, 0);
+    StreamSnapshotSampler sampler(sample_spec, 0, NULL);
 
     CHECK(!sampler.is_enabled());
 
@@ -63,7 +64,7 @@ TEST(stream_snapshot_sampler, disabled) {
 }
 
 TEST(stream_snapshot_sampler, no_mapping_inert) {
-    StreamSnapshotSampler sampler(sample_spec, GridPeriod);
+    StreamSnapshotSampler sampler(sample_spec, GridPeriod, NULL);
 
     CHECK(sampler.is_enabled());
 
@@ -74,7 +75,7 @@ TEST(stream_snapshot_sampler, no_mapping_inert) {
 }
 
 TEST(stream_snapshot_sampler, basic_crossings) {
-    StreamSnapshotSampler sampler(sample_spec, GridPeriod);
+    StreamSnapshotSampler sampler(sample_spec, GridPeriod, NULL);
     sampler.update_mapping(MapCts, MapRtp);
 
     // Two full grid periods of reads with constant niq.
@@ -115,7 +116,7 @@ TEST(stream_snapshot_sampler, basic_crossings) {
 }
 
 TEST(stream_snapshot_sampler, niq_mean_averages_interval) {
-    StreamSnapshotSampler sampler(sample_spec, GridPeriod);
+    StreamSnapshotSampler sampler(sample_spec, GridPeriod, NULL);
     sampler.update_mapping(MapCts, MapRtp);
 
     // First partial interval reaches the first crossing.
@@ -143,7 +144,7 @@ TEST(stream_snapshot_sampler, niq_mean_averages_interval) {
 }
 
 TEST(stream_snapshot_sampler, ring_overwrites_oldest) {
-    StreamSnapshotSampler sampler(sample_spec, GridPeriod);
+    StreamSnapshotSampler sampler(sample_spec, GridPeriod, NULL);
     sampler.update_mapping(MapCts, MapRtp);
 
     // Seven crossings; ring keeps the last 4, oldest first.
@@ -161,7 +162,7 @@ TEST(stream_snapshot_sampler, ring_overwrites_oldest) {
 }
 
 TEST(stream_snapshot_sampler, metric_capture) {
-    StreamSnapshotSampler sampler(sample_spec, GridPeriod);
+    StreamSnapshotSampler sampler(sample_spec, GridPeriod, NULL);
     sampler.update_mapping(MapCts, MapRtp);
 
     for (packet::stream_timestamp_t pos = MapRtp;
@@ -180,7 +181,7 @@ TEST(stream_snapshot_sampler, metric_capture) {
 }
 
 TEST(stream_snapshot_sampler, negative_warp) {
-    StreamSnapshotSampler sampler(sample_spec, GridPeriod);
+    StreamSnapshotSampler sampler(sample_spec, GridPeriod, NULL);
     sampler.update_mapping(MapCts, MapRtp);
 
     for (packet::stream_timestamp_t pos = MapRtp;
@@ -196,7 +197,7 @@ TEST(stream_snapshot_sampler, negative_warp) {
 }
 
 TEST(stream_snapshot_sampler, discontinuity_resync) {
-    StreamSnapshotSampler sampler(sample_spec, GridPeriod);
+    StreamSnapshotSampler sampler(sample_spec, GridPeriod, NULL);
     sampler.update_mapping(MapCts, MapRtp);
 
     feed_reads(sampler, MapRtp, MapRtp + GridSamples + ReadSamples,
@@ -220,7 +221,7 @@ TEST(stream_snapshot_sampler, discontinuity_resync) {
 }
 
 TEST(stream_snapshot_sampler, mapping_update_small_shift) {
-    StreamSnapshotSampler sampler(sample_spec, GridPeriod);
+    StreamSnapshotSampler sampler(sample_spec, GridPeriod, NULL);
     sampler.update_mapping(MapCts, MapRtp);
 
     feed_reads(sampler, MapRtp, MapRtp + GridSamples + ReadSamples,
@@ -241,7 +242,7 @@ TEST(stream_snapshot_sampler, mapping_update_small_shift) {
 }
 
 TEST(stream_snapshot_sampler, rtp_wraparound) {
-    StreamSnapshotSampler sampler(sample_spec, GridPeriod);
+    StreamSnapshotSampler sampler(sample_spec, GridPeriod, NULL);
 
     // Anchor just below the 32-bit wrap; positions cross it.
     const packet::stream_timestamp_t wrap_rtp = (packet::stream_timestamp_t)-24000;
@@ -261,7 +262,7 @@ TEST(stream_snapshot_sampler, grid_smaller_than_read) {
     // grid points. The discontinuity guard must not fire, and the ring
     // fills with the newest crossings.
     const core::nanoseconds_t SmallGrid = 3 * core::Millisecond;
-    StreamSnapshotSampler sampler(sample_spec, SmallGrid);
+    StreamSnapshotSampler sampler(sample_spec, SmallGrid, NULL);
     sampler.update_mapping(MapCts, MapRtp);
 
     // 10ms reads for 200ms of stream.
@@ -283,11 +284,177 @@ TEST(stream_snapshot_sampler, grid_smaller_than_read) {
     }
 }
 
+TEST(stream_snapshot_sampler, process_read_returns_emitted_count) {
+    StreamSnapshotSampler sampler(sample_spec, GridPeriod, NULL);
+    sampler.update_mapping(MapCts, MapRtp);
+
+    // No crossing yet.
+    CHECK_EQUAL(0, sampler.process_read(MapRtp, core::Millisecond, -1, 0, -1));
+
+    // A read past the first grid point emits one snapshot.
+    CHECK_EQUAL(1,
+                sampler.process_read(MapRtp + GridSamples + ReadSamples,
+                                     core::Millisecond, -1, 0, -1));
+
+    // A read jumping two grid periods emits two.
+    CHECK_EQUAL(2,
+                sampler.process_read(MapRtp + GridSamples * 3 + ReadSamples,
+                                     core::Millisecond, -1, 0, -1));
+}
+
+TEST(stream_snapshot_sampler, drain_accumulation_and_reset) {
+    StreamSnapshotSampler sampler(sample_spec, GridPeriod, NULL);
+    sampler.update_mapping(MapCts, MapRtp);
+
+    // No interval closed yet: sentinel.
+    LONGLONGS_EQUAL(-1, sampler.last_interval_drain());
+
+    // Interval with queue depth varying between 2ms and 6ms, mean 4ms:
+    // drain = mean - min = 2ms.
+    packet::stream_timestamp_t pos = MapRtp;
+    size_t i = 0;
+    for (; pos < MapRtp + GridSamples + ReadSamples; pos += ReadSamples, i++) {
+        const core::nanoseconds_t niq =
+            i % 2 == 0 ? 2 * core::Millisecond : 6 * core::Millisecond;
+        sampler.process_read(pos, niq, -1, 0, -1);
+    }
+
+    CHECK(sampler.last_interval_drain() >= core::Millisecond);
+    CHECK(sampler.last_interval_drain() <= 3 * core::Millisecond);
+
+    // Next interval with constant depth: accumulation was reset, so
+    // the drain of the new interval is zero, not a mixture.
+    for (; pos < MapRtp + GridSamples * 2 + ReadSamples; pos += ReadSamples) {
+        sampler.process_read(pos, 5 * core::Millisecond, -1, 0, -1);
+    }
+    LONGLONGS_EQUAL(0, sampler.last_interval_drain());
+}
+
+TEST(stream_snapshot_sampler, drain_starved_interval_no_value) {
+    StreamSnapshotSampler sampler(sample_spec, GridPeriod, NULL);
+    sampler.update_mapping(MapCts, MapRtp);
+
+    // Healthy interval first.
+    packet::stream_timestamp_t pos = MapRtp;
+    for (; pos < MapRtp + GridSamples + ReadSamples; pos += ReadSamples) {
+        sampler.process_read(pos, 5 * core::Millisecond, -1, 0, -1);
+    }
+    CHECK(sampler.last_interval_drain() >= 0);
+
+    // An interval whose reads carry no queue depth closes with no
+    // drain value: the healthy interval's value is not republished.
+    for (; pos < MapRtp + GridSamples * 2 + ReadSamples; pos += ReadSamples) {
+        sampler.process_read(pos, -1, -1, 0, -1);
+    }
+    LONGLONGS_EQUAL(-1, sampler.last_interval_drain());
+}
+
+TEST(stream_snapshot_sampler, drain_needs_two_readings) {
+    // Grid period below the read step: each interval sees at most one
+    // queue reading, and one reading makes mean minus min identically
+    // zero. Such intervals yield no drain value.
+    const core::nanoseconds_t SmallGrid = 3 * core::Millisecond;
+    StreamSnapshotSampler sampler(sample_spec, SmallGrid, NULL);
+    sampler.update_mapping(MapCts, MapRtp);
+
+    const packet::stream_timestamp_t BigRead = SampleRate / 100;
+    for (packet::stream_timestamp_t off = 0; off < SampleRate / 5; off += BigRead) {
+        sampler.process_read(MapRtp + off, core::Millisecond, -1, 0, -1);
+    }
+    LONGLONGS_EQUAL(-1, sampler.last_interval_drain());
+}
+
+TEST(stream_snapshot_sampler, delay_stats_stamped_and_reset) {
+    core::HeapArena arena;
+    ArrivalDelayMeterConfig meter_config;
+    ArrivalDelayMeter meter(meter_config, arena);
+    LONGS_EQUAL(status::StatusOK, meter.init_status());
+
+    StreamSnapshotSampler sampler(sample_spec, GridPeriod, &meter);
+    sampler.update_mapping(MapCts, MapRtp);
+
+    // Packet path: constant 2ms deviation charged into the meter.
+    // (The meter baseline starts empty, so the first update pins it
+    // and later updates deviate from it.)
+    meter.update_delay(0, core::Millisecond);
+    for (size_t i = 0; i < 10; i++) {
+        meter.update_delay(2 * core::Millisecond, 0);
+    }
+
+    // Frame path: one grid crossing pulls the interval statistics.
+    feed_reads(sampler, MapRtp, MapRtp + GridSamples + ReadSamples,
+               core::Millisecond);
+
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    CHECK_EQUAL(1, sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots));
+
+    CHECK(snaps[0].deviation_mean > core::Millisecond);
+    CHECK(snaps[0].deviation_max >= 2 * core::Millisecond - 100 * core::Microsecond);
+    LONGLONGS_EQUAL(0, snaps[0].event_count);
+
+    // The pull reset the meter interval: a crossing with no packets in
+    // between carries sentinels.
+    feed_reads(sampler, MapRtp + GridSamples + ReadSamples,
+               MapRtp + GridSamples * 2 + ReadSamples, core::Millisecond);
+    CHECK_EQUAL(2, sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots));
+    LONGLONGS_EQUAL(-1, snaps[1].deviation_mean);
+    LONGLONGS_EQUAL(-1, snaps[1].deviation_max);
+    LONGLONGS_EQUAL(-1, snaps[1].event_count);
+}
+
+TEST(stream_snapshot_sampler, delay_stats_first_snapshot_of_read_only) {
+    core::HeapArena arena;
+    ArrivalDelayMeterConfig meter_config;
+    ArrivalDelayMeter meter(meter_config, arena);
+    LONGS_EQUAL(status::StatusOK, meter.init_status());
+
+    const core::nanoseconds_t SmallGrid = 100 * core::Millisecond;
+    StreamSnapshotSampler sampler(sample_spec, SmallGrid, &meter);
+    sampler.update_mapping(MapCts, MapRtp);
+
+    meter.update_delay(0, core::Millisecond);
+    meter.update_delay(3 * core::Millisecond, 0);
+
+    sampler.process_read(MapRtp, core::Millisecond, -1, 0, -1);
+    // One read jumping two grid periods: the delay statistics are
+    // extensive over the one closed interval, so only the first
+    // snapshot carries them and the rest carry sentinels (a replicated
+    // event count would be counted per row at the sender).
+    sampler.process_read(MapRtp + SampleRate / 5 + ReadSamples, core::Millisecond, -1,
+                         0, -1);
+
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    const size_t n = sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots);
+    CHECK(n >= 2);
+    CHECK(snaps[0].deviation_mean >= 0);
+    CHECK(snaps[0].deviation_max >= 0);
+    LONGLONGS_EQUAL(0, snaps[0].event_count);
+    for (size_t i = 1; i < n; i++) {
+        LONGLONGS_EQUAL(-1, snaps[i].deviation_mean);
+        LONGLONGS_EQUAL(-1, snaps[i].deviation_max);
+        LONGLONGS_EQUAL(-1, snaps[i].event_count);
+    }
+}
+
+TEST(stream_snapshot_sampler, null_meter_sentinels) {
+    StreamSnapshotSampler sampler(sample_spec, GridPeriod, NULL);
+    sampler.update_mapping(MapCts, MapRtp);
+
+    feed_reads(sampler, MapRtp, MapRtp + GridSamples + ReadSamples,
+               core::Millisecond);
+
+    packet::StreamSnapshot snaps[StreamSnapshotSampler::MaxSnapshots];
+    CHECK_EQUAL(1, sampler.get_snapshots(snaps, StreamSnapshotSampler::MaxSnapshots));
+    LONGLONGS_EQUAL(-1, snaps[0].deviation_mean);
+    LONGLONGS_EQUAL(-1, snaps[0].deviation_max);
+    LONGLONGS_EQUAL(-1, snaps[0].event_count);
+}
+
 TEST(stream_snapshot_sampler, shared_mean_on_multi_crossing) {
     // Two grid points crossed by one read: both snapshots carry the
     // same interval mean; neither is unavailable.
     const core::nanoseconds_t SmallGrid = 100 * core::Millisecond;
-    StreamSnapshotSampler sampler(sample_spec, SmallGrid);
+    StreamSnapshotSampler sampler(sample_spec, SmallGrid, NULL);
     sampler.update_mapping(MapCts, MapRtp);
 
     sampler.process_read(MapRtp, 2 * core::Millisecond, -1, 0, -1);

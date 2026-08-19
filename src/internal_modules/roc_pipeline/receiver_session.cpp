@@ -275,8 +275,9 @@ ReceiverSession::ReceiverSession(const ReceiverSessionConfig& session_config,
 
         latency_monitor_.reset(new (latency_monitor_) audio::LatencyMonitor(
             *frm_reader, *source_queue_, *depacketizer_, *source_meter_,
-            fec_reader_.get(), resampler_reader_.get(), session_config.latency,
-            session_config.freq_est, pkt_encoding->sample_spec, inout_spec, dumper_));
+            source_meter_->delay_meter(), fec_reader_.get(), resampler_reader_.get(),
+            session_config.latency, session_config.freq_est, pkt_encoding->sample_spec,
+            inout_spec, dumper_));
         if ((init_status_ = latency_monitor_->init_status()) != status::StatusOK) {
             return;
         }

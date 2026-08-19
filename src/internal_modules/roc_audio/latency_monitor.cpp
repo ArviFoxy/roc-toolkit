@@ -24,6 +24,7 @@ LatencyMonitor::LatencyMonitor(IFrameReader& frame_reader,
                                const packet::SortedQueue& incoming_queue,
                                const Depacketizer& depacketizer,
                                const packet::ILinkMeter& link_meter,
+                               ArrivalDelayMeter* delay_meter,
                                const fec::BlockReader* fec_reader,
                                ResamplerReader* resampler,
                                const LatencyConfig& latency_config,
@@ -32,7 +33,7 @@ LatencyMonitor::LatencyMonitor(IFrameReader& frame_reader,
                                const SampleSpec& frame_sample_spec,
                                dbgio::CsvDumper* dumper)
     : tuner_(latency_config, fe_config, frame_sample_spec, dumper)
-    , snapshot_sampler_(packet_sample_spec, latency_config.snapshot_grid)
+    , snapshot_sampler_(packet_sample_spec, latency_config.snapshot_grid, delay_meter)
     , frame_reader_(frame_reader)
     , incoming_queue_(incoming_queue)
     , depacketizer_(depacketizer)
@@ -64,6 +65,19 @@ LatencyMonitor::LatencyMonitor(IFrameReader& frame_reader,
                            .Register(*registry);
     e2e_latency_histogram_ = &e2e_family.Add(
         { }, metrics::generate_histogram_buckets(latency_config.prometheus.e2e_latency));
+
+    const prometheus::Labels drain_labels =
+        metrics::scope_labels(latency_config.prometheus.scope);
+    auto& drain_family =
+        prometheus::BuildHistogram()
+            .Name(metrics::scope_metric_name(latency_config.prometheus.scope,
+                                             "queue_drain_seconds"))
+            .Help("Queue drain depth per snapshot grid interval, in seconds:"
+                  " interval mean minus interval minimum of the queue depth")
+            .Register(*registry);
+    queue_drain_histogram_ = &drain_family.Add(
+        drain_labels,
+        metrics::generate_histogram_buckets(latency_config.prometheus.queue_drain));
 
     niq_stalling_gauge_ = &prometheus::BuildGauge()
                                .Name("roc_recv_niq_stalling_seconds")
@@ -107,10 +121,22 @@ status::StatusCode LatencyMonitor::read(Frame& frame,
 
     if (snapshot_sampler_.is_enabled() && depacketizer_.is_started()) {
         // e2e is zero until the first reclock: report unavailable then.
-        snapshot_sampler_.process_read(
+        const size_t n_emitted = snapshot_sampler_.process_read(
             depacketizer_.next_timestamp(), latency_metrics_.niq_latency,
             latency_metrics_.e2e_latency != 0 ? latency_metrics_.e2e_latency : -1,
             tuner_.last_freq_coeff(), tuner_.last_target_latency());
+
+#ifdef ROC_TARGET_PROMETHEUS
+        // One drain observation per closed interval: a read that
+        // crosses several grid points still closes only one
+        // accumulation interval.
+        if (n_emitted > 0 && snapshot_sampler_.last_interval_drain() >= 0) {
+            queue_drain_histogram_->Observe(
+                (double)snapshot_sampler_.last_interval_drain() / 1e9);
+        }
+#else
+        (void)n_emitted;
+#endif
     }
 
     if (!pre_read_()) {

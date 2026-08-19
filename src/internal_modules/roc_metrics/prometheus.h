@@ -108,6 +108,7 @@ struct PrometheusConfig {
     HistogramConfig playout_fleet_mean;
     HistogramConfig delay_deviation;
     HistogramConfig event_height;
+    HistogramConfig queue_drain;
 
     // playout_spread bounds also serve the fleet stddev histogram:
     // both statistics live in the same sub-millisecond decade, with the
@@ -120,7 +121,9 @@ struct PrometheusConfig {
     // assumption), so its 1 us floor sits below the diffusion noise.
     // event_height starts at 100 us: events smaller than that consume
     // no meaningful margin. Both cap at 1 s, past the point where a
-    // session restarts anyway.
+    // session restarts anyway. queue_drain caps at about twice the
+    // largest fleet target latency: a drain beyond the target is an
+    // underrun.
     PrometheusConfig()
         : port(0)
         , niq_latency(100, 5 * core::Millisecond, 50 * core::Millisecond)
@@ -130,7 +133,8 @@ struct PrometheusConfig {
         , playout_spread(40, 10 * core::Microsecond, 10 * core::Millisecond)
         , playout_fleet_mean(40, 5 * core::Millisecond, 100 * core::Millisecond)
         , delay_deviation(90, 1 * core::Microsecond, 1 * core::Second)
-        , event_height(60, 100 * core::Microsecond, 1 * core::Second) {
+        , event_height(60, 100 * core::Microsecond, 1 * core::Second)
+        , queue_drain(40, 100 * core::Microsecond, 100 * core::Millisecond) {
     }
 };
 

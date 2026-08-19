@@ -67,10 +67,14 @@ namespace audio {
 class LatencyMonitor : public IFrameReader, public core::NonCopyable<> {
 public:
     //! Constructor.
+    //! @p delay_meter is the source-path arrival delay meter whose
+    //! interval statistics the snapshot sampler stamps into snapshots;
+    //! NULL leaves those snapshot fields unavailable.
     LatencyMonitor(IFrameReader& frame_reader,
                    const packet::SortedQueue& incoming_queue,
                    const Depacketizer& depacketizer,
                    const packet::ILinkMeter& link_meter,
+                   ArrivalDelayMeter* delay_meter,
                    const fec::BlockReader* fec_reader,
                    ResamplerReader* resampler,
                    const LatencyConfig& latency_config,
@@ -139,6 +143,7 @@ private:
 
 #ifdef ROC_TARGET_PROMETHEUS
     prometheus::Histogram* e2e_latency_histogram_;
+    prometheus::Histogram* queue_drain_histogram_;
     prometheus::Gauge* niq_stalling_gauge_;
     prometheus::Gauge* fec_block_duration_gauge_;
 #endif
