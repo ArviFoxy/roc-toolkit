@@ -22,11 +22,8 @@ const core::nanoseconds_t ReportInterval = core::Second * 30;
 
 TimestampInjector::TimestampInjector(packet::IReader& reader,
                                      const audio::SampleSpec& sample_spec)
-    : has_ts_(false)
-    , capt_ts_(0)
-    , rtp_ts_(0)
+    : mapping_(sample_spec)
     , reader_(reader)
-    , sample_spec_(sample_spec)
     , n_drops_(0)
     , rate_limiter_(ReportInterval, 1) {
 }
@@ -46,12 +43,8 @@ status::StatusCode TimestampInjector::read(packet::PacketPtr& pkt,
         roc_panic("timestamp injector: unexpected non-rtp packet");
     }
 
-    if (has_ts_) {
-        const packet::stream_timestamp_diff_t rtp_dn =
-            packet::stream_timestamp_diff(pkt->rtp()->stream_timestamp, rtp_ts_);
-
-        pkt->rtp()->capture_timestamp =
-            capt_ts_ + sample_spec_.stream_timestamp_delta_2_ns(rtp_dn);
+    if (mapping_.has_mapping()) {
+        pkt->rtp()->capture_timestamp = mapping_.capture_ts(pkt->rtp()->stream_timestamp);
     }
 
     return status::StatusOK;
@@ -63,19 +56,16 @@ void TimestampInjector::update_mapping(core::nanoseconds_t capture_ts,
         roc_log(LogDebug,
                 "timestamp injector: received mapping:"
                 " old=cts:%lld/sts:%llu new=cts:%lld/sts:%llu has_ts=%d n_drops=%lu",
-                (long long)capt_ts_, (unsigned long long)rtp_ts_, (long long)capture_ts,
-                (unsigned long long)rtp_ts, (int)has_ts_, (unsigned long)n_drops_);
+                (long long)mapping_.base_capture_ts(),
+                (unsigned long long)mapping_.base_stream_ts(), (long long)capture_ts,
+                (unsigned long long)rtp_ts, (int)mapping_.has_mapping(),
+                (unsigned long)n_drops_);
     }
 
-    if (capture_ts <= 0) {
+    if (!mapping_.update(capture_ts, rtp_ts)) {
         roc_log(LogTrace, "timestamp injector: dropping mapping with negative cts");
         n_drops_++;
-        return;
     }
-
-    capt_ts_ = capture_ts;
-    rtp_ts_ = rtp_ts;
-    has_ts_ = true;
 }
 
 } // namespace rtp

@@ -16,6 +16,7 @@
 #include "roc_core/noncopyable.h"
 #include "roc_core/rate_limiter.h"
 #include "roc_core/stddefs.h"
+#include "roc_packet/capture_timestamp_mapping.h"
 #include "roc_packet/ireader.h"
 
 namespace roc {
@@ -44,12 +45,9 @@ public:
                         packet::stream_timestamp_t rtp_ts);
 
 private:
-    bool has_ts_;
-    core::nanoseconds_t capt_ts_;
-    packet::stream_timestamp_t rtp_ts_;
+    packet::CaptureTimestampMapping mapping_;
 
     packet::IReader& reader_;
-    const audio::SampleSpec sample_spec_;
 
     size_t n_drops_;
 

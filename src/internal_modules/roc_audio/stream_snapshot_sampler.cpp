@@ -29,9 +29,7 @@ StreamSnapshotSampler::StreamSnapshotSampler(const SampleSpec& sample_spec,
                                              core::nanoseconds_t grid_period)
     : sample_spec_(sample_spec)
     , grid_period_(grid_period)
-    , has_mapping_(false)
-    , map_cts_(0)
-    , map_rtp_(0)
+    , mapping_(sample_spec)
     , synced_(false)
     , next_grid_cts_(0)
     , next_grid_rtp_(0)
@@ -60,9 +58,9 @@ void StreamSnapshotSampler::update_mapping(core::nanoseconds_t capture_ts,
         return;
     }
 
-    has_mapping_ = true;
-    map_cts_ = capture_ts;
-    map_rtp_ = stream_ts;
+    if (!mapping_.update(capture_ts, stream_ts)) {
+        return;
+    }
 
     if (synced_) {
         update_rtp_cursor_();
@@ -74,7 +72,7 @@ void StreamSnapshotSampler::process_read(packet::stream_timestamp_t position,
                                          core::nanoseconds_t e2e_latency,
                                          double freq_coeff,
                                          core::nanoseconds_t target_latency) {
-    if (!is_enabled() || !has_mapping_) {
+    if (!is_enabled() || !mapping_.has_mapping()) {
         return;
     }
 
@@ -91,9 +89,7 @@ void StreamSnapshotSampler::process_read(packet::stream_timestamp_t position,
     }
 
     // Position on the sender CTS timeline (wrap-safe RTP delta).
-    const core::nanoseconds_t cts_now = map_cts_
-        + sample_spec_.stream_timestamp_delta_2_ns(
-              packet::stream_timestamp_diff(position, map_rtp_));
+    const core::nanoseconds_t cts_now = mapping_.capture_ts(position);
 
     if (cts_now <= 0) {
         return;
@@ -182,9 +178,7 @@ void StreamSnapshotSampler::emit_(core::nanoseconds_t niq_latency,
     // Report the RTP position of the GRID POINT itself, not of the
     // read that crossed it. The sender validates this position against
     // the grid, so it must not carry the read-cadence overshoot.
-    snap.position = map_rtp_
-        + (packet::stream_timestamp_t)sample_spec_.ns_2_stream_timestamp_delta(
-              next_grid_cts_ - map_cts_);
+    snap.position = mapping_.position(next_grid_cts_);
     snap.niq_instant = niq_latency >= 0 ? niq_latency : -1;
     if (niq_accum_count_ > 0) {
         snap.niq_mean = niq_accum_ / (core::nanoseconds_t)niq_accum_count_;
@@ -212,9 +206,7 @@ void StreamSnapshotSampler::resync_(core::nanoseconds_t cts_now) {
 }
 
 void StreamSnapshotSampler::update_rtp_cursor_() {
-    next_grid_rtp_ = map_rtp_
-        + (packet::stream_timestamp_t)sample_spec_.ns_2_stream_timestamp_delta(
-              next_grid_cts_ - map_cts_);
+    next_grid_rtp_ = mapping_.position(next_grid_cts_);
 }
 
 void StreamSnapshotSampler::reset_accum_() {

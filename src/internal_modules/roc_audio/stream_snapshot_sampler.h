@@ -16,6 +16,7 @@
 #include "roc_core/noncopyable.h"
 #include "roc_core/stddefs.h"
 #include "roc_core/time.h"
+#include "roc_packet/capture_timestamp_mapping.h"
 #include "roc_packet/stream_snapshot.h"
 #include "roc_packet/units.h"
 
@@ -91,9 +92,7 @@ private:
     const SampleSpec sample_spec_;
     const core::nanoseconds_t grid_period_;
 
-    bool has_mapping_;
-    core::nanoseconds_t map_cts_;
-    packet::stream_timestamp_t map_rtp_;
+    packet::CaptureTimestampMapping mapping_;
 
     bool synced_;
     core::nanoseconds_t next_grid_cts_;
