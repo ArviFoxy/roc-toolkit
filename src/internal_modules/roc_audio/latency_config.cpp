@@ -275,10 +275,13 @@ bool LatencyConfig::deduce_defaults(core::nanoseconds_t default_latency,
             }
 
             if (tuner_backend != LatencyTunerBackend_E2e) {
-                roc_log(LogInfo,
-                        "latency config: wallclock_start_alignment aligns only the"
-                        " start position; without the e2e backend the tuner won't"
-                        " hold the wall-clock alignment afterwards");
+                roc_log(LogError,
+                        "latency config: wallclock_start_alignment requires the e2e"
+                        " latency backend: the aligned start positions"
+                        " capture-to-playback latency, which only the e2e backend"
+                        " then holds; a non-e2e backend also declares the sender"
+                        " clock untrusted, and the alignment depends on that clock");
+                return false;
             }
 
             if (wallclock_start_timeout == 0) {

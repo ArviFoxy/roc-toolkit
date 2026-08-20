@@ -456,14 +456,27 @@ TEST(latency_tuner_init, wallclock_alignment_deduction) {
     CHECK_EQUAL(LatencyTunerBackend_E2e, config.tuner_backend);
     LONGLONGS_EQUAL(200 * Ms + core::Second, config.wallclock_start_timeout);
 
-    // An explicitly chosen backend stays as chosen.
-    LatencyConfig niq_config;
-    niq_config.tuner_backend = LatencyTunerBackend_Niq;
-    niq_config.target_latency = 200 * Ms;
-    niq_config.wallclock_start_alignment = true;
-    CHECK(niq_config.deduce_defaults(200 * Ms, true));
+    // An explicitly chosen e2e backend stays as chosen.
+    LatencyConfig e2e_config;
+    e2e_config.tuner_backend = LatencyTunerBackend_E2e;
+    e2e_config.target_latency = 200 * Ms;
+    e2e_config.wallclock_start_alignment = true;
+    CHECK(e2e_config.deduce_defaults(200 * Ms, true));
 
-    CHECK_EQUAL(LatencyTunerBackend_Niq, niq_config.tuner_backend);
+    CHECK_EQUAL(LatencyTunerBackend_E2e, e2e_config.tuner_backend);
+}
+
+TEST(latency_tuner_init, wallclock_alignment_requires_e2e) {
+    // An explicitly non-e2e backend with wall-clock-aligned start is a
+    // config error: the aligned start positions capture-to-playback
+    // latency, which only the e2e backend then holds, and the alignment
+    // depends on the sender clock, which a non-e2e backend declares
+    // untrusted.
+    LatencyConfig config;
+    config.tuner_backend = LatencyTunerBackend_Niq;
+    config.target_latency = 200 * Ms;
+    config.wallclock_start_alignment = true;
+    CHECK(!config.deduce_defaults(200 * Ms, true));
 }
 
 TEST(latency_tuner_init, wallclock_alignment_receiver_only) {

@@ -561,6 +561,9 @@ TEST(multiroom_sink_2_sources, aligned_receivers_share_start_position) {
 
         ReceiverSourceConfig receiver_config = make_receiver_config();
         receiver_config.session_defaults.latency.wallclock_start_alignment = true;
+        // Wall-clock-aligned start requires the e2e backend.
+        receiver_config.session_defaults.latency.tuner_backend =
+            audio::LatencyTunerBackend_E2e;
 
         receivers[leg].reset(new (receivers[leg]) ReceiverSource(
             receiver_config, processor_map, encoding_map, packet_pool,

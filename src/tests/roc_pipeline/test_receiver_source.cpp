@@ -3413,6 +3413,8 @@ TEST(receiver_source, wallclock_aligned_initial_trim) {
 
     ReceiverSourceConfig config = make_default_config();
     config.session_defaults.latency.wallclock_start_alignment = true;
+    // Wall-clock-aligned start requires the e2e backend.
+    config.session_defaults.latency.tuner_backend = audio::LatencyTunerBackend_E2e;
 
     ReceiverSource receiver(config, processor_map, encoding_map, packet_pool,
                             packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
@@ -3489,6 +3491,8 @@ TEST(receiver_source, wallclock_aligned_no_mapping_fallback) {
     ReceiverSourceConfig config =
         make_custom_config(Latency, LatencyTolerance, WatchdogTimeout, WatchdogWarmup);
     config.session_defaults.latency.wallclock_start_alignment = true;
+    // Wall-clock-aligned start requires the e2e backend.
+    config.session_defaults.latency.tuner_backend = audio::LatencyTunerBackend_E2e;
 
     ReceiverSource receiver(config, processor_map, encoding_map, packet_pool,
                             packet_buffer_pool, frame_pool, frame_buffer_pool, arena);
