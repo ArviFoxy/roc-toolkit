@@ -1,0 +1,58 @@
+\contentsline {section}{\numberline {1}Introduction}{3}{section.1}%
+\contentsline {subsection}{\numberline {1.1}The system in one page}{3}{subsection.1.1}%
+\contentsline {subsection}{\numberline {1.2}The three goals are one problem}{3}{subsection.1.2}%
+\contentsline {subsection}{\numberline {1.3}How to read this document}{3}{subsection.1.3}%
+\contentsline {section}{\numberline {2}The System Model}{4}{section.2}%
+\contentsline {subsection}{\numberline {2.1}Timelines, samples, and schedules}{4}{subsection.2.1}%
+\contentsline {subsection}{\numberline {2.2}The buffer and underrun}{5}{subsection.2.2}%
+\contentsline {subsection}{\numberline {2.3}Measurement: two feedback architectures}{5}{subsection.2.3}%
+\contentsline {section}{\numberline {3}The Delay Process}{6}{section.3}%
+\contentsline {subsection}{\numberline {3.1}The three components}{6}{subsection.3.1}%
+\contentsline {subsection}{\numberline {3.2}What the model does not assume}{7}{subsection.3.2}%
+\contentsline {subsection}{\numberline {3.3}Levels, not increments}{7}{subsection.3.3}%
+\contentsline {section}{\numberline {4}The Loss}{8}{section.4}%
+\contentsline {subsection}{\numberline {4.1}Policies}{8}{subsection.4.1}%
+\contentsline {subsection}{\numberline {4.2}The loss functional}{8}{subsection.4.2}%
+\contentsline {subsection}{\numberline {4.3}Modeling choices, stated openly}{9}{subsection.4.3}%
+\contentsline {section}{\numberline {5}What Each Loss Term Can See}{9}{section.5}%
+\contentsline {subsection}{\numberline {5.1}Linear and quadratic terms need only moments}{9}{subsection.5.1}%
+\contentsline {subsection}{\numberline {5.2}The indicator term is not determined by moments}{10}{subsection.5.2}%
+\contentsline {subsection}{\numberline {5.3}Matching the marginal is still not enough for event structure}{10}{subsection.5.3}%
+\contentsline {subsection}{\numberline {5.4}Where the temporal law does and does not matter}{11}{subsection.5.4}%
+\contentsline {section}{\numberline {6}Exact Reductions}{12}{section.6}%
+\contentsline {subsection}{\numberline {6.1}From time averages to stationary expectations}{12}{subsection.6.1}%
+\contentsline {subsection}{\numberline {6.2}Mean and difference coordinates}{12}{subsection.6.2}%
+\contentsline {subsection}{\numberline {6.3}Superposition}{13}{subsection.6.3}%
+\contentsline {section}{\numberline {7}The Quadratic Theory}{13}{section.7}%
+\contentsline {subsection}{\numberline {7.1}The closed algebra}{13}{subsection.7.1}%
+\contentsline {subsection}{\numberline {7.2}Spectral evaluation}{14}{subsection.7.2}%
+\contentsline {subsection}{\numberline {7.3}The fast loop is a linear-quadratic regulator}{14}{subsection.7.3}%
+\contentsline {subsection}{\numberline {7.4}Speaker-space diagonalization}{16}{subsection.7.4}%
+\contentsline {subsection}{\numberline {7.5}Closed-loop transfer functions and the component ledger}{17}{subsection.7.5}%
+\contentsline {subsection}{\numberline {7.6}Integral action}{17}{subsection.7.6}%
+\contentsline {section}{\numberline {8}The Indicator Term}{18}{section.8}%
+\contentsline {subsection}{\numberline {8.1}Exact rewriting}{18}{subsection.8.1}%
+\contentsline {subsection}{\numberline {8.2}Evaluation under the component model}{19}{subsection.8.2}%
+\contentsline {subsection}{\numberline {8.3}The simplification chain}{20}{subsection.8.3}%
+\contentsline {subsection}{\numberline {8.4}Shape of the risk curve}{22}{subsection.8.4}%
+\contentsline {section}{\numberline {9}Composition: the Two Solvers and the Free Direction}{23}{section.9}%
+\contentsline {subsection}{\numberline {9.1}The free direction}{23}{subsection.9.1}%
+\contentsline {subsection}{\numberline {9.2}The decomposition theorem}{24}{subsection.9.2}%
+\contentsline {subsection}{\numberline {9.3}The level program}{25}{subsection.9.3}%
+\contentsline {subsection}{\numberline {9.4}Per-receiver tilts}{25}{subsection.9.4}%
+\contentsline {subsection}{\numberline {9.5}Moving the level: glides and asymmetry}{26}{subsection.9.5}%
+\contentsline {subsection}{\numberline {9.6}What remains of the general problem}{28}{subsection.9.6}%
+\contentsline {section}{\numberline {10}The Resulting Controller}{28}{section.10}%
+\contentsline {subsection}{\numberline {10.1}Layer 1: estimators (the belief state)}{28}{subsection.10.1}%
+\contentsline {subsection}{\numberline {10.2}Layer 2: the level program}{29}{subsection.10.2}%
+\contentsline {subsection}{\numberline {10.3}Layer 3: fast loops (unchanged)}{29}{subsection.10.3}%
+\contentsline {subsection}{\numberline {10.4}Layer 4: event hygiene}{29}{subsection.10.4}%
+\contentsline {subsection}{\numberline {10.5}Self-monitoring}{29}{subsection.10.5}%
+\contentsline {section}{\numberline {11}Register of Simplifications}{29}{section.11}%
+\contentsline {section}{\numberline {12}Limits of the Result}{29}{section.12}%
+\contentsline {section}{\numberline {A}Imported Results}{31}{appendix.A}%
+\contentsline {subsection}{\numberline {A.1}Campbell--Mecke formula}{31}{subsection.A.1}%
+\contentsline {subsection}{\numberline {A.2}Rice's formula}{31}{subsection.A.2}%
+\contentsline {subsection}{\numberline {A.3}Gaussian tail independence}{32}{subsection.A.3}%
+\contentsline {subsection}{\numberline {A.4}Other imports}{32}{subsection.A.4}%
+\contentsline {section}{\numberline {B}Notation}{32}{appendix.B}%

@@ -1,0 +1,2756 @@
+\documentclass[11pt, a4paper]{article}
+
+%% == Packages =================================================================
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+
+% Mathematics
+\usepackage{amsmath, amssymb, amsthm, mathtools}
+\usepackage{bm}
+
+% Layout
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{parskip}
+\usepackage{enumitem}
+\usepackage{booktabs}
+
+% References
+\usepackage{xcolor}
+\usepackage[colorlinks=true, linkcolor=blue!60!black, citecolor=green!50!black,
+            urlcolor=blue!70!black]{hyperref}
+\usepackage{cleveref}
+
+%% == Theorem environments =====================================================
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}[section]
+\newtheorem{assumption}{Assumption}[section]
+\newtheorem{simplification}{Simplification}
+\newtheorem{convention}{Convention}[section]
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{corollary}[theorem]{Corollary}
+
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}[section]
+\newtheorem{example}{Example}[section]
+
+\crefname{assumption}{Assumption}{Assumptions}
+\crefname{simplification}{Simplification}{Simplifications}
+\crefname{convention}{Convention}{Conventions}
+\crefname{remark}{Remark}{Remarks}
+\crefname{definition}{Definition}{Definitions}
+\crefname{example}{Example}{Examples}
+
+%% == Notation shortcuts =======================================================
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Prob}{\mathbb{P}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\Cov}{\operatorname{Cov}}
+\newcommand{\tr}{\operatorname{tr}}
+\newcommand{\dd}{\,\mathrm{d}}
+\newcommand{\ind}[1]{\mathbf{1}\!\left[#1\right]}
+\newcommand{\pos}[1]{\left(#1\right)^{\!+}}
+\newcommand{\Lbar}{\bar{L}}
+\newcommand{\Ltil}[1]{\tilde{L}_{#1}}
+
+%% == Title ====================================================================
+\title{Joint Latency Control for Synchronized Multi-Receiver Audio:\\
+  Model, Loss, and the Structure of the Optimal Controller}
+\author{}
+\date{\today}
+
+%% =============================================================================
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This document states and solves a control problem for synchronized audio
+streaming to $N$ receivers over a local network.  The problem has one loss
+with four terms: mean latency (linear), cross-receiver synchronization error
+(quadratic), buffer underrun (an indicator), and warp-rate roughness
+(quadratic).  The disturbance is one stochastic process per receiver: the
+per-sample delivery delay, modeled as baseline wander plus stationary
+diffusion plus a pause process.  The document derives the structure of the
+optimal controller.  The derivation is explicit about every simplification.
+Each simplification gets a statement, a reason, a quantified defect, and a
+telemetry monitor.  The result: the optimal controller factors into
+per-receiver linear loops (a specific second-order law with damping ratio
+$1/\sqrt2$) and a slow scalar program that positions the common latency
+level.  The latency target is not an input of the problem.  It appears in
+the solution as a dynamic state variable of the controller.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+%% =============================================================================
+\section{Introduction}\label{sec:intro}
+
+\subsection{The system in one page}\label{sec:system-one-page}
+
+One sender streams audio over a local network to $N$ receivers.  Each
+receiver drives one loudspeaker.  The sender packetizes samples and sends
+them with their stream timestamps.  Each receiver holds arrived samples in
+a buffer and plays them out through a resampler.  The resampler can play
+slightly faster or slower than nominal rate.  This rate adjustment is
+called \emph{warp}.  Warp is the only actuator in the system.
+
+Three things can go wrong.
+\begin{enumerate}[label=(\alph*)]
+  \item \textbf{Latency.}  Audio plays late relative to capture.  For
+    interactive sources (video, instruments) this is a direct cost.
+  \item \textbf{Desynchronization.}  Two receivers play the same sample at
+    different times.  The listener hears smeared or displaced sound.
+  \item \textbf{Underrun.}  A receiver needs a sample that has not arrived.
+    It must insert silence.  This is an audible dropout.
+\end{enumerate}
+A fourth cost is internal: warp changes pitch.  Fast warp changes are
+audible.  Slow warp offsets are not.
+
+These four costs pull in different directions.  Lower latency means a
+smaller buffer, which means more underruns.  Tighter synchronization means
+stiffer control, which means rougher warp.  The purpose of this document is
+to treat the four costs as one optimization problem and to derive the
+controller that this problem implies.
+
+\subsection{The three goals are one problem}\label{sec:one-problem}
+
+Historically the three goals were handled by three mechanisms: a fixed
+latency target chosen by hand (latency), independent per-receiver
+controllers holding that target (synchronization), and a safety margin
+inside the target (underrun).  This document shows that the three
+mechanisms are the correct \emph{shape} of the solution, but that the
+target must not be an input.  The optimization produces the target as an
+output.  The target becomes an internal, slowly moving state of the
+controller, computed from measured statistics of the network.
+
+\subsection{How to read this document}\label{sec:how-to-read}
+
+Sections \ref{sec:model}--\ref{sec:loss} state the problem: the physical
+model, the stochastic process, and the loss.  These sections contain no
+approximations beyond three explicitly flagged identifications: an
+$O(10^{-4})$ actuator rescaling (\cref{prop:latency-dynamics}), the
+margin--queue identification to one packet period
+(\cref{rem:margin-queue}), and the zero-drain ramp idealization
+(\cref{prop:ramp}).  Section \ref{sec:sufficiency} proves which statistics
+of the process each loss term can see.  This section explains \emph{why}
+the solution splits into two different kinds of mathematics.
+Section \ref{sec:reductions} performs exact coordinate changes.
+Section \ref{sec:quadratic} solves the quadratic part of the problem with
+linear-quadratic machinery.  Section \ref{sec:indicator} handles the
+underrun term.  Every simplification lives in a numbered environment
+(\textbf{S1}, \textbf{S2}, \dots) with a quantified defect.
+Section \ref{sec:composition} composes the two solutions and proves the
+decomposition result.  Section \ref{sec:controller} states the resulting
+controller as an algorithm.  Section \ref{sec:register} collects all
+simplifications in one table.  Section \ref{sec:limits} lists what the
+derivation does \emph{not} cover.
+
+Two style rules apply throughout.  First: every symbol is defined before
+use, and \cref{sec:notation} collects the recurring ones.  Second: every claim is
+either proven here, or imported with an explicit citation and marked as
+imported.  There are no silent steps.
+
+%% =============================================================================
+\section{The System Model}\label{sec:model}
+
+\subsection{Timelines, samples, and schedules}\label{sec:timelines}
+
+\begin{convention}[Units]\label{conv:units}
+All times are in seconds.  Stream position is measured in seconds of audio,
+not in sample counts.  This removes the sample rate $F_s$ from all
+formulas.  To convert to sample units, multiply seconds of audio by $F_s$.
+\end{convention}
+
+\begin{definition}[Stream and emission]\label{def:stream}
+The audio stream is indexed by \emph{stream time} $s \in \R$: the position
+inside the audio signal, in seconds of audio.  The sender emits (captures
+and transmits) stream position $s$ at wall time $\tau(s)$.  For an ideal
+sender clock, $\tau(s) = s + \text{const}$; we absorb the constant and
+write $\tau(s) = s + c_A(s)$, where $c_A$ is the sender clock error, a
+slowly varying function with $|\dot c_A| \le 10^{-4}$ (clock rates differ
+from nominal by at most tens of ppm).
+\end{definition}
+
+\begin{definition}[Arrival]\label{def:arrival}
+Stream position $s$ becomes available in receiver $i$'s buffer at wall
+time
+\begin{equation}\label{eq:arrival}
+  a_i(s) \;=\; \tau(s) + D_i(s),
+\end{equation}
+where $D_i(s) \ge 0$ is the \emph{delivery delay} of receiver $i$ for
+stream position $s$.  The delay $D_i$ covers everything between emission
+and availability: packetization, network transit, queueing, and any
+receiver-side processing before the sample is playable.  The delay
+processes $(D_1, \dots, D_N)$ are the stochastic disturbance of the
+problem.  \Cref{sec:process} models them.
+\end{definition}
+
+\begin{definition}[Playout schedule and warp]\label{def:schedule}
+Receiver $i$ chooses a strictly increasing \emph{playout schedule}
+$p_i(s)$: stream position $s$ plays at wall time $p_i(s)$.  Let $s_i(t)$
+denote the inverse: the stream position scheduled at wall time~$t$, so
+$p_i(s_i(t)) = t$.  The \emph{warp} is the fractional playout rate offset
+\begin{equation}\label{eq:warp-def}
+  u_i(t) \;\coloneqq\; \frac{\dd s_i}{\dd t}(t)\,\bigl(1 + \dot c_{B,i}\bigr) - 1 ,
+\end{equation}
+where $c_{B,i}$ is receiver $i$'s clock error function, defined like
+$c_A$ in \cref{def:stream}, with the same ppm-scale rate bound.  In words: $u_i > 0$ means receiver $i$ consumes the stream faster
+than nominal; $u_i < 0$ means slower.  The warp is bounded by the
+resampler: $|u_i| \le u_{\max}$, with $u_{\max} = 5\times 10^{-3}$ in the
+implementation.
+\end{definition}
+
+\begin{definition}[End-to-end latency]\label{def:latency}
+The \emph{latency} of receiver $i$ at wall time $t$ is the age of the
+sample it is scheduled to play:
+\begin{equation}\label{eq:latency-def}
+  L_i(t) \;\coloneqq\; t - \tau\!\bigl(s_i(t)\bigr).
+\end{equation}
+\end{definition}
+
+\begin{proposition}[Latency dynamics]\label{prop:latency-dynamics}
+The latency obeys
+\begin{equation}\label{eq:latency-dynamics}
+  \dot L_i(t) \;=\; w_i(t) - u_i(t),
+  \qquad
+  |w_i(t)| \;\le\; 3\times 10^{-4},
+\end{equation}
+where $w_i \coloneqq
+(\dot c_{B,i} - \dot c_A)/(1 + \dot c_{B,i})$ is the relative clock
+drift between receiver $i$ and the sender.
+\end{proposition}
+
+\begin{proof}
+Differentiate \cref{eq:latency-def}:
+$\dot L_i = 1 - \tau'(s_i(t))\,\dot s_i(t)
+          = 1 - \bigl(1+\dot c_A\bigr)\dot s_i$.
+By \cref{eq:warp-def}, $\dot s_i = (1+u_i)/(1+\dot c_{B,i})$.  Therefore
+\[
+  \dot L_i
+  = 1 - \frac{(1+\dot c_A)(1+u_i)}{1+\dot c_{B,i}}
+  = \frac{\dot c_{B,i} - \dot c_A - u_i\,(1 + \dot c_A)}{1 + \dot c_{B,i}} .
+\]
+Define $w_i \coloneqq (\dot c_{B,i}-\dot c_A)/(1+\dot c_{B,i})$ and absorb
+the factor $(1+\dot c_A)/(1+\dot c_{B,i}) = 1 + O(10^{-4})$ into the
+definition of $u_i$ (a relative rescaling of the actuator by at most
+$10^{-4}$, far below actuator resolution).  Both clock rates are within
+$10^{-4}$ of nominal, so
+$|w_i| \le 2\times 10^{-4}/(1 - 10^{-4}) < 3\times 10^{-4}$.
+\end{proof}
+
+\begin{remark}[What \cref{eq:latency-dynamics} says]
+Latency is an integrator driven by clock drift and steered by warp.  The
+controller cannot set latency directly.  It can only slide latency around
+at up to $u_{\max} = 5$\,ms per second.  This bound is the single most
+important quantitative fact in this document.  It reappears in
+Simplification~S3, where it decouples the underrun term from the fast
+control loop, and in \cref{sec:glide}, where it limits how fast the
+latency level can be raised.
+\end{remark}
+
+\subsection{The buffer and underrun}\label{sec:buffer}
+
+\begin{definition}[Underrun]\label{def:underrun}
+Receiver $i$ is \emph{in underrun} at wall time $t$ when the sample it is
+scheduled to play has not arrived:
+\begin{equation}\label{eq:underrun-def}
+  \text{underrun}_i(t)
+  \;\iff\;
+  a_i\!\bigl(s_i(t)\bigr) \;>\; t .
+\end{equation}
+\end{definition}
+
+\begin{convention}[Silence convention]\label{conv:silence}
+During underrun the schedule keeps advancing and the receiver outputs
+silence for the missing samples.  The schedule is not paused and not
+reset.  Missing audio is counted by the loss (\cref{sec:loss}); it is not
+compensated later.
+\end{convention}
+
+\begin{proposition}[Underrun is a delay-versus-latency comparison]
+\label{prop:underrun-margin}
+For all $i, t$:
+\begin{equation}\label{eq:underrun-margin}
+  \text{underrun}_i(t)
+  \;\iff\;
+  D_i\!\bigl(s_i(t)\bigr) \;>\; L_i(t).
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+By \cref{eq:arrival}, $a_i(s_i(t)) > t$ iff
+$\tau(s_i(t)) + D_i(s_i(t)) > t$ iff
+$D_i(s_i(t)) > t - \tau(s_i(t)) = L_i(t)$ by \cref{eq:latency-def}.
+\end{proof}
+
+\begin{definition}[Margin]\label{def:margin}
+The \emph{margin} of receiver $i$ at wall time $t$ is
+\begin{equation}\label{eq:margin-def}
+  m_i(t) \;\coloneqq\; L_i(t) - D_i\!\bigl(s_i(t)\bigl).
+\end{equation}
+Underrun at $t$ is exactly $m_i(t) < 0$.
+\end{definition}
+
+\begin{remark}[Margin and buffer depth]\label{rem:margin-queue}
+When arrivals are in stream order, the buffer of receiver $i$ at time $t$
+holds exactly the samples $s$ with $s_i(t) \le s$ and $a_i(s) \le t$, and
+the buffered duration equals the margin up to the local variation of $D_i$
+over one buffer length.  Packet reordering breaks exact equality but the
+identification ``margin $\approx$ buffered audio duration'' is accurate to
+one packet period.  We use the word \emph{margin} for the model quantity
+and \emph{queue depth} for the implementation measurement.
+\end{remark}
+
+\subsection{Measurement: two feedback architectures}\label{sec:measurement}
+
+The controller observes the system through one of two measured outputs.
+Both exist in the implementation; the choice is per stream.
+
+\begin{definition}[Latency measurement, ``e2e'' backend]\label{def:meas-e2e}
+The receiver measures
+\begin{equation}\label{eq:meas-e2e}
+  y_i(t) \;=\; L_i(t) + n_i(t),
+\end{equation}
+where $n_i$ is measurement error.  Its dominant component is the error of
+the clock synchronization between sender and receiver: computing
+$t - \tau(s)$ requires comparing the two clocks.  On hosts disciplined by
+the same time service, $n_i$ is microseconds.  On an undisciplined host,
+$n_i$ can drift by milliseconds over minutes; this drift enters the loop
+as a false disturbance.  \Cref{sec:transfer} quantifies the consequence.
+\end{definition}
+
+\begin{definition}[Margin measurement, ``niq'' backend]\label{def:meas-niq}
+The receiver measures its own buffered duration:
+\begin{equation}\label{eq:meas-niq}
+  y_i(t) \;=\; m_i(t).
+\end{equation}
+This measurement needs no cross-host clock comparison.  It is exact up to
+packet quantization.  Its cost: the measured signal now contains the
+delay process, so network disturbances drive the control loop
+(\cref{sec:transfer}).
+\end{definition}
+
+%% =============================================================================
+\section{The Delay Process}\label{sec:process}
+
+This section models the disturbance $(D_1, \dots, D_N)$.  The model is the
+result of measurement, not of convenience; each component corresponds to a
+distinct physical mechanism, and the telemetry estimates each component
+separately.
+
+\subsection{The three components}\label{sec:components}
+
+\begin{assumption}[Additive decomposition]\label{as:decomposition}
+For each receiver $i$,
+\begin{equation}\label{eq:decomposition}
+  D_i(s) \;=\; B_i(t_s) \;+\; \varepsilon_i(s) \;+\; P_i(s),
+  \qquad t_s = \tau(s),
+\end{equation}
+where $B_i$ is the \emph{baseline}, $\varepsilon_i$ is the
+\emph{diffusion}, and $P_i$ is the \emph{pause component}, defined in
+\cref{as:baseline,as:diffusion,as:pause} below.
+\end{assumption}
+
+\begin{assumption}[Baseline]\label{as:baseline}
+$B_i(t)$ is differentiable and slow: its derivative is bounded,
+$|\dot B_i| \le \bar\beta$ with $\bar\beta$ of order $10^{-5}$ (tens of
+microseconds per second), and its power spectrum is concentrated below the
+control bandwidth $\kappa$ defined in \cref{sec:lqr}.  Physically:
+propagation and processing floor, thermal drift of clocks and interface
+timing, slow route or load changes.
+\end{assumption}
+
+\begin{assumption}[Diffusion]\label{as:diffusion}
+$\varepsilon_i(s)$ is stationary, mean-zero, and mixing (correlations
+decay; there is a horizon beyond which values are almost independent).
+It has variance $\sigma_i^2$ and power spectral density $S_{\varepsilon,i}(\omega)$.
+Its tail is light: there are constants $x_0, C$ such that
+$\Prob(\varepsilon_i > x) \le C e^{-x/x_0}$ for all $x>0$.  Physically:
+interrupt coalescing, scheduler granularity, cross-traffic queueing at
+sub-millisecond scale.  Measured values in the reference deployment:
+$\sigma_i$ from tens of microseconds up to about one millisecond on wired
+hosts.  The upper end matters: at an aggressive latency level of order
+$10$\,ms the margin is only a few multiples of $\sigma_i$, so the tail of
+$\varepsilon_i$ is a first-class contribution to underrun risk, not a
+negligible one (\cref{sec:risk-evaluation}).
+\end{assumption}
+
+\begin{assumption}[Pause component]\label{as:pause}
+Delivery to receiver $i$ stops entirely during \emph{pause episodes}.
+Episode $k$ starts at wall time $T_{i,k}$ and lasts $H_{i,k}$ seconds
+(the \emph{height}); delivery resumes at $T_{i,k} + H_{i,k}$.  Stream
+content emitted during the episode is delivered late (after resume),
+recovered by forward error correction, or lost; the split between these
+outcomes is a property of the episode mechanism.  The pairs
+$(T_{i,k}, H_{i,k})$ form a stationary marked point process with
+intensity $\lambda_i$ (episodes per second) and mark law $F_i$ (the Palm
+distribution of heights; $\bar F_i \coloneqq 1 - F_i$).  Clustering of
+episode times is allowed and is a measured property, not a parameter.
+Physically: radio retraining, roaming, bulk interference, CPU stalls.
+Measured heights range from milliseconds (wired hosts) to $10^2$--$10^3$
+milliseconds (radio hosts).
+\end{assumption}
+
+\begin{proposition}[Pause ramp shape]\label{prop:ramp}
+Under \cref{as:pause} and the zero-drain idealization below, during
+episode $k$ the pause component is a descending ramp: for stream
+positions $s$ with $\tau(s) \in [T_{i,k},\, T_{i,k}+H_{i,k}]$,
+\begin{equation}\label{eq:ramp}
+  P_i(s) \;=\; T_{i,k} + H_{i,k} - \tau(s),
+\end{equation}
+and $P_i(s) = 0$ outside episodes.  In particular
+$\max_s P_i(s) = H_{i,k}$ during episode $k$: the height equals both the
+duration of the episode and the peak extra delay.
+
+\emph{Zero-drain idealization:} withheld content is treated as arriving
+at the instant delivery resumes.  In reality the burst drains over the
+time of \cref{as:recovery}(a) (milliseconds on a local network); the
+ramp is exact up to that drain time.  This idealization is carried as
+part of Simplification S2's defect accounting
+(\cref{sec:simplification-chain}).
+\end{proposition}
+
+\begin{proof}
+A sample emitted at $\tau(s)$ inside the episode cannot arrive before
+delivery resumes at $T_{i,k}+H_{i,k}$.  If it is delivered at all, it
+arrives in the burst of withheld content just after resume --- at the
+resume instant, under the idealization --- so its extra delay is
+$T_{i,k}+H_{i,k}-\tau(s)$, which falls linearly from $H_{i,k}$ (for the
+sample emitted at episode start) to $0$ (at episode end).  Samples
+emitted outside episodes have no withheld path, so $P_i = 0$.
+\end{proof}
+
+\begin{definition}[Recovery time]\label{def:recovery}
+The \emph{recovery time} $\rho_{i,k}$ of episode $k$ is the time from
+delivery resume until the margin of receiver $i$ is back at its
+pre-episode value.
+\end{definition}
+
+\begin{assumption}[Recovery mechanisms]\label{as:recovery}
+No instant recovery is assumed.  Two mechanisms bound $\rho_{i,k}$:
+\begin{enumerate}[label=(\alph*)]
+  \item \textbf{Redelivery burst (fast).}  When the withheld content was
+    queued upstream, it arrives in a burst at the link rate once delivery
+    resumes.  The burst refills the buffer directly:
+    $\rho_{i,k} \approx H_{i,k}\cdot R_{\mathrm{stream}}/R_{\mathrm{link}}$
+    (stream bit rate over link capacity), milliseconds on a local
+    network.  This is the measured behavior of
+    radio dropouts in the reference deployment: the instantaneous queue
+    depth spikes by approximately the episode height right after resume.
+  \item \textbf{Warp-limited restoration (slow).}  When content was lost,
+    or when the playout schedule slipped during the episode (a stalled
+    playout, or a controller that converted the transient into latency),
+    the deficit can only be worked off by warp:
+    $\rho_{i,k} \le \chi_{i,k}/u_{\max}$, where
+    $\chi_{i,k} = \min(H_{i,k}, m_i)$ is the margin the episode consumed.
+    With $u_{\max} = 5\times10^{-3}$, a consumed margin of $10$\,ms takes
+    up to $2$\,s to restore; $100$\,ms takes up to $20$\,s.
+\end{enumerate}
+Which mechanism applies is a property of the episode and of the
+implementation path; $\rho$ is treated as a measured per-episode mark.
+The interval after an episode during which the margin is still depressed
+is a window of raised vulnerability; \cref{sec:risk-evaluation} prices a
+following episode inside this window using the measured gap law.
+\end{assumption}
+
+\begin{assumption}[Cross-receiver structure]\label{as:cross}
+The joint process $(D_1,\dots,D_N)$ is stationary.  Components decompose
+along the network path tree: each of $B, \varepsilon, P$ splits into a
+part common to all receivers (sender host, shared switch), parts shared by
+subtrees, and idiosyncratic parts.  No independence across receivers is
+assumed anywhere.  Measured fact: pause episodes co-occur across receivers
+at rates two orders of magnitude above the independence prediction.
+\end{assumption}
+
+\subsection{What the model does not assume}\label{sec:not-assumed}
+
+The model does not assume Poisson pause times (clustering is measured).
+It does not assume any specific height law $F_i$ (heavy or multimodal laws
+are allowed; heights are bounded in practice by session supervision, so
+all moments of $D_i$ exist).  It does not assume Gaussian diffusion (only
+light tails and mixing).  It does not assume independence across
+receivers.  It does not assume instant recovery after an episode
+(\cref{as:recovery}), and it does not assume that the diffusion tail is
+negligible at the operating margin.
+
+\subsection{Levels, not increments}\label{sec:levels-not-increments}
+
+Classical jitter metrics are built from \emph{increments}: differences of
+consecutive delays.  The following elementary fact shows that increments
+cannot drive a buffer model, and it calibrates what the white-noise terms
+in \cref{sec:quadratic} may and may not represent.
+
+\begin{proposition}[Increment sums telescope]\label{prop:telescope}
+Let $\eta(n)$, $n \in \mathbb{Z}$, be any stationary sequence (per-packet
+delay levels) with variance $\sigma_\eta^2 < \infty$, and let
+$\xi(n) = \eta(n)-\eta(n-1)$.  Then for every $M$,
+\[
+  \sum_{n=1}^{M} \xi(n) \;=\; \eta(M) - \eta(0),
+  \qquad
+  \Var\!\Bigl[\sum_{n=1}^{M}\xi(n)\Bigr] \;\le\; 4\sigma_\eta^2 ,
+\]
+so the long-run variance rate of the partial sums is zero:
+$\lim_{M\to\infty} \Var[\sum_1^M \xi]/M = 0$.
+\end{proposition}
+
+\begin{proof}
+The sum telescopes term by term.  The variance of a difference of two
+variables, each with variance $\sigma_\eta^2$, is at most
+$4\sigma_\eta^2$ by the Cauchy--Schwarz inequality.  Dividing a bounded
+quantity by $M$ gives zero in the limit.
+\end{proof}
+
+\begin{corollary}\label{cor:no-brownian}
+A stationary delay process contributes no Brownian (accumulating) noise to
+the buffer.  The buffer responds to the delay \emph{level} directly:
+a delay change of $x$ seconds moves the margin by $-x$ seconds, once, and
+the margin recovers when the delay recovers.  Any model that drives the
+buffer with white noise of nonzero intensity implicitly assumes a
+\emph{nonstationary} (wandering) delay level.  In this document, white
+noise terms therefore represent only the baseline wander $B_i$ and
+measurement noise; the stationary diffusion $\varepsilon_i$ enters through
+its spectrum and the pause component $P_i$ through the underrun term.
+\end{corollary}
+
+%% =============================================================================
+\section{The Loss}\label{sec:loss}
+
+\subsection{Policies}\label{sec:policies}
+
+\begin{definition}[Causal policy]\label{def:policy}
+A \emph{policy} $\pi$ is a rule that chooses every receiver's warp
+$u_i(t)$ as a function of observations available at time $t$: the
+receiver's own measured output $y_i$ up to $t$
+(\cref{def:meas-e2e,def:meas-niq}), its own arrival history, and any
+messages received from the sender by time $t$.  Messages from receivers reach the sender after a one-way network
+delay, and sender broadcasts reach receivers after another; any
+closed information loop through the sender takes at least a round
+trip.  The information structure is therefore
+distributed: no receiver sees another receiver's state directly, and the
+sender sees receiver reports with delay.
+\end{definition}
+
+\subsection{The loss functional}\label{sec:loss-functional}
+
+Let $\omega$ denote one realization of the joint disturbance: the delay
+processes of all receivers and the clock drifts.  All randomness lives in
+$\omega$.
+
+\begin{definition}[The loss]\label{def:loss}
+For a policy $\pi$, define
+\begin{equation}\label{eq:loss}
+  J(\pi) \;=\;
+  \E_\omega\!\left[\;
+    \limsup_{T\to\infty}\,
+    \frac{1}{T}\int_0^{T} \Lambda(t,\omega)\;\dd t
+  \right],
+\end{equation}
+with the instantaneous loss rate, evaluated on the realization,
+\begin{equation}\label{eq:pointwise-loss}
+  \Lambda(t,\omega)
+  \;=\;
+  \alpha\,\Lbar(t)
+  \;+\;
+  \frac{q}{N}\sum_{i=1}^{N}\bigl(L_i(t)-\Lbar(t)\bigr)^2
+  \;+\;
+  \frac{c}{N}\sum_{i=1}^{N}\ind{m_i(t) < 0}
+  \;+\;
+  \frac{r}{N}\sum_{i=1}^{N}\dot u_i(t)^2 ,
+\end{equation}
+where $\Lbar(t) = \frac1N\sum_i L_i(t)$ is the instantaneous fleet mean
+latency and $\alpha, q, c, r > 0$ are weights.
+\end{definition}
+
+The four terms, in words:
+\begin{enumerate}[label=(\roman*)]
+  \item \textbf{Latency (linear).}  Every second of average latency costs
+    $\alpha$ per second of operation.  Latency is bad in proportion to its
+    size; there is no threshold and no target.
+  \item \textbf{Synchronization (quadratic).}  The instantaneous variance
+    of latency across receivers, on this realization.  This is the
+    physical desynchronization the listener hears.  It contains no
+    reference value: it compares receivers with each other only.
+  \item \textbf{Underrun (indicator).}  The fraction of receivers
+    currently playing silence for lack of data.  By
+    \cref{prop:underrun-margin} this is a property of delay versus
+    latency; by \cref{conv:silence} silence duration is what accumulates.
+  \item \textbf{Warp roughness (quadratic).}  Fast warp changes are
+    audible pitch transients.  A constant warp is free: only the
+    derivative is charged.  This choice has a structural consequence used
+    in \cref{sec:composition}: the loss puts zero price on any constant
+    warp offset, hence zero price on holding any fixed latency level.
+\end{enumerate}
+
+\begin{remark}[Units]\label{rem:units}
+Let $\mathsf{u}$ denote one loss unit.  Then $\Lambda$ has units
+$\mathsf{u}/\mathrm{s}$ and
+\[
+  [\alpha] = \mathsf{u}\,\mathrm{s}^{-2},\quad
+  [q] = \mathsf{u}\,\mathrm{s}^{-3},\quad
+  [c] = \mathsf{u}\,\mathrm{s}^{-1},\quad
+  [r] = \mathsf{u}\,\mathrm{s}.
+\]
+Two combinations will matter:
+$\alpha/c$ has units $\mathrm{s}^{-1}$ (a rate --- it will equal the
+deviation's occupation density at the optimum,
+\cref{sec:level-program}; for the pause component this is an episode
+exceedance rate), and $(q/r)^{1/4}$ has units
+$\mathrm{s}^{-1}$ (a bandwidth --- it will be the fast loop's natural
+frequency in \cref{sec:lqr}).  Dimensional consistency of both is a
+useful check on the derivation.
+\end{remark}
+
+\subsection{Modeling choices, stated openly}\label{sec:modeling-choices}
+
+Three choices in \cref{def:loss} are choices, not necessities.
+
+\begin{enumerate}[label=(\alph*)]
+  \item \textbf{Mean over receivers in the latency term.}  The maximum
+    over receivers is an alternative.  With the synchronization term
+    active, receivers sit within a fraction of a millisecond of each
+    other, so mean and maximum differ by less than the resolution of any
+    latency preference.  The mean gives cleaner algebra.
+  \item \textbf{Linear latency cost.}  Any increasing function of
+    latency is admissible.  Linearity makes $\alpha$ interpretable (the
+    price of one second of latency) and, in \cref{sec:level-program},
+    makes the operating point depend on the single ratio $\alpha/c$.
+  \item \textbf{Underrun counted by time, symmetrically across
+    receivers.}  The indicator charges silence duration.  It does not
+    separately charge the \emph{number} of dropouts, and it does not
+    model listener adaptation.  A count-based or risk-averse variant
+    changes \cref{sec:indicator}; \cref{sec:limits} discusses where.
+\end{enumerate}
+
+\begin{remark}[What is absent: session restarts]\label{rem:no-restart}
+The implementation supervises sessions and restarts them on gross
+failures (unbounded queue growth, tolerance violations).  A restart is a
+loud, discrete event that this loss does not model beyond the silence it
+causes.  The derivation therefore optimizes normal operation; supervision
+remains a separate safety layer.  See \cref{sec:limits}.
+\end{remark}
+
+%% =============================================================================
+\section{What Each Loss Term Can See}\label{sec:sufficiency}
+
+The four loss terms differ in which statistics of the disturbance they
+depend on.  This section makes that precise.  The result explains the
+architecture of the whole solution: three terms live inside a closed
+``moment algebra'' that linear-quadratic theory solves, and one term ---
+the indicator --- provably lives outside it.
+
+\subsection{Linear and quadratic terms need only moments}
+\label{sec:moments-suffice}
+
+\begin{proposition}[First moments suffice for linear terms]
+\label{prop:linear-first-moment}
+Let $x$ be a random vector with mean $\mu$, and let $g(x) = a^\top x$ be
+linear.  Then $\E[g(x)] = a^\top\mu$ depends on the law of $x$ only
+through its first moment.
+\end{proposition}
+
+\begin{proof} Linearity of expectation. \end{proof}
+
+\begin{proposition}[Second moments suffice for quadratic terms]
+\label{prop:quadratic-second-moment}
+Let $x$ be a random vector with mean $\mu$ and covariance $\Sigma$, and
+let $g(x) = x^\top Q x$.  Then
+\begin{equation}\label{eq:trace-formula}
+  \E[g(x)] \;=\; \tr(Q\Sigma) + \mu^\top Q \mu ,
+\end{equation}
+which depends on the law of $x$ only through its first two moments.
+\end{proposition}
+
+\begin{proof}
+Write $x = \mu + z$ with $\E[z]=0$, $\E[zz^\top]=\Sigma$.  Then
+$\E[x^\top Qx] = \mu^\top Q\mu + 2\mu^\top Q\,\E[z] + \E[z^\top Qz]$,
+and $\E[z^\top Qz] = \E[\tr(Qzz^\top)] = \tr(Q\Sigma)$ by linearity of
+the trace and of expectation.
+\end{proof}
+
+For stationary processes passed through linear time-invariant systems,
+``second moments'' means the power spectral density; \cref{sec:spectral}
+gives the exact statement.  The consequence: for the latency,
+synchronization, and warp terms, two disturbance processes with equal
+first and second moments produce \emph{identical} loss under every linear
+policy.  Everything else about the disturbance is invisible to these
+terms.
+
+\subsection{The indicator term is not determined by moments}
+\label{sec:indicator-not-moments}
+
+\begin{proposition}[Moment insufficiency, marginal form]
+\label{prop:counterexample}
+There exist two stationary processes with equal mean and equal
+autocovariance function whose stationary underrun fractions at the same
+margin differ by more than eighty orders of magnitude.
+\end{proposition}
+
+\begin{proof}
+Take the pause process of \cref{as:pause} with constant intensity
+$\lambda = 10^{-2}\,\mathrm{s}^{-1}$, deterministic height
+$H \equiv 0.5$\,s, non-overlapping episodes, and no other components.
+By \cref{prop:ramp}, during an episode the level descends linearly from
+$H$ to $0$ at unit rate, so the fraction of time the level exceeds
+$m = 0.4$\,s is, by \cref{prop:campbell} below,
+$\lambda\,\E\pos{H - m} = 10^{-2}\times 0.1 = 10^{-3}$.
+Its stationary mean is
+$\mu_P = \lambda \int_0^H (H-x)\dd x = \lambda H^2/2 = 1.25\times10^{-3}$\,s,
+and its stationary second moment is
+$\lambda\int_0^H (H-x)^2\dd x = \lambda H^3/3 = 4.17\times10^{-4}\,\mathrm{s}^2$,
+giving variance $\approx 4.15\times10^{-4}\,\mathrm{s}^2$, standard
+deviation $\sigma_P \approx 20.4$\,ms.  Its autocovariance function is
+some fixed function $C(\cdot)$.
+
+Now take the Gaussian process with the same mean $\mu_P$ and the same
+autocovariance $C$ (one exists for any valid autocovariance).  Its
+stationary exceedance of $m=0.4$\,s is
+$\bar\Phi\bigl((0.4-0.00125)/0.0204\bigr) = \bar\Phi(19.5) < 10^{-84}$,
+using the Mills-ratio bound
+$\bar\Phi(x) \le \varphi(x)/x = e^{-x^2/2}/(x\sqrt{2\pi})$.  The two processes agree on all first
+and second moments and disagree on the underrun fraction by a factor
+exceeding $10^{80}$.
+\end{proof}
+
+\begin{remark}
+The example is extreme by design, but the mechanism is the measured one:
+pause heights are hundreds of standard deviations of the bulk.  Any
+moment-matched Gaussian surrogate concludes that underruns never happen.
+\end{remark}
+
+\subsection{Matching the marginal is still not enough for event structure}
+\label{sec:copula}
+
+A natural repair: transform a Gaussian process through a monotone map so
+that the \emph{marginal} distribution matches exactly (a
+``trans-Gaussian'' or Gaussian-copula model), and match the covariance as
+well.  This fixes the exceedance \emph{fraction} by construction.  It
+still fails on the \emph{time structure} of exceedances, and the failure
+is qualitative.
+
+\begin{proposition}[Sojourn shrinkage for Gaussian-based models]
+\label{prop:sojourn}
+Let $X$ be a stationary, almost-surely differentiable Gaussian process
+with variance $\sigma_0^2$ and derivative variance $\sigma_1^2$.  The
+mean duration of one visit of $X$ above level $z$ satisfies
+\begin{equation}\label{eq:sojourn}
+  \mu_{\mathrm{soj}}(z)
+  \;=\;
+  \frac{\Prob(X > z)}{N^+(z)}
+  \;=\;
+  \frac{\sqrt{2\pi}\,\sigma_0^2}{\sigma_1\, z}\,\bigl(1+o(1)\bigr)
+  \;\xrightarrow[z\to\infty]{}\; 0,
+\end{equation}
+where $N^+(z)$ is the rate of upcrossings of level $z$.  A monotone
+marginal transform changes the level scale but not the vanishing:
+high-level visits of any trans-Gaussian process built on a smooth
+(almost surely differentiable) Gaussian base become arbitrarily short.
+By contrast, the pause process of \cref{as:pause} has mean visit duration
+$\E[\,H - m \mid H > m\,]$ above margin $m$: a quantity of the order of
+the height spread, bounded away from zero.
+\end{proposition}
+
+\begin{proof}
+Two imports, both collected in \cref{sec:app-rice}: Rice's formula for
+the upcrossing rate, and the ergodic occupation--crossing ratio
+identity $\mu_{\mathrm{soj}}(z) = \Prob(X>z)/N^+(z)$ (mean visit
+duration equals stationary exceedance probability divided by visit
+rate).  Rice's formula gives
+$N^+(z) = \frac{\sigma_1}{2\pi\sigma_0} e^{-z^2/2\sigma_0^2}$.
+The Mills ratio bound
+$\bar\Phi(x) = \frac{\varphi(x)}{x}(1+O(x^{-2}))$ with $x = z/\sigma_0$
+gives
+$\mu_{\mathrm{soj}}
+ = \bar\Phi(x)\,\frac{2\pi\sigma_0}{\sigma_1}e^{x^2/2}
+ = \frac{1}{\sqrt{2\pi}\,x}\,\frac{2\pi\sigma_0}{\sigma_1}\,(1+o(1))
+ = \frac{\sqrt{2\pi}\,\sigma_0^2}{\sigma_1 z}(1+o(1))$.
+The pause statement is \cref{prop:ramp}: one episode with height $H > m$
+stays above $m$ for exactly $H - m$.  Underlying both is the
+tail-independence property of the Gaussian copula
+(\cref{sec:app-tail-independence}).
+\end{proof}
+
+\begin{remark}[Scope of the sojourn argument]\label{rem:sojourn-scope}
+\Cref{prop:sojourn} is an asymptotic statement ($z \to \infty$).  At a
+\emph{fixed} operating margin it supplies the mechanism and the
+direction, not a bound: how short the transformed process's visits are
+at a given level depends on the transform.  The operational claim ---
+that marginal-matched Gaussian-based models mispredict event durations
+at deployed margins --- rests on the exact fixed-level counterexample
+(\cref{prop:counterexample}) for magnitudes and on the measured
+event-duration histograms of the telemetry, with the asymptotics
+pinning the reason.
+\end{remark}
+
+\subsection{Where the temporal law does and does not matter}
+\label{sec:where-temporal}
+
+The last two propositions justify modeling pauses explicitly.  The
+following exactness result then draws a perhaps surprising boundary: for
+the \emph{mean} underrun loss, only marginal pause statistics matter.
+
+\begin{proposition}[Campbell evaluation of the underrun fraction]
+\label{prop:campbell}
+Under \cref{as:pause}, suppose episodes of receiver $i$ do not overlap,
+the margin is held at the constant value $m$ throughout, and recovery is
+instant ($\rho = 0$; \cref{sec:indicator} quantifies the error of all
+three suppositions).  Then the long-run fraction of time in underrun
+caused by pauses alone is
+\begin{equation}\label{eq:campbell}
+  R_i(m)
+  \;=\;
+  \lambda_i \,\E\pos{H_i - m},
+\end{equation}
+where the expectation is over the Palm mark law $F_i$.  This holds for
+\emph{any} stationary marked point process: clustering of episode times
+does not change the mean underrun fraction.
+\end{proposition}
+
+\begin{proof}
+By \cref{prop:ramp} and \cref{def:margin}, during episode $k$ the margin
+is $m - P_i$, which is negative exactly while $P_i > m$, i.e., for
+duration $\pos{H_{i,k}-m}$ (the ramp descends at unit rate).  Episodes do
+not overlap, so total underrun time in $[0,T]$ is
+$\sum_{k: T_{i,k}\in[0,T]} \pos{H_{i,k}-m}$ up to edge effects of two
+episodes.  The Campbell--Mecke formula for stationary marked point
+processes (imported; statement and reference in \cref{sec:app-campbell})
+gives the expectation of this sum as
+$\lambda_i T\,\E\pos{H_i - m}$.  Dividing by $T$ and letting
+$T \to \infty$ gives \cref{eq:campbell}; the limit holds almost surely
+under ergodicity by the same theorem's ergodic form.
+\end{proof}
+
+\begin{remark}[The division of labor]\label{rem:division}
+Combining \cref{prop:counterexample,prop:sojourn,prop:campbell}:
+\begin{itemize}
+  \item Under instant recovery, the \emph{mean} pause-caused underrun
+    loss at a fixed margin needs only the marginal exceedance structure
+    $(\lambda_i, F_i)$.  Clustering does not move it.
+  \item With finite recovery times (\cref{as:recovery}) the mean loss
+    gains a compound term: an episode arriving while the margin is still
+    depressed does extra damage.  This term depends on the \emph{gap
+    law} between consecutive episodes, so the temporal structure enters
+    the mean loss through exactly one channel --- gaps shorter than
+    recovery times.  \Cref{sec:risk-evaluation} computes it.
+  \item Beyond the mean, the temporal law also governs the variance of
+    realized loss over finite horizons (hence how fast
+    $(\lambda_i, F_i)$ can be estimated and how wide the confidence
+    bands of the level program are), the validity of Simplifications
+    S3--S5, and any risk-averse variant of the loss.
+\end{itemize}
+This sharpens the reason for measuring gap structure: it prices the
+compound risk, it calibrates the trust in the estimated risk, and it
+validates the model.
+\end{remark}
+
+%% =============================================================================
+\section{Exact Reductions}\label{sec:reductions}
+
+This section performs coordinate changes that are exact, preceded by
+the one statistical convention everything later rests on (S1 ---
+stated first so that its scope is visible, and itself carrying a
+defect like every other S-item).  The output is a decomposition of the loss into parts that
+the quadratic machinery of \cref{sec:quadratic} can process, plus a
+precise identification of the one term that resists.
+
+\subsection{From time averages to stationary expectations}
+\label{sec:ergodic}
+
+\begin{simplification}[S1: stationary ergodic regime]\label{simp:ergodic}
+\textbf{Statement.}  Within one operating regime, the closed-loop system
+under a fixed policy is stationary and ergodic: the time average in
+\cref{eq:loss} equals the expectation of $\Lambda$ under the stationary law,
+\[
+  J(\pi) \;=\; \E\bigl[\Lambda(0,\omega)\bigr]
+  \quad\text{(stationary law of the closed loop).}
+\]
+\textbf{Role.}  Converts trajectory optimization into optimization of a
+stationary distribution.  Every later formula computes stationary
+expectations.\\
+\textbf{Defect.}  Real networks switch regimes: a host moves from wired
+to radio, a radio environment degrades, a route changes.  Statistics
+estimated in one regime are wrong in the next.  The size of the defect is
+the loss incurred during adaptation: (regime switch rate) $\times$
+(adaptation time) $\times$ (excess loss during adaptation).  The
+adaptation time of the estimators is a design parameter
+(\cref{sec:controller}); the derivation does not hide it.\\
+\textbf{Monitor.}  Change detection on the estimator inputs; the
+telemetry flags disagreement between short-window and long-window
+estimates of $(\sigma_i, \lambda_i, F_i)$.
+\end{simplification}
+
+\subsection{Mean and difference coordinates}\label{sec:coordinates}
+
+\begin{definition}[Fleet coordinates]\label{def:coordinates}
+Define the fleet mean and the deviations
+\[
+  \Lbar(t) = \frac1N\sum_{i=1}^N L_i(t),
+  \qquad
+  \Ltil{i}(t) = L_i(t) - \Lbar(t),
+  \qquad
+  \textstyle\sum_i \Ltil{i}(t) = 0 ,
+\]
+and the same for warp: $\bar u = \frac1N\sum_i u_i$,
+$\tilde u_i = u_i - \bar u$.
+\end{definition}
+
+\begin{proposition}[The loss in fleet coordinates]\label{prop:loss-coords}
+The pointwise loss \cref{eq:pointwise-loss} equals
+\begin{equation}\label{eq:loss-coords}
+  \Lambda
+  \;=\;
+  \underbrace{\alpha \Lbar \;+\; r\,\dot{\bar u}^2}_{\text{mean
+  coordinate}}
+  \;+\;
+  \underbrace{\frac{q}{N}\sum_i \Ltil{i}^2
+  \;+\; \frac{r}{N}\sum_i \dot{\tilde u}_i^2}_{\text{difference
+  coordinates}}
+  \;+\;
+  \underbrace{\frac{c}{N}\sum_i \ind{m_i < 0}}_{\text{couples both}} .
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+The latency and synchronization terms are already in coordinate form by
+\cref{def:coordinates}.  For the warp term, expand
+$\dot u_i = \dot{\bar u} + \dot{\tilde u}_i$:
+\[
+  \frac1N\sum_i \dot u_i^2
+  = \frac1N\sum_i \bigl(\dot{\bar u} + \dot{\tilde u}_i\bigr)^2
+  = \dot{\bar u}^2
+    + \frac{2\dot{\bar u}}{N}\sum_i \dot{\tilde u}_i
+    + \frac1N\sum_i \dot{\tilde u}_i^2
+  = \dot{\bar u}^2 + \frac1N\sum_i \dot{\tilde u}_i^2 ,
+\]
+because $\sum_i \tilde u_i = 0$ identically, hence
+$\sum_i \dot{\tilde u}_i = 0$.  The indicator term depends on
+$m_i = \Lbar + \Ltil{i} - D_i(s_i(t))$, which contains both coordinates;
+it does not decompose.
+\end{proof}
+
+\begin{proposition}[Dynamics decouple]\label{prop:dynamics-decouple}
+From \cref{prop:latency-dynamics}, by averaging and subtracting:
+\[
+  \dot{\Lbar} = \bar w - \bar u ,
+  \qquad
+  \dot{\Ltil{i}} = \tilde w_i - \tilde u_i .
+\]
+The mean coordinate is driven only by mean drift and mean warp; each
+difference coordinate only by its own drift and warp deviations.
+\end{proposition}
+
+\begin{proof}
+Linearity of \cref{eq:latency-dynamics} in $(w_i, u_i)$ and of the
+averaging map.
+\end{proof}
+
+\begin{remark}[The obstacle, stated precisely]\label{rem:obstacle}
+After \cref{prop:loss-coords,prop:dynamics-decouple}, the problem would
+split into $1 + (N{-}1)$ independent problems --- one for the mean, one
+per difference direction --- \emph{except} for the indicator term, which
+evaluates the sum $\Lbar + \Ltil{i}$ against the delay realization.
+Everything in \cref{sec:indicator} exists to handle this one term; the
+result (\cref{sec:composition}) is that after quantified approximations
+it attaches only to the mean coordinate.
+\end{remark}
+
+\subsection{Superposition}\label{sec:superposition}
+
+\begin{proposition}[Component superposition]\label{prop:superposition}
+Under any linear time-invariant policy, every closed-loop signal (latency
+error, margin, warp) is a sum of its responses to $B_i$, $\varepsilon_i$,
+$P_i$, drift $w_i$, and measurement noise $n_i$ separately.
+\end{proposition}
+
+\begin{proof}
+The closed loop of a linear plant and a linear policy is a linear map of
+its inputs; \cref{as:decomposition} writes the disturbance as a sum.
+\end{proof}
+
+This licenses the accounting of \cref{sec:transfer}: each loss term is
+evaluated component by component.  Cross terms between components appear
+only in second moments of sums; \cref{simp:independence} (S9) treats
+them.
+
+%% =============================================================================
+\section{The Quadratic Theory}\label{sec:quadratic}
+
+This section solves the part of the problem that lives in the closed
+algebra of linear dynamics, quadratic costs, and second moments.  The
+solution machinery is classical; the derivation is nevertheless complete,
+because the specific constants matter later.
+
+\subsection{The closed algebra}\label{sec:closure}
+
+Three facts, jointly, make the quadratic part solvable in closed form.
+
+\begin{proposition}[Closure]\label{prop:closure}
+\begin{enumerate}[label=(\roman*)]
+  \item A linear map of a Gaussian vector is Gaussian (imported; standard
+    property of Gaussian measures).
+  \item The expectation of a quadratic form depends only on the first two
+    moments (\cref{prop:quadratic-second-moment}).
+  \item The minimizer of a quadratic cost under linear dynamics is linear
+    state feedback (proven for our system in \cref{prop:riccati} below).
+\end{enumerate}
+Consequently: starting from linear dynamics, quadratic costs, and a
+disturbance described by second moments, every object generated by the
+optimization (optimal law, closed loop, cost value) stays inside a family
+parameterized by matrices.  No path-space computation is needed.
+\end{proposition}
+
+\begin{remark}[Where Gaussianity actually matters]
+\label{rem:gaussian-role}
+For the fully observed problem \cref{eq:lqr-setup} below, the
+completion-of-squares argument of \cref{prop:riccati} never uses
+Gaussianity: the linear law is optimal among \emph{all} causal
+state-feedback laws for any mean-zero white noise of finite intensity,
+because the quadratic value function ansatz closes regardless of the
+noise law.  Gaussianity earns its keep one level up: when the
+controlled error must be inferred from a corrupted measurement, the
+linear estimator is optimal among all causal estimators only for
+Gaussian corruption.  The real assumption of the fast layer is
+therefore about \emph{measurement}, and \cref{simp:gaussian} states it
+as such.
+\end{remark}
+
+(Simplifications are numbered by their position in the register of
+\cref{sec:register}, not by order of appearance: S10, S12, and S13
+arise inside the machinery and composition chapters, S2--S9 in the
+indicator chapter.)
+
+\setcounter{simplification}{9}%
+\begin{simplification}[S10: full-information law on the raw
+measurement]\label{simp:gaussian}
+\textbf{Statement.}  The fast layer applies the full-information
+optimal law of \cref{prop:riccati} with the measured output
+substituted for the true error --- no filtering stage --- and stays in
+the linear time-invariant class.\\
+\textbf{Role.}  Keeps the fast layer a two-gain law; avoids carrying
+an estimator design through the derivation.  Under exact error
+observation the restriction is vacuous (\cref{rem:gaussian-role}).\\
+\textbf{Defect.}  Two parts, by backend.  (a) Under the latency
+measurement, the corruption $n_i$ enters the loop and moves true
+latency with transfer $-\kappa^2/\mathcal{D}(s)$
+(\cref{prop:transfer}); the exposure is
+$\int |\kappa^2/\mathcal{D}(j\omega)|^2 S_n(\omega)\,
+\dd\omega/2\pi$, which also upper-bounds what an optimal filtering
+stage could recover.  On time-disciplined hosts $n_i$ is microseconds
+and the forfeit is negligible; on an undisciplined host $n_i$ drifts
+by milliseconds and no linear filter repairs it --- the correct
+response is switching that stream's backend, not a filter.  (b) Under
+the margin measurement, the deviation itself drives the loop, and its
+distribution is far from Gaussian (the pause component): a nonlinear
+law can strictly beat the linear one.  The event-gated machinery of
+the implementation (detection, freezing, supervision) is exactly such
+a nonlinear element, added outside this derivation; its benefit is
+bounded by the pause leakage terms of \cref{prop:transfer}.\\
+\textbf{Monitor.}  Innovation histogram and spectrum of the loop;
+measured $S_n$ level per host.
+\end{simplification}
+
+\subsection{Spectral evaluation}\label{sec:spectral}
+
+\begin{proposition}[Output spectra of linear systems]\label{prop:psd}
+Let $x$ be stationary with power spectral density $S_x(\omega)$, let $h$
+be the impulse response of a stable linear time-invariant system with
+transfer function $H(s)$, and let $y = h * x$.  Then $y$ is stationary
+with
+\begin{equation}\label{eq:psd-rule}
+  S_y(\omega) = \bigl|H(j\omega)\bigr|^2 S_x(\omega),
+  \qquad
+  \Var[y] = \int_{-\infty}^{\infty} |H(j\omega)|^2 S_x(\omega)
+  \,\frac{\dd\omega}{2\pi}.
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+The autocovariance of $y$ is
+$R_y(\tau) = \E[y(t)y(t{+}\tau)]
+= \iint h(a)h(b)\,R_x(\tau + a - b)\dd a\dd b$.
+Taking Fourier transforms in $\tau$ and using the convolution theorem
+twice gives $S_y = H(j\omega)\overline{H(j\omega)}\,S_x$.  Integrating
+the spectral density gives the variance (Bochner / Wiener--Khinchin,
+imported).
+\end{proof}
+
+\begin{convention}[Transform notation]\label{conv:transforms}
+In spectral and transfer-function contexts, $H(s)$ denotes a generic
+transfer function and $s$ the Laplace variable; capital letters
+($E, U, W, Y, M, N_i, \tilde D$) denote transforms of the
+corresponding time-domain signals.  Neither use collides with stream
+position $s$ (\cref{def:stream}) or episode heights $H_{i,k}$
+(\cref{as:pause}), which never appear inside transforms.
+\end{convention}
+
+\subsection{The fast loop is a linear-quadratic regulator}\label{sec:lqr}
+
+Consider one difference coordinate (\cref{sec:speaker-modes} shows all
+$N{-}1$ of them are identical copies).  Write $e$ for the coordinate's
+latency error, $u$ for its warp, $v = \dot u$ for the control input, and
+let white noise of intensity $\sigma_w^2$ drive $e$ (per
+\cref{cor:no-brownian}, this white noise represents baseline-wander and
+measurement-noise components; the stationary diffusion enters separately
+through \cref{prop:psd} and the transfer functions of
+\cref{sec:transfer}).  The system and cost are
+\begin{equation}\label{eq:lqr-setup}
+  \frac{\dd}{\dd t}\begin{pmatrix} e\\ u\end{pmatrix}
+  =
+  \underbrace{\begin{pmatrix} 0 & -1\\ 0 & 0\end{pmatrix}}_{A}
+  \begin{pmatrix} e\\ u\end{pmatrix}
+  +
+  \underbrace{\begin{pmatrix} 0\\ 1\end{pmatrix}}_{B} v
+  + \begin{pmatrix} \sigma_w \dot W\\ 0\end{pmatrix},
+  \qquad
+  \text{cost rate } q e^2 + r v^2 .
+\end{equation}
+
+\setcounter{simplification}{11}%
+\begin{simplification}[S12: white-noise surrogate for the loop-driving
+disturbance]\label{simp:whitenoise}
+\textbf{Statement.}  The disturbance driving the fast-loop design is
+modeled as white noise of intensity $\sigma_w^2$, although the physical
+components it stands for --- the wander of $B_i$
+(\cref{as:baseline}: bounded derivative, not integrated white noise)
+and measurement error --- have non-flat spectra.\\
+\textbf{Role.}  Yields the closed-form Riccati and Lyapunov results
+below.\\
+\textbf{Defect.}  Two distinct effects.  For the \emph{gains}: the
+optimal linear law against a colored disturbance augments the design
+with a disturbance model; for the dominant mismatch here --- the
+near-DC drift component --- that augmentation is exactly the integral
+action of \cref{sec:integral}, which the implementation carries, so
+the residual gain defect is confined to mid-band spectral shape.  For
+the \emph{evaluations}: the variance formulas of
+\cref{prop:lyapunov} err by
+$\int |H(j\omega)|^2\,(S_{\mathrm{true}}(\omega) - \sigma_w^2)
+\,\dd\omega/2\pi$ per output, a measurable quantity.\\
+\textbf{Monitor.}  Flatness of the loop-innovation spectrum within the
+bandwidth $\kappa$.
+\end{simplification}
+
+\begin{proposition}[Riccati solution]\label{prop:riccati}
+The average-cost optimal law for \cref{eq:lqr-setup} is
+\begin{equation}\label{eq:lqr-law}
+  v \;=\; \kappa^2\, e \;-\; \sqrt2\,\kappa\, u,
+  \qquad
+  \kappa \;\coloneqq\; \Bigl(\frac{q}{r}\Bigr)^{1/4},
+\end{equation}
+with closed-loop characteristic polynomial
+$\mathcal{D}(s) = s^2 + \sqrt2\,\kappa s + \kappa^2$: natural frequency
+$\omega_n = \kappa$ and damping ratio $\zeta = 1/\sqrt2$.  The gains do
+not depend on the noise intensity $\sigma_w^2$.
+\end{proposition}
+
+\begin{proof}
+Seek a value function $V(x) = x^\top P x$ and average cost
+$\varrho$ (the average-cost constant; unrelated to the recovery time
+$\rho$)
+satisfying the average-cost Hamilton--Jacobi--Bellman equation
+\[
+  \varrho \;=\; \min_v\Bigl[\, q e^2 + r v^2
+    + \nabla V^\top (Ax + Bv)\Bigr]
+    + \tfrac12 \sigma_w^2\,\partial^2_{ee} V .
+\]
+(The verification theorem for average-cost linear-quadratic control is
+imported; the computation below exhibits the solution it certifies.)
+The minimization over $v$ is a quadratic:
+$\partial_v[\,rv^2 + 2x^\top P B v\,] = 0$ gives
+$v^* = -\tfrac1r B^\top P x$.  Substituting back, the $x$-dependent part
+must vanish for all $x$, giving the algebraic Riccati equation
+\[
+  A^\top P + PA - \tfrac1r PBB^\top P + Q = 0,
+  \qquad Q = \begin{pmatrix} q&0\\0&0\end{pmatrix},
+\]
+and $\varrho = \sigma_w^2 P_{11}$.  Write
+$P = \bigl(\begin{smallmatrix} p_{11}&p_{12}\\
+p_{12}&p_{22}\end{smallmatrix}\bigr)$.  Componentwise:
+\[
+  A^\top P + PA
+  = \begin{pmatrix} 0 & -p_{11}\\ -p_{11} & -2p_{12}\end{pmatrix},
+  \qquad
+  \tfrac1r PBB^\top P
+  = \tfrac1r\begin{pmatrix} p_{12}^2 & p_{12}p_{22}\\
+     p_{12}p_{22} & p_{22}^2\end{pmatrix}.
+\]
+The three scalar equations are
+\[
+  \text{(1,1)}:\; q = \tfrac{p_{12}^2}{r},
+  \qquad
+  \text{(1,2)}:\; p_{11} = -\tfrac{p_{12}p_{22}}{r},
+  \qquad
+  \text{(2,2)}:\; -2p_{12} = \tfrac{p_{22}^2}{r}.
+\]
+Equation (2,2) forces $p_{12} < 0$, so (1,1) gives
+$p_{12} = -\sqrt{qr}$; then (2,2) gives
+$p_{22} = \sqrt{2r\sqrt{qr}} = \sqrt2\, q^{1/4} r^{3/4}$ and (1,2) gives
+$p_{11} = \sqrt2\, q^{3/4} r^{1/4} > 0$.  Positive definiteness:
+$p_{11} > 0$ and
+$\det P = p_{11}p_{22} - p_{12}^2 = 2qr - qr = qr > 0$.
+The law is $v = -\tfrac1r(p_{12} e + p_{22} u)
+= \sqrt{q/r}\,e - \sqrt2\,(q/r)^{1/4} u$, which is \cref{eq:lqr-law}
+with $\kappa = (q/r)^{1/4}$.  The closed-loop matrix
+$A - \tfrac1r BB^\top P
+= \bigl(\begin{smallmatrix} 0&-1\\ \kappa^2& -\sqrt2\kappa
+\end{smallmatrix}\bigr)$
+has characteristic polynomial
+$s(s+\sqrt2\kappa) + \kappa^2 = s^2 + \sqrt2\kappa s + \kappa^2$, i.e.,
+$\omega_n = \kappa$, $\zeta = \sqrt2\kappa/(2\kappa) = 1/\sqrt2$,
+stable.  The noise intensity appears only in $\varrho$, not in the Riccati
+equation, so the gains are noise-independent.
+\end{proof}
+
+\begin{remark}[Correspondence with the deployed controller]
+\label{rem:deployed}
+The implementation runs exactly this second-order law (plus integral
+action, \cref{sec:integral}), derived earlier in sample units with cost
+$\Var[e_{\mathrm{samples}}] + \lambda \Var[\dot u]$ (that
+document's smoothness weight $\lambda$, unrelated to the episode
+rates $\lambda_i$).  Converting
+$e_{\mathrm{samples}} = F_s\, e_{\mathrm{seconds}}$ maps that cost to
+$q = F_s^2$, $r = \lambda$, hence
+$\kappa = (F_s^2/\lambda)^{1/4}$ --- the same natural frequency, and the
+same universal damping $\zeta = 1/\sqrt2$.  What is new here is not the
+law but its \emph{scope}: \cref{prop:riccati} makes it the
+full-information optimum over all causal laws for the difference
+coordinates --- not a choice within a two-parameter family --- and S10
+states exactly what running it on the raw measurement gives up.
+\end{remark}
+
+\begin{proposition}[Stationary variances of the fast loop]
+\label{prop:lyapunov}
+Under the law \cref{eq:lqr-law} driven by white noise of intensity
+$\sigma_w^2$ on $e$, the stationary covariance
+$X = \Cov(e,u)$ solves the Lyapunov equation
+$A_c X + X A_c^\top + \operatorname{diag}(\sigma_w^2, 0) = 0$ with
+$A_c = \bigl(\begin{smallmatrix} 0&-1\\ \kappa^2&-\sqrt2\kappa
+\end{smallmatrix}\bigr)$, and
+\begin{equation}\label{eq:lyapunov-values}
+  \Var[e] = \frac{3\,\sigma_w^2}{2\sqrt2\,\kappa},
+  \qquad
+  \Cov[e,u] = \frac{\sigma_w^2}{2},
+  \qquad
+  \Var[u] = \frac{\kappa\,\sigma_w^2}{2\sqrt2},
+  \qquad
+  \Var[\dot u] = \frac{\kappa^3 \sigma_w^2}{2\sqrt2}.
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+Write $X = \bigl(\begin{smallmatrix} x_e&x_c\\ x_c&x_u
+\end{smallmatrix}\bigr)$.  Compute
+$A_c X = \bigl(\begin{smallmatrix} -x_c & -x_u\\
+\kappa^2 x_e - \sqrt2\kappa x_c & \kappa^2 x_c - \sqrt2\kappa x_u
+\end{smallmatrix}\bigr)$.
+The Lyapunov equation componentwise:
+\[
+  \text{(1,1)}:\; -2x_c + \sigma_w^2 = 0
+  \;\Rightarrow\; x_c = \tfrac{\sigma_w^2}{2};
+  \qquad
+  \text{(2,2)}:\; 2\kappa^2 x_c - 2\sqrt2\kappa x_u = 0
+  \;\Rightarrow\; x_u = \tfrac{\kappa x_c}{\sqrt2}
+   = \tfrac{\kappa\sigma_w^2}{2\sqrt2};
+\]
+\[
+  \text{(1,2)}:\; -x_u + \kappa^2 x_e - \sqrt2\kappa x_c = 0
+  \;\Rightarrow\;
+  x_e = \frac{x_u + \sqrt2\kappa x_c}{\kappa^2}
+      = \frac{\sigma_w^2}{\kappa}
+        \Bigl(\frac{1}{2\sqrt2} + \frac{\sqrt2}{2}\Bigr)
+      = \frac{3\,\sigma_w^2}{2\sqrt2\,\kappa}.
+\]
+For $\Var[\dot u]$, use $\dot u = v = \kappa^2 e - \sqrt2 \kappa u$:
+\[
+  \Var[v] = \kappa^4 x_e - 2\sqrt2\kappa^3 x_c + 2\kappa^2 x_u
+  = \kappa^3\sigma_w^2\Bigl(\frac{3}{2\sqrt2} - \sqrt2
+    + \frac{1}{\sqrt2}\Bigr)
+  = \frac{\kappa^3\sigma_w^2}{2\sqrt2},
+\]
+using $\tfrac{3}{2\sqrt2} - \sqrt2 + \tfrac1{\sqrt2}
+= \tfrac{3 - 4 + 2}{2\sqrt2} = \tfrac1{2\sqrt2}$.
+\end{proof}
+
+\subsection{Speaker-space diagonalization}\label{sec:speaker-modes}
+
+\begin{proposition}[Mode decomposition]\label{prop:modes}
+Let $\Pi = I_N - \tfrac1N \mathbf{1}\mathbf{1}^\top$ be the centering
+matrix.  Then:
+\begin{enumerate}[label=(\roman*)]
+  \item The synchronization cost is
+    $\tfrac{q}{N} L^\top \Pi L$; the matrix $\Pi$ has eigenvalue $0$ on
+    the all-ones direction (the mean coordinate) and eigenvalue $1$ on
+    its orthogonal complement (the difference coordinates).
+  \item In any orthonormal basis whose first vector is
+    $\mathbf{1}/\sqrt N$, the quadratic part of the loss and the
+    dynamics \cref{prop:dynamics-decouple} split into: a mean-coordinate
+    problem with \emph{zero} quadratic state cost, linear cost
+    $\alpha\Lbar$, and warp-rate cost; and $N-1$ identical difference
+    problems, each an instance of \cref{eq:lqr-setup} with weights
+    $(q/N, r/N)$ --- the common factor $1/N$ cancels in the ratio
+    $q/r$, so the bandwidth $\kappa$ of \cref{prop:riccati} is
+    unaffected and the factor is suppressed from here on.
+\end{enumerate}
+\end{proposition}
+
+\begin{proof}
+(i) $\Pi\mathbf{1} = \mathbf{1} - \mathbf{1} = 0$; for $x \perp
+\mathbf{1}$, $\Pi x = x$.  Also
+$\sum_i (L_i - \Lbar)^2 = L^\top \Pi L$ by expanding the square.
+(ii) The warp cost $\tfrac{r}{N}\sum \dot u_i^2 = \tfrac{r}{N}
+\dot u^\top I \dot u$ is proportional to the identity, hence diagonal in
+every orthonormal basis; the dynamics are the same scalar integrator in
+every coordinate (\cref{prop:dynamics-decouple}); the synchronization
+cost is diagonal by (i) with the stated eigenvalues; the latency cost
+$\alpha\Lbar$ involves only the first basis vector.  Disturbance
+covariances need not be diagonal in this basis; by
+\cref{prop:riccati} the optimal gains do not depend on them, and cost
+evaluation projects the covariances onto the modes.
+\end{proof}
+
+\begin{remark}[What the mean coordinate is left with]
+\label{rem:mean-coordinate}
+The mean coordinate has no quadratic restoring cost: synchronization
+puts eigenvalue zero on it, and the warp-rate cost charges only
+\emph{motion} of the mean warp, not its value.  Its only costs are the
+linear latency price $\alpha\Lbar$ and (through the margin) the
+indicator term.  The quadratic machinery therefore has nothing to say
+about \emph{where} the fleet sits --- only about how it moves.  This
+degeneracy is not an accident; it is the structural hook on which
+\cref{sec:composition} hangs the underrun term.
+\end{remark}
+
+\subsection{Closed-loop transfer functions and the component ledger}
+\label{sec:transfer}
+
+The fast law \cref{eq:lqr-law} in transfer form: from $s U = \kappa^2 Y
+- \sqrt2\kappa U$,
+\begin{equation}\label{eq:controller-tf}
+  U(s) = C(s)\, Y(s),
+  \qquad
+  C(s) = \frac{\kappa^2}{s + \sqrt2\kappa},
+\end{equation}
+where $Y$ is the measured error.  The plant is $sE = W - U$ with $W$ the
+drift disturbance.  Let $\tilde D$ denote the transform of the
+deviation of the delay process from its baseline --- the same physical
+quantity written $x_i$ in the time domain
+(\cref{sec:indicator-exact}) --- $N_i$ the transform of the
+measurement error $n_i$ of \cref{def:meas-e2e}, and
+$\mathcal{D}(s) = s^2 + \sqrt2\kappa s + \kappa^2$.
+
+\begin{proposition}[Backend transfer functions]\label{prop:transfer}
+Under the margin measurement ($Y = E - \tilde D$, \cref{def:meas-niq}):
+\begin{equation}\label{eq:tf-niq}
+  \frac{E}{\tilde D} = \frac{\kappa^2}{\mathcal{D}(s)},
+  \qquad
+  \frac{M}{\tilde D} = -\,\frac{s\,(s+\sqrt2\kappa)}{\mathcal{D}(s)},
+  \qquad
+  \frac{U}{\tilde D} = -\,\frac{\kappa^2 s}{\mathcal{D}(s)},
+\end{equation}
+where $M = E - \tilde D$ is the margin deviation.  Under the latency
+measurement ($Y = E + N_i$, \cref{def:meas-e2e}):
+\begin{equation}\label{eq:tf-e2e}
+  \frac{E}{N_i} = -\,\frac{\kappa^2}{\mathcal{D}(s)},
+  \qquad
+  \frac{E}{\tilde D} = 0,
+  \qquad
+  \frac{M}{\tilde D} = -1 \;\;\text{(all frequencies)} .
+\end{equation}
+\end{proposition}
+
+\begin{proof}
+Margin measurement: $sE = W - C\,(E - \tilde D)$ gives
+$E\,(s + C) = W + C\tilde D$, so
+$E/\tilde D = C/(s+C)$.  Compute
+$s + C = \bigl(s(s+\sqrt2\kappa) + \kappa^2\bigr)/(s+\sqrt2\kappa)
+= \mathcal{D}(s)/(s+\sqrt2\kappa)$, hence
+$C/(s+C) = \kappa^2/\mathcal{D}(s)$.  Then
+$M/\tilde D = E/\tilde D - 1 = (\kappa^2 - \mathcal{D}(s))/\mathcal{D}(s)
+= -s(s+\sqrt2\kappa)/\mathcal{D}(s)$, and
+$U = C\,(E - \tilde D) = C\,(M/\tilde D)\,\tilde D
+= -\kappa^2 s/\mathcal{D}(s)\,\tilde D$.
+Latency measurement: $sE = W - C(E + N_i)$ gives
+$E/N_i = -C/(s+C) = -\kappa^2/\mathcal{D}(s)$; the delay deviation does not enter
+the loop equations at all, so $E/\tilde D = 0$ and
+$M = E - \tilde D$ carries $\tilde D$ with gain $-1$ at every
+frequency.
+\end{proof}
+
+\begin{remark}[Reading \cref{prop:transfer}]\label{rem:transfer-reading}
+Under the margin measurement, $E/\tilde D$ is a unit-gain low-pass:
+slow delay changes (baseline) are converted one-for-one into latency
+changes, and only fluctuations above the loop bandwidth $\kappa$ land in
+the margin.  The pause component is far above $\kappa$ in its onset, so
+a pause drives the margin almost fully --- but the loop still responds
+through $U/\tilde D$: pauses leak into warp (and hence into the
+synchronization and roughness terms) under this backend.
+Under the latency measurement the network deviation never drives the
+loop: the entire deviation, at \emph{all} frequencies, lands in the
+margin.  Slow baseline growth then consumes margin silently --- the
+level layer must track the baseline explicitly
+(\cref{sec:level-program}) --- and a drifting clock error $n_i$ moves
+true latency one-for-one at DC.  Neither backend removes a disturbance;
+each chooses which loss term absorbs it.
+\end{remark}
+
+\begin{table}[h]
+\centering
+\caption{Which loss term absorbs which disturbance component.}
+\label{tab:ledger}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Component & Latency measurement (e2e) & Margin measurement (niq)\\
+\midrule
+Baseline $B_i$ & indicator (silent margin drain; & latency term
+  (latency follows \\
+ & level layer must track $\hat B_i$) & the network) \\
+Diffusion $\varepsilon_i$ & indicator (bulk tail term) & margin
+  (high-pass part) $\to$ indicator; \\
+ & & warp/sync (band-pass leakage) \\
+Pauses $P_i$ & indicator only & indicator $+$ warp/sync leakage \\
+Drift $w_i$ & warp DC (free) & warp DC (free) \\
+Clock error $n_i$ & latency term (unit DC gain) & absent \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Integral action}\label{sec:integral}
+
+The drift $w_i$ is unknown and slowly varying.  The principled
+treatment augments the state with the unknown input ($\dot w = 0$) and
+solves the augmented problem; by the internal-model principle
+(imported: Francis and Wonham, 1976), any law achieving zero
+steady-state error against a constant disturbance must contain an
+integrator, and the certainty-equivalent reduction of the augmented
+design --- estimate $\hat w$ by integrating the loop innovation, feed
+it forward --- lands on the law \cref{eq:lqr-law} plus an integral
+term:
+\begin{equation}\label{eq:pid}
+  \dot\xi = e,
+  \qquad
+  v = \kappa^2 e + K_0\,\xi - \sqrt2\kappa\,u ,
+\end{equation}
+with $K_0$ placing a pole well below $\kappa$ (dominant-pole design).
+Two caveats, so the status of \cref{eq:pid} is exact:
+it is certainty-equivalent and dominant-pole-tuned, not the jointly
+optimized augmented-state law ($K_0$ is set by a chosen settling time
+$T_I$, not by the augmented Riccati equation); and the integral mode
+inflates the stationary error variance by the factor
+$1/\bigl(1 - 1/(\sqrt2\,\kappa\,T_I)\bigr) \approx 1.035$ --- a
+$3.5\%$ overhead at the deployed
+$\kappa \approx 0.69\,\mathrm{s}^{-1}$, $T_I = 30$\,s.  The
+deployed controller implements exactly \cref{eq:pid} with anti-windup
+on the warp clamp; the earlier document\footnote{\texttt{controller.tex}
+in this directory: the second-order controller derivation.  Its gain
+optimization is consistent with \cref{prop:riccati}; its noise passage
+is superseded by \cref{prop:telescope,cor:no-brownian}: a stationary
+jitter level cannot supply the accumulating white noise assumed there,
+so its $\sigma_w$ must be read as baseline wander plus measurement
+noise, and its Gaussian-tail underrun estimates are replaced by
+\cref{sec:indicator}.}
+gives the dominant-pole design, the variance-overhead computation, and
+stability margins (the integral gain must satisfy
+$K_0 < \sqrt2\,\kappa\cdot\kappa^2$, the Routh bound).
+
+%% =============================================================================
+\section{The Indicator Term}\label{sec:indicator}
+
+The underrun term is outside the quadratic algebra
+(\cref{sec:indicator-not-moments}).  This section evaluates it by a chain
+of quantified simplifications.  The end product is a function
+$R_i(\mu)$ --- underrun fraction versus margin level --- consumed by the
+level program of \cref{sec:composition}.
+
+\subsection{Exact rewriting}\label{sec:indicator-exact}
+
+Fix receiver $i$.  Under S1, the underrun contribution to the loss is
+$c$ times the stationary probability $\Prob(m_i < 0)$.  Decompose the
+margin using \cref{as:decomposition}: with the fast loop holding the
+latency near a slowly varying level $\ell_i(t)$,
+\begin{equation}\label{eq:margin-decomp}
+  m_i \;=\; \ell_i - B_i - x_i + e_i^{\mathrm{loop}},
+  \qquad
+  x_i \coloneqq \varepsilon_i + P_i ,
+\end{equation}
+where $x_i$ is the \emph{deviation} (the part of the delay above
+baseline; this is the quantity the telemetry's deviation meter measures)
+and $e_i^{\mathrm{loop}}$ is the fast loop's tracking error.  Define the
+\emph{margin level}
+\begin{equation}\label{eq:margin-level}
+  \mu_i \;\coloneqq\; \ell_i - \hat B_i
+  \quad\text{(latency backend)},
+\end{equation}
+the distance between the held latency and the estimated baseline.
+Under the margin backend the loop regulates the margin directly and
+$\mu_i$ is the configured queue target itself, with no baseline
+subtraction (\cref{rem:backend-deviation}); every use of $\mu_i$
+below is backend-conditional in this sense.  Then
+\begin{equation}\label{eq:R-def}
+  \Prob(m_i < 0)
+  \;=\;
+  \Prob\bigl(x_i > \mu_i\bigr) \;+\; \text{(errors)},
+  \qquad
+  R_i(\mu) \coloneqq \Prob(x_i > \mu),
+\end{equation}
+where the errors come from baseline estimation error
+$B_i - \hat B_i$, bounded by the estimator lag $\bar\beta\,\tau_{\hat B}$
+(with $\tau_{\hat B}$ the baseline filter's time constant, distinct
+from the emission time $\tau(s)$), and from
+$e_i^{\mathrm{loop}}$, whose stationary scale is
+$\sqrt{\Var[e]} = \sqrt{3\sigma_w^2/(2\sqrt2\,\kappa)}$ by
+\cref{prop:lyapunov} --- both far smaller than $\sigma_i$ at the
+deployed constants.  $R_i$ is the exceedance function of
+the stationary deviation law --- a directly measurable object: the
+deviation histogram estimates it without any model.
+
+\begin{remark}[Backend dependence of the deviation law]
+\label{rem:backend-deviation}
+\Cref{eq:margin-decomp} reads differently per backend.  Under the
+latency measurement, the loop holds $L_i$ at $\ell_i$ and the full
+deviation lands in the margin at every frequency
+(\cref{prop:transfer}): $x_i$ enters unfiltered.  Under the margin
+measurement, the loop absorbs the part of $x_i$ below the bandwidth
+$\kappa$ into latency, so the deviation reaching the margin is
+high-passed, and the margin level $\mu_i$ is the configured queue
+target itself rather than $\ell_i - \hat B_i$ (the baseline is
+absorbed by the loop and drops out of \cref{eq:margin-level}).  In
+both cases the deviation histogram is measured on the running closed
+loop, so $\hat R_i$ estimates the correct backend-specific exceedance
+law by construction; only the component-model \emph{extrapolation} of
+\cref{sec:risk-evaluation} must respect the backend.
+\end{remark}
+
+\begin{definition}[Occupation density]\label{def:occupation}
+$g_i(\mu) \coloneqq -\,\dd R_i/\dd\mu$: the probability density of time
+the deviation spends at level $\mu$.  The level program's optimality
+condition (\cref{sec:level-program}) is stated in terms of $g_i$.
+\end{definition}
+
+\subsection{Evaluation under the component model}\label{sec:risk-evaluation}
+
+The component model of \cref{sec:process} evaluates $R_i$ as three
+terms.  The decomposition serves two purposes: it \emph{extrapolates}
+$R_i$ beyond the directly observed range (the tail of the pause height
+law extends past any finite observation window), and it \emph{explains}
+which mechanism dominates at which margin.
+
+\begin{proposition}[Risk evaluation]\label{prop:risk-evaluation}
+Under S1--S5 below,
+\begin{equation}\label{eq:risk-evaluation}
+  R_i(\mu)
+  \;=\;
+  \underbrace{\Prob(\varepsilon_i > \mu)}_{\text{bulk}}
+  \;+\;
+  \underbrace{\lambda_i\,\E\pos{H_i - \mu}}_{\text{pauses
+  (\cref{prop:campbell})}}
+  \;+\;
+  \underbrace{\lambda_i \int \E\Bigl[\pos{H' - \mu + \delta(g)}
+      - \pos{H' - \mu}\Bigr]\, G_i(\dd g)}_{\text{compounding}}
+  \;+\; \text{defects of S2--S5},
+\end{equation}
+where $G_i$ is the gap law between consecutive episodes, $H'$ is the
+height of the following episode, and
+\begin{equation}\label{eq:depression}
+  \delta(g) \;=\; \chi\,\pos{1 - g/\rho}
+\end{equation}
+is the residual margin depression at gap $g$ after an episode that
+consumed margin $\chi = \min(H, \mu)$ and recovers over time $\rho$
+(\cref{as:recovery}; linear recovery model).  The expectation in the
+compounding term is over three quantities: the predecessor's height
+$H$ and recovery $\rho$ (entering through $\delta$), and the
+follower's height $H'$; per S5 they are taken mutually independent
+and independent of the gap $g$, each with its marginal law.
+\end{proposition}
+
+The bulk term is the stationary exceedance of the diffusion --- exact
+under S1 outside episodes.  \textbf{With wired-host $\sigma_i$ up to one
+millisecond and margin levels of order $5$--$10$\,ms, the bulk term is
+comparable to or larger than the pause term}; no negligibility is
+claimed anywhere.  The pause term is \cref{prop:campbell}.  The
+compounding term prices an episode that arrives while the margin is
+still depressed: the follower's effective margin is
+$\mu - \delta(g)$ instead of $\mu$.  With fast redelivery
+($\rho \sim$ milliseconds) the integral is negligible because
+$G_i(\rho) \approx 0$; with warp-limited recovery
+($\rho$ up to $\chi/u_{\max}$, i.e., seconds) and the measured gap
+clustering (short gaps two to three orders above the exponential
+prediction), the term is first-order.  It is computable from measured
+objects: the gap histogram, the height law, and the recovery mechanism.
+
+\begin{definition}[Belief state]\label{def:belief}
+The \emph{belief state} $\hat\theta(t)$ is the vector of estimator
+outputs feeding the risk evaluation and, later, the level program:
+\[
+  \hat\theta \;\coloneqq\;
+  \bigl(\hat B_i,\ \hat\sigma_i,\
+  \text{deviation histogram},\
+  \hat\lambda_i,\ \hat F_i,\ \hat G_i,\ \hat\rho_i
+  \bigr)_{i=1,\dots,N}.
+\]
+Wherever a later statement says ``the belief moves,'' it means these
+estimates change.
+\end{definition}
+
+\subsection{The simplification chain}\label{sec:simplification-chain}
+
+\setcounter{simplification}{1}%
+\begin{simplification}[S2: additive component evaluation]
+\label{simp:additive}
+\textbf{Statement.}  $R_i$ is evaluated as the sum
+\cref{eq:risk-evaluation}: bulk and pause exceedances add, and the
+diffusion is ignored \emph{inside} episodes.\\
+\textbf{Role.}  Lets each term be estimated by its own estimator (the
+histogram for the bulk; the event meter for pauses).\\
+\textbf{Defect.}  Three parts.  (a) \emph{Threshold smearing}: inside an
+episode the true condition is $\varepsilon_i + P_i > \mu$, not
+$P_i > \mu$; because the ramp crosses level $\mu$ at unit rate, the
+diffusion shifts the crossing time by $O(|\varepsilon_i|)$, so the error
+per episode is at most $\E|\varepsilon_i|$ seconds of misclassified
+time, and the rate error is at most
+$\lambda_i\,\bar F_i(\mu - O(\sigma_i))\cdot O(\sigma_i)$ relative to a
+pause term whose scale is $\lambda_i \E\pos{H_i-\mu}$: the relative
+defect is $O(\sigma_i / \text{height spread})$, a few percent when
+heights are tens of milliseconds, tens of percent when the height law
+concentrates near the margin --- in which case the bulk and pause terms
+have merged physically and the histogram estimate of $R_i$ (which never
+used the decomposition) remains the ground truth.  (b) \emph{Duty
+cycle}: the bulk term uses all time rather than time outside episodes;
+the error is a factor $1 - \lambda_i\E[H_i]$ --- order $10^{-3}$ on
+wired hosts, up to order $10^{-2}$ on radio hosts with second-scale
+heights.  (c) \emph{Zero-drain ramp} (\cref{prop:ramp}): per-episode
+timing error bounded by the burst drain time of
+\cref{as:recovery}(a).\\
+\textbf{Monitor.}  Compare the composed $R_i$ of
+\cref{eq:risk-evaluation} against the raw deviation-histogram exceedance
+on the overlap range; disagreement is exactly the S2 defect.
+\end{simplification}
+
+\begin{simplification}[S3: the fast layer cannot move the indicator]
+\label{simp:actuation}
+\textbf{Statement.}  The underrun term is treated as independent of the
+fast-loop policy: only the level path $\ell_i(t)$ enters it.\\
+\textbf{Role.}  This is the load-bearing decoupling.  It removes the
+indicator from the fast layer's optimization, which is what allows
+\cref{prop:riccati} to stand as the fast-layer optimum.  Without it,
+the barrier term couples to the loop and the problem is a free-boundary
+dynamic program.\\
+\textbf{Defect.}  During an episode, the most any admissible policy can
+add to the margin before it empties is
+$u_{\max} \times (\text{time to empty}) = u_{\max}\,\mu$ (playing
+slower stretches $\mu$ buffered seconds into $\mu/(1-u_{\max})$ wall
+seconds).  With $u_{\max} = 5\times10^{-3}$ and $\mu = 10$\,ms this is
+$50\,\mu$s; with $\mu = 100$\,ms, $0.5$\,ms.  The loss difference
+between the best fast policy and a fast policy that ignores the
+indicator is therefore at most
+\[
+  \frac{c}{N}\sum_i\bigl[R_i(\mu_i) - R_i\bigl(\mu_i(1{+}u_{\max})\bigr)\bigr]
+  \;\le\;
+  \frac{c}{N}\sum_i g_i(\mu_i)\; u_{\max}\,\mu_i ,
+\]
+a relative defect of $u_{\max}\,\mu_i\,g_i(\mu_i)/R_i(\mu_i)$.  The
+honest size of this ratio differs by component.  For the pause part,
+$g/R$ is of order one over the height spread, so the ratio is
+$u_{\max}\mu/(\text{height spread})$ --- well below one percent at the
+reference numbers.  For the bulk part, $g/R$ is the tail hazard rate
+of $\varepsilon_i$, of order $1/x_0$ with $x_0 \le \sigma_i$ the tail
+scale: the ratio is $u_{\max}\mu/x_0$, which at $\mu = 10$\,ms and
+$x_0 = 1$\,ms is $5\%$, and larger for faster-decaying tails.  The
+decoupling nevertheless stands, on an absolute anchor: at the
+operating point the first-order condition (\cref{prop:foc}) pins
+$\tfrac{c}{N}\sum_i g_i(\mu_i) = \alpha$, so the absolute loss the
+fast layer could recover is at most
+$c\,\bar g\,u_{\max}\mu = \alpha\,u_{\max}\mu$ --- a fraction
+$u_{\max}\,\mu/\ell \le u_{\max} = 0.5\%$ of the latency term itself.
+No admissible fast policy moves the indicator term by more than
+that.
+The same authority argument covers reacting to bulk fluctuations: a
+fluctuation of duration $T_f \sim 10$\,ms grants
+$u_{\max}T_f = 50\,\mu\mathrm{s} \ll \sigma_i$.\\
+\textbf{Monitor.}  Both forms: the relative ratio
+$u_{\max}\mu\,g(\mu)/R(\mu)$ per component, and the absolute anchor
+$\alpha\,u_{\max}\mu$ against the running loss estimate; if warp
+authority is ever raised substantially, these monitors flag the
+breakdown of the decomposition (\cref{sec:limits}).
+\end{simplification}
+
+\begin{simplification}[S4: frozen margin during an episode]
+\label{simp:frozen}
+\textbf{Statement.}  The evaluation \cref{eq:campbell} holds the margin
+constant during an episode: no mid-episode warp response and no
+mid-episode refill.\\
+\textbf{Role.}  Gives the closed form $\pos{H-\mu}$ for per-episode
+underrun time.\\
+\textbf{Defect.}  Mid-episode warp is bounded by S3
+($\le u_{\max}\mu$); mid-episode arrivals are excluded by the
+definition of an episode (delivery stopped).  The defect is the S3
+number again; it is not counted twice in the register.\\
+\textbf{Monitor.}  Same as S3.
+\end{simplification}
+
+\begin{simplification}[S5: one-step compounding]
+\label{simp:compound}
+\textbf{Statement.}  The compounding term in \cref{eq:risk-evaluation}
+considers only consecutive episode pairs, with the follower's height
+drawn independently of the gap; chains of three or more episodes inside
+one recovery window are dropped, as is gap--height dependence.\\
+\textbf{Role.}  Keeps the compound term a one-dimensional integral over
+the measured gap histogram.\\
+\textbf{Defect.}  Chain terms are
+$O\bigl((\lambda_i^{\mathrm{loc}}\rho)^2\bigr)$ where
+$\lambda_i^{\mathrm{loc}}$ is the \emph{local} episode rate inside a
+cluster (the measured short-gap rate, not the global average) ---
+with strong clustering this is the first quantity to watch; gap--height
+dependence is measurable from the joint (gap, height) records and enters
+as a covariance correction.\\
+\textbf{Monitor.}  Fraction of episodes whose predecessor lies within
+$\rho$; the drain validator (windowed margin minimum), which sees
+compound drains directly and arbitrates the whole of
+\cref{eq:risk-evaluation} against reality.
+\end{simplification}
+
+\begin{simplification}[S6: two-timescale separation]
+\label{simp:twotimescale}
+\textbf{Statement.}  The level $\ell_i(t)$ and the belief
+$\hat\theta(t)$ move slowly relative to episodes and to the fast-loop
+bandwidth: the evaluation treats $\mu_i$ as constant within episodes
+and within estimation windows.\\
+\textbf{Role.}  Turns the indicator into a \emph{static} function
+$R_i(\mu_i)$ of the current level; the level path enters only through
+the glide cost (\cref{sec:glide}).\\
+\textbf{Defect.}  During a level glide at rate $\gamma$, the margin
+during an episode of duration $H$ differs from the static value by up
+to $\gamma H$; relative defect $\gamma H / \sigma$-scale.  With the
+glide bounded by $u_{\max}$ and $H \le 1$\,s this is at most
+$5$\,ms --- not negligible during fast raises; the raise policy of
+\cref{sec:glide} therefore counts the transient explicitly rather than
+relying on S6.\\
+\textbf{Monitor.}  Glide rate telemetry; episodes stamped with the
+concurrent glide rate.
+\end{simplification}
+
+\begin{simplification}[S7: certainty equivalence]
+\label{simp:certainty}
+\textbf{Statement.}  The level program optimizes against the
+\emph{estimated} risk functions $\hat R_i$ as if they were true; no
+hedging against estimation error and no active probing.\\
+\textbf{Role.}  Replaces a Bayesian dynamic program over beliefs with a
+plug-in static program.\\
+\textbf{Defect.}  Second-order in the estimation error: for the scalar
+level program with optimum $\mu^*$, the excess loss is
+$\tfrac12 J''(\mu^*)\,\E[(\hat\mu^* - \mu^*)^2]$ with curvature
+$J''(\mu^*) = -\tfrac{c}{N}\sum_i g_i'(\mu_i^*)$, positive under S8's
+decreasing densities; the estimator variance follows from event-count
+statistics: with $n$ exceedance observations near the operating point,
+$\operatorname{sd}(\hat\mu^*) \propto 1/\sqrt n$ with a clustering
+inflation factor read from the gap law (\cref{rem:division}).  Active
+probing is unnecessary because every episode's height is measured
+whether or not it causes underrun: the risk curve at levels above the
+operating point is identified from the same records, without ever
+running the system at those levels.\\
+\textbf{Monitor.}  Confidence band of $\hat R_i$ propagated to a
+confidence interval on $\mu^*$; the band width is the S7 budget.
+\end{simplification}
+
+\begin{simplification}[S8: smooth, convex risk curve]
+\label{simp:smooth}
+\textbf{Statement.}  $R_i$ is differentiable at the operating point
+($g_i$ exists), and the composed level objective $J$ is convex on the
+operating range.\\
+\textbf{Role.}  Lets the level program use the first-order condition
+and report two-sided sensitivities.\\
+\textbf{Defect.}  Three ways the statement can fail, none of which
+breaks the program --- it is one-dimensional and solved by direct
+scan of the measured $\hat J$ when the assumption fails
+(\cref{prop:risk-shape}(ii)).  (a) An atom in the height law (a
+mechanism producing a fixed-height pause) makes $R_i$ kinked: the
+first-order condition becomes a subgradient inclusion and the optimum
+may sit exactly at the atom; sensitivities become one-sided.
+(b) Convexity of the bulk term requires a decreasing density beyond
+the operating point (true for unimodal light-tailed laws); the pause
+term is convex unconditionally
+($\dd^2/\dd\mu^2\,\lambda\E\pos{H-\mu} = \lambda f_H(\mu) \ge 0$).
+(c) The compounding term carries a concave piece proportional to the
+residual-depression fraction (\cref{prop:risk-shape}(i) and its
+proof): in the clustered, slow-recovery regime the composed $J$ can
+lose convexity, and the first-order characterization with it.\\
+\textbf{Monitor.}  The estimated $\hat g_i$ near the operating point;
+mass concentration at single heights; the sign of the second
+difference of the scanned $\hat J$ across the operating range.
+\end{simplification}
+
+\begin{simplification}[S9: component independence in second-order
+accounting]\label{simp:independence}
+\textbf{Statement.}  Cross-covariances between $B_i$, $\varepsilon_i$,
+$P_i$ (and across receivers, between idiosyncratic parts) are dropped
+where second moments are summed.\\
+\textbf{Role.}  Keeps the spectral accounting of \cref{sec:transfer}
+per-component.\\
+\textbf{Defect.}  Measured violations exist: episodes co-move with
+baseline shifts (a radio environment change moves both).  The dropped
+terms are covariances bounded by the product of component scales; the
+affected outputs are the quadratic terms' \emph{evaluations} (not the
+gains, which are covariance-independent by \cref{prop:riccati}, and
+not the risk curve, which is estimated on the summed deviation
+directly).\\
+\textbf{Monitor.}  Cross-correlation of the baseline estimator's drift
+with event occurrence.
+\end{simplification}
+
+\subsection{Shape of the risk curve}\label{sec:risk-shape}
+
+\begin{proposition}[Monotonicity, convexity, interiority]
+\label{prop:risk-shape}
+$R_i$ is nonincreasing.  Consider the composed level objective over
+the fleet level $\ell$,
+$J(\ell) = \alpha\ell + \tfrac{c}{N}\sum_i R_i(\ell - b_i)$ (with
+fixed baseline offsets $b_i$), on the domain
+$\ell \ge \ell_{\mathrm{floor}} \coloneqq \max_i b_i$ (below the
+floor, some receiver's margin is negative --- permanent underrun ---
+and such levels are excluded from the program).  Then:
+\begin{enumerate}[label=(\roman*)]
+  \item The bulk and pause contributions to each $R_i$ are convex
+    under S8's density conditions; the compounding contribution is
+    \emph{not convex in general} (see the proof), so convexity of the
+    composed $J$ on the operating range is an \emph{assumption},
+    carried by S8 and monitored, not a theorem.
+  \item $J$ is continuous and $J(\ell) \ge \alpha\ell \to \infty$, so
+    a minimizer exists on $[\ell_{\mathrm{floor}}, \infty)$ regardless
+    of convexity; because the program is one-dimensional over a
+    measured function, the minimizer is computable by direct scan of
+    $\hat J$, and \cref{eq:foc} characterizes it only where $J$ is
+    smooth and locally convex.
+  \item Under S8 (including composed convexity), the minimizer is
+    unique and is interior --- so that the first-order condition of
+    \cref{prop:foc} applies --- exactly when
+    \begin{equation}\label{eq:interior-condition}
+      \alpha \;<\; \frac{c}{N}\sum_{i=1}^N
+        g_i\bigl(\ell_{\mathrm{floor}} - b_i\bigr)\,,
+    \end{equation}
+    the risk relief available at the floor (each receiver evaluated
+    at its own floor margin $\ell_{\mathrm{floor}} - b_i \ge 0$);
+    otherwise the optimum sits at the floor --- a corner worth an
+    alarm, not a controller.
+\end{enumerate}
+\end{proposition}
+
+\begin{proof}
+Monotonicity: exceedance functions are nonincreasing.  Convexity of
+the bulk part where the density is decreasing; of the pause part
+because $\dd^2/\dd\mu^2\,\E\pos{H-\mu} = f_H(\mu) \ge 0$ by
+differentiating $\E\pos{H-\mu} = \int_\mu^\infty \bar F(h)\dd h$
+twice.  The compounding part fails the same argument: its threshold
+for the follower is $t(\mu) = \mu - c_g\min(H,\mu)$ with
+$c_g = \pos{1 - g/\rho}$ the residual-depression fraction, so
+$t'(\mu)$ jumps \emph{up} by $c_g$ at $\mu = H$ (from $1-c_g$ to
+$1$), the slope $-t'(\mu)\bar F_{H'}(t(\mu))$ jumps down, and mixing
+over the predecessor height contributes the negative (concave) piece
+$-c_g\,\bar F_{H'}\bigl((1-c_g)\mu\bigr) f_H(\mu)$ to $J''$ alongside
+the positive $t'^2 f_{H'}$ pieces.  The concave piece scales with
+$c_g$: it is largest exactly in the clustered, slow-recovery regime.
+Hence (i).  Existence by continuity and coercivity upward; the scan
+statement is immediate from one-dimensionality.  Interiority:
+$J'(\ell_{\mathrm{floor}}^+) = \alpha -
+\tfrac{c}{N}\sum_i g_i(\ell_{\mathrm{floor}} - b_i)$; under composed
+convexity, \cref{eq:interior-condition} makes this negative and the
+minimizer interior; if it fails, $J' \ge 0$ on the whole domain and
+the floor is optimal.
+\end{proof}
+
+%% =============================================================================
+\section{Composition: the Two Solvers and the Free Direction}
+\label{sec:composition}
+
+The quadratic machinery (\cref{sec:quadratic}) and the risk evaluation
+(\cref{sec:indicator}) use disjoint mathematics and disjoint statistics.
+This section shows why they compose without conflict, derives the level
+program, and states the decomposition theorem.
+
+\subsection{The free direction}\label{sec:free-direction}
+
+Collect three facts already proven:
+\begin{enumerate}[label=(F\arabic*)]
+  \item The synchronization cost has eigenvalue zero on the mean
+    coordinate (\cref{prop:modes}): moving all receivers together is
+    free for synchronization.
+  \item The warp cost charges only the \emph{rate of change} of warp:
+    a held latency level costs nothing, and a steady glide of the level
+    costs nothing either --- during a constant-rate glide the
+    commanded mean warp is constant, so its contribution to
+    $\dot{\bar u}$ is zero.  Only changes of the glide rate are
+    charged, through $\dot{\bar u} = -\ddot\ell$ up to two residuals
+    --- drift-rate variation and the common-mode part of the fast
+    loops' disturbance response --- both priced by S13 below
+    (\cref{prop:loss-coords,prop:dynamics-decouple}).
+  \item After S2--S6, the indicator term depends on the policy only
+    through the slowly varying margin levels
+    $\mu_i(t) = \ell_i(t) - \hat B_i(t)$
+    (\cref{sec:risk-evaluation}).
+\end{enumerate}
+The quadratic part of the loss is thus \emph{degenerate} exactly on the
+coordinate --- the static mean level --- through which the indicator
+term acts.  The two solvers meet on orthogonal coordinates: the
+quadratic solver fills every mode and every frequency except the mean
+coordinate's zero-frequency component; the risk program occupies
+precisely that component.  The loss was shaped for this: the linear
+latency term (no quadratic pull toward any preset level), the
+variance-only synchronization term (no absolute reference), and the
+derivative-only warp cost (no charge for holding an offset) each keep
+the static mean level free of quadratic forces.
+
+\setcounter{simplification}{12}%
+\begin{simplification}[S13: common-mode loop response priced
+separately]\label{simp:commonmode}
+\textbf{Statement.}  The decomposition below identifies the mean
+coordinate's warp cost with the level path's roughness,
+$\dot{\bar u} = -\ddot\ell$.  Two residual contributions to
+$\dot{\bar u}$ are set aside and accounted here: (a) the
+\emph{common-mode disturbance response} --- every receiver's fast
+loop responds to its own measured disturbance, and the fleet-average
+of those responses (shared wander, shared measurement noise,
+co-occurring pauses; \cref{as:cross}) is mean warp motion belonging
+to neither the difference modes nor the level path; (b) \emph{drift-rate
+variation}, $\dot{\bar w} \ne 0$.\\
+\textbf{Role.}  Keeps $J_{\mathrm{diff}} + J_{\mathrm{mean}}$
+additive in \cref{thm:structure}.\\
+\textbf{Defect.}  (a) is computable from the transfer functions of
+\cref{prop:transfer} evaluated on the \emph{common} component's
+spectrum: the omitted cost is
+$r\int |s\,U/Y(j\omega)|^2\, S_{\mathrm{common}}(\omega)\,
+\dd\omega/2\pi$ for the relevant backend input, the same integral
+that prices per-receiver roughness, just fed the common spectrum ---
+the ``warp/sync leakage'' entries of \cref{tab:ledger} name exactly
+this mechanism.  Under the latency measurement on disciplined hosts
+the common driver is small; under the margin measurement co-occurring
+pauses make it the dominant residual.  (b) is bounded by clock
+physics: quartz frequency drift is parts in $10^{10}$ per second
+(thermal); taking a two-orders-of-magnitude margin,
+$|\dot w_i| \le 10^{-8}\,\mathrm{s}^{-1}$, the contribution
+$r\,\E[\dot{\bar w}^2] \le 10^{-16}\,r$ is negligible at any sane
+$r$.\\
+\textbf{Monitor.}  Cross-receiver coherence of the loop innovations
+(estimates $S_{\mathrm{common}}$); the fleet-average warp-rate
+spectrum against the level layer's commanded $\ddot\ell$.
+\end{simplification}
+
+\subsection{The decomposition theorem}\label{sec:decomposition-theorem}
+
+\begin{definition}[Layered policies]\label{def:layered}
+A policy is \emph{layered} when it consists of: a level path
+$\ell(t)$, adapted to the sender's information and broadcast to the
+receivers; and per-receiver fast laws that act causally on the
+receiver's own measured error relative to the broadcast level.  Write
+$\mathcal{P}_{\mathrm{L}}$ for this class.  A layered policy is
+specified by the pair $(\pi_{\mathrm{fast}}, \ell(\cdot))$.
+\end{definition}
+
+\begin{theorem}[Structure of the optimal controller]\label{thm:structure}
+Under S1--S13:
+\begin{enumerate}[label=(\alph*)]
+  \item[(0)] \textbf{Decomposition.}  For every layered policy
+    $\pi = (\pi_{\mathrm{fast}}, \ell(\cdot)) \in
+    \mathcal{P}_{\mathrm{L}}$,
+    \[
+      J(\pi)
+      \;=\;
+      \underbrace{J_{\mathrm{diff}}\bigl(\pi_{\mathrm{fast}}\bigr)}_{
+        \text{difference modes}}
+      \;+\;
+      \underbrace{J_{\mathrm{mean}}\bigl(\ell(\cdot)\bigr)}_{
+        \text{level path}}
+      \;+\; \Delta_{\mathrm{S}}(\pi),
+    \]
+    where the evaluation error $\Delta_{\mathrm{S}}(\pi)$, in
+    loss-rate units ($\mathsf{u}/\mathrm{s}$), is bounded by the sum
+    of the S1--S13 defects, each converted to an absolute loss-rate contribution
+    (relative defects multiply the term they qualify; the register of
+    \cref{sec:register} lists both forms).
+\end{enumerate}
+Within $\mathcal{P}_{\mathrm{L}}$:
+\begin{enumerate}[label=(\roman*)]
+  \item $J_{\mathrm{diff}}$ depends only on the fast-layer feedback
+    and is minimized, independently of the level path and within the
+    policy class of S10, by the law $v = \kappa^2 e - \sqrt2\kappa u$
+    of \cref{prop:riccati} applied in each difference coordinate
+    (equivalently: by every receiver running that law against the
+    common broadcast level), with $\kappa = (q/r)^{1/4}$.  Under exact
+    error observation the class restriction is vacuous and the law is
+    optimal among all causal laws
+    (\cref{prop:riccati,rem:gaussian-role}).
+  \item $J_{\mathrm{mean}}$ depends only on the level path:
+    \begin{equation}\label{eq:mean-objective}
+      J_{\mathrm{mean}}
+      = \E\left[\,\alpha\,\ell
+        \;+\; \frac{c}{N}\sum_{i=1}^N R_i\bigl(\ell - \hat B_i\bigr)
+        \;+\; r\,\Bigl(\frac{\dd^2\ell}{\dd t^2}\Bigr)^{\!2}\,\right]
+    \end{equation}
+    under the stationary law of the belief process, and is minimized
+    \emph{within the hold-and-glide subclass} --- hold $\ell$ at the
+    argmin of the static program (\cref{sec:level-program});
+    rest-to-rest glides per \cref{sec:glide} when the argmin moves ---
+    up to the S6 and S7 defects.  Anticipatory level policies, which
+    act on forecasts of the belief rather than its current value (the
+    direction endorsed by \cref{prop:ascent}), are not derived here.
+\end{enumerate}
+\end{theorem}
+
+\begin{proof}
+Assembly of proven pieces.  By \cref{prop:loss-coords} the pointwise
+loss splits into mean terms, difference terms, and the indicator.  By
+\cref{prop:dynamics-decouple} the coordinates have decoupled dynamics,
+so a policy may be specified per coordinate; conversely any policy's
+loss evaluates coordinate-wise on the split terms.  The difference
+part is the stationary expectation (S1) of the quadratic cost
+\cref{eq:lqr-setup} per coordinate, minimized by \cref{prop:riccati}
+within the policy class of S10; the minimizing gains do not depend on
+the disturbance covariances, so the same law is optimal in every
+difference coordinate regardless of cross-receiver correlation.  The
+indicator, after S2 (additive evaluation), S3--S4 (no fast-policy
+dependence), S5 (compounding closed over the gap law) and S6 (levels
+static on episode timescales), equals
+$\tfrac{c}{N}\sum_i R_i(\mu_i)$ with $R_i$ from
+\cref{prop:risk-evaluation} --- a function of the level path alone.
+The remaining mean-coordinate quadratic cost is
+$r\,\E[\dot{\bar u}^2]$; on level glides
+$\dot{\bar u} = -\ddot\ell$ up to the two residuals of S13
+(drift-rate variation and the common-mode disturbance response), so
+its stationary cost is the third term of \cref{eq:mean-objective}
+plus S13's registered contribution (S6 separates the timescales so no
+cross-frequency terms survive).  The per-receiver level tilts are set
+to zero by S11 (\cref{sec:tilt}); every dropped term is one of the
+S-defects, collected in $\Delta_{\mathrm{S}}$.
+\end{proof}
+
+\begin{remark}[The optimality gap of the layered class --- an
+assembled claim, not a theorem]\label{rem:gap-claim}
+We also claim: the best layered policy is within the same defect
+budget of the best causal policy.  The reasoning: the mechanisms an
+unrestricted policy could exploit beyond the layered class are the
+ones the simplifications discard, and each S-item bounds its
+mechanism's worth (S3: in-event control; S10: filtering and nonlinear
+response to the measurement; S11: per-receiver levels; S13:
+coordinated common-mode response; S7: belief-coupled control).  This
+is an \emph{assembled} bound --- each piece rigorous under its own
+stated conditions, summed --- and the completeness of the mechanism
+list is an engineering judgment, not a proven exhaustion of policy
+space.  It sits outside the theorem for exactly that reason.
+\end{remark}
+
+
+\subsection{The level program}\label{sec:level-program}
+
+\begin{proposition}[Operating point]\label{prop:foc}
+The static part of \cref{eq:mean-objective} is minimized at the level
+$\ell^*$ solving
+\begin{equation}\label{eq:foc}
+  \frac{c}{N}\sum_{i=1}^{N} g_i\bigl(\ell^* - \hat B_i\bigr)
+  \;=\; \alpha
+  \qquad\Longleftrightarrow\qquad
+  \frac1N\sum_{i=1}^{N} g_i(\mu_i^*) \;=\; \frac{\alpha}{c}\,,
+\end{equation}
+with $g_i$ the occupation density (\cref{def:occupation}); under S8
+and the interiority condition \cref{eq:interior-condition} the
+minimizer exists, is unique, and satisfies \cref{eq:foc}
+(\cref{prop:risk-shape}).  Only the ratio $\alpha/c$ enters: the operating point balances the summed
+occupation density of the deviation at the margin against the price
+ratio of latency to underrun.  Dimensional check: $[\alpha/c] =
+\mathrm{s}^{-1} = [g_i]$ (\cref{rem:units}).
+\end{proposition}
+
+\begin{proof}
+Differentiate $\alpha\ell + \tfrac{c}{N}\sum_i R_i(\ell - \hat B_i)$
+in $\ell$ and use $R_i' = -g_i$; convexity (\cref{prop:risk-shape})
+makes the stationary point the minimum.
+\end{proof}
+
+\begin{remark}[The target has emerged]\label{rem:emergence}
+No reference latency appears anywhere in
+\cref{sec:model,sec:process,sec:loss}.  The quantity $\ell^*$ of
+\cref{eq:foc} is produced by the optimization: it is a function of the
+estimated baseline levels and risk curves --- that is, of the
+controller's belief state --- and it moves when the belief moves.  The
+``latency target'' of the implementation is thus a \emph{dynamic state
+variable of the controller}, with dynamics inherited from the
+estimators through the argmin map, rate-limited by \cref{sec:glide}.
+This is the promised answer to the question the problem statement left
+open: a reference \emph{may} arise in the solution, and it does ---
+as internal state, not as input.
+\end{remark}
+
+\subsection{Per-receiver tilts}\label{sec:tilt}
+
+Allowing each receiver its own level $\ell_i$ turns the static program
+into
+$\min_{\ell_1,\dots,\ell_N} \alpha\bar\ell
++ \tfrac{q}{N}\sum_i(\ell_i-\bar\ell)^2
++ \tfrac{c}{N}\sum_i R_i(\ell_i - \hat B_i)$.
+
+\begin{proposition}[Optimal tilts]\label{prop:tilt}
+The stationary conditions are, for each $i$,
+\[
+  \frac{\alpha}{N} + \frac{2q}{N}\,(\ell_i - \bar\ell)
+  \;=\; \frac{c}{N}\, g_i(\mu_i),
+\]
+whose average over $i$ recovers \cref{eq:foc}, and whose centered part
+gives
+\begin{equation}\label{eq:tilt}
+  \ell_i - \bar\ell
+  \;=\;
+  \frac{c\,\bigl[g_i(\mu_i) - \tfrac1N\sum_j g_j(\mu_j)\bigr]}{2q}\,.
+\end{equation}
+Each receiver is displaced by its \emph{excess} risk pressure relative
+to the fleet average, divided by twice the synchronization stiffness.
+\end{proposition}
+
+\begin{proof}
+Differentiate in $\ell_i$:
+$\partial_{\ell_i}\bigl[\tfrac{q}{N}\sum_j(\ell_j-\bar\ell)^2\bigr]
+= \tfrac{2q}{N}(\ell_i-\bar\ell)$ (the cross terms cancel because
+$\sum_j(\ell_j-\bar\ell)$ is invariant to $\ell_i$ shifts through
+$\bar\ell$; expanding,
+$\partial_{\ell_i}\sum_j(\ell_j-\bar\ell)^2
+= 2(\ell_i-\bar\ell)(1-\tfrac1N)
+- \tfrac2N\sum_{j\ne i}(\ell_j-\bar\ell)
+= 2(\ell_i-\bar\ell)$).  The latency term contributes $\alpha/N$ and
+the risk term $-\tfrac{c}{N}g_i$.  Averaging the conditions eliminates
+the centered term; subtracting the average isolates \cref{eq:tilt}.
+\end{proof}
+
+\setcounter{simplification}{10}%
+\begin{simplification}[S11: tilts set to zero]\label{simp:tilt}
+\textbf{Statement.}  The broadcast level is common:
+$\ell_i \equiv \ell^*$.\\
+\textbf{Role.}  One number to distribute; receivers need no
+per-receiver risk data.\\
+\textbf{Defect.}  By \cref{eq:tilt} the forfeited displacement is of
+order $c\,\Delta g/(2q)$ with $\Delta g$ the cross-receiver spread of
+risk pressure; at the operating point $c\,g_i \sim \alpha$, so the
+tilt scale is $\alpha/(2q)$ --- with any synchronization weight strong
+enough to hold sub-millisecond skew, microseconds.  The forfeited loss
+is quadratic in the tilt: with every tilt at its scale,
+$\tfrac{q}{N}\sum_i(\text{tilt}_i)^2 \sim \alpha^2/(4q)$, negligible
+against every other defect.\\
+\textbf{Monitor.}  The spread of estimated $c\,g_i(\mu_i)$ across
+receivers, reported next to $\alpha$.
+\end{simplification}
+
+\subsection{Moving the level: glides and asymmetry}\label{sec:glide}
+
+The argmin $\ell^*(\hat\theta)$ moves when the belief moves.  Moving
+the fleet level at rate $\gamma$ means every receiver warps by
+$\gamma$: the glide is executed by the existing fast loops tracking the
+moving broadcast and is bounded by $|\gamma| \le u_{\max}$.  Under the
+loss, a \emph{steady} glide is free --- the warp term charges
+$\dot{\bar u}^2 = \ddot\ell^{\,2}$, and a constant-rate glide has
+$\ddot\ell = 0$.  What a level move costs is therefore: the
+time-integral of the latency overhang (descents) or of the excess risk
+(ascents), plus the roughness of \emph{changing} the glide rate.  The
+descent problem has a closed-form solution.
+
+\begin{proposition}[Optimal descent]\label{prop:descent}
+Suppose the belief lowers the argmin by $\Delta$: the current level
+sits $\Delta$ above the target.  Write the level relative to the
+target, $\phi(t) \coloneqq \ell(t) - \ell^*$, and consider rest-to-rest
+descents: $\phi(0)=\Delta$, $\dot\phi(0)=0$, $\phi(T)=0$,
+$\dot\phi(T)=0$, with the duration $T$ free, subject to no undershoot
+($\phi \ge 0$; below the target the risk term rules, so overshoot
+credit is not available).  The cost of a descent path is
+\begin{equation}\label{eq:descent-cost-functional}
+  C[\phi] \;=\; \int_0^T \Bigl[\,\alpha\,\phi(t)
+    + r\,\ddot\phi(t)^2\,\Bigr]\dd t
+\end{equation}
+(excess latency plus warp roughness; risk never enters because
+$\phi \ge 0$ keeps the margin at or above its target value throughout,
+and $R_i$ is nonincreasing).  The optimal descent is the quartic arc
+\begin{equation}\label{eq:descent-arc}
+  \phi(t) \;=\; \Delta\,\Bigl(1 - \tfrac{t}{T^*}\Bigr)^{\!3}
+    \Bigl(1 + \tfrac{3t}{T^*}\Bigr),
+  \qquad
+  \boxed{\;T^* \;=\; 2\sqrt3\,\Bigl(\frac{r\,\Delta}{\alpha}
+    \Bigr)^{\!1/4}\;}
+\end{equation}
+with monotone level, peak descent rate and total cost
+\begin{equation}\label{eq:descent-numbers}
+  \gamma_{\mathrm{pk}}
+  \;=\; \frac{8\sqrt3}{27}\,\Delta^{3/4}
+    \Bigl(\frac{\alpha}{r}\Bigr)^{\!1/4}
+  \quad\text{at } t = T^*/3,
+  \qquad
+  C^* \;=\; \frac{16\sqrt3}{15}\,
+    \Delta^{5/4}\,\alpha^{3/4}\,r^{1/4},
+\end{equation}
+the cost splitting $3{:}1$ between latency overhang and warp
+roughness.  This holds when $\gamma_{\mathrm{pk}} \le u_{\max}$, i.e.,
+for $\Delta \le \Delta_{\mathrm{sat}} \coloneqq
+\bigl(27 u_{\max}/(8\sqrt3)\bigr)^{4/3} (r/\alpha)^{1/3}$; the
+saturated case follows the proposition.
+\end{proposition}
+
+\begin{proof}
+\emph{Euler--Lagrange.}  The integrand
+$F(\phi, \ddot\phi) = \alpha\phi + r\ddot\phi^2$ has
+$\partial F/\partial\phi = \alpha$,
+$\partial F/\partial\dot\phi = 0$,
+$\partial F/\partial\ddot\phi = 2r\ddot\phi$.  For a second-order
+Lagrangian with $\phi$ and $\dot\phi$ fixed at both ends, the
+Euler--Lagrange equation is
+$\partial_\phi F - \tfrac{\dd}{\dd t}\partial_{\dot\phi}F
++ \tfrac{\dd^2}{\dd t^2}\partial_{\ddot\phi}F = 0$, i.e.,
+$\alpha + 2r\,\phi^{(4)} = 0$: constant fourth derivative
+$\phi^{(4)} = -a$ with $a \coloneqq \alpha/(2r)$.
+
+\emph{The quartic family.}  Integrating and imposing
+$\phi(0)=\Delta$, $\dot\phi(0)=0$, $\phi(T)=0$, $\dot\phi(T)=0$:
+\[
+  \phi(t) = -\frac{a t^4}{24} + \frac{c_3 t^3}{6}
+    + \frac{c_2 t^2}{2} + \Delta,
+  \qquad
+  c_3 = \frac{aT}{2} + \frac{12\Delta}{T^3},
+  \qquad
+  c_2 = -\frac{aT^2}{12} - \frac{6\Delta}{T^2}.
+\]
+For each fixed $T$ the functional $C[\phi]$ is strictly convex in
+$\phi$ (a positive quadratic form in $\ddot\phi$ plus a linear
+term), so the Euler--Lagrange solution is the unique global minimizer
+among all paths with these boundary values --- comparing family
+members across $T$ therefore compares true per-$T$ optima.
+Substituting and integrating termwise gives the cost of the family
+member with duration $T$:
+\begin{equation}\label{eq:descent-cost-T}
+  C(T) \;=\; \frac{12\,\Delta^2 r}{T^3}
+    \;+\; \frac{\alpha\,\Delta\,T}{2}
+    \;-\; \frac{\alpha^2\,T^5}{2880\,r}.
+\end{equation}
+
+\emph{No interior minimum; the boundary of admissibility.}
+Differentiate and substitute $x = T^4$:
+$C'(T) = \tfrac{\alpha\Delta}{2} - \tfrac{36\Delta^2 r}{x}
+- \tfrac{\alpha^2 x}{576 r}$.
+As a function of $x > 0$ this is concave with maximum at
+$x = 144\,\Delta r/\alpha$ (set the derivative
+$36\Delta^2 r/x^2 - \alpha^2/(576r)$ to zero), where its value is
+$\tfrac{\alpha\Delta}{2} - \tfrac{\alpha\Delta}{4}
+- \tfrac{\alpha\Delta}{4} = 0$.  Hence $C'(T) \le 0$ for all $T$,
+with equality exactly at $T^4 = 144\,\Delta r/\alpha$, i.e., at
+$T = T^*$ of \cref{eq:descent-arc}: the cost \emph{decreases} in $T$
+everywhere else.  The minimizer must therefore sit at the largest
+admissible $T$.
+
+\emph{Admissibility ends at $T^*$.}  Factor the velocity:
+$\dot\phi(t) = -\tfrac{a}{6}\,t\,(t - T)(t - t_1)$ with
+$t_1 = \tfrac{T}{2} + \tfrac{36\Delta}{a T^3}$ (the cubic
+$\dot\phi$ has roots at $0$ and $T$ by construction; the product and
+sum of the quadratic factor's roots give $t_1$).  Now
+$t_1 \ge T \iff 72\Delta \ge aT^4 \iff T \le T^*$.  For
+$T \le T^*$: on $(0, T)$ the factors give
+$t > 0$, $(t{-}T) < 0$, $(t{-}t_1) < 0$, so $\dot\phi < 0$: the
+descent is monotone and $\phi \ge 0$ holds.  For $T > T^*$:
+$t_1 < T$, so $\dot\phi > 0$ on $(t_1, T)$; with $\phi(T) = 0$ this
+means $\phi < 0$ just before $T$ --- the interior path undershoots
+and is inadmissible.  One admissible alternative remains at long
+horizons: touch $\phi = 0$ with $\dot\phi = 0$ at some $T' < T$ and
+rest there.  Resting at the target costs nothing, so such a path is
+exactly a descent of duration $T'$; admissibility forces
+$T' \le T^*$, and $C$ decreasing on $(0, T^*]$ gives
+$C(T') \ge C(T^*)$.  Hence the constrained optimum is exactly
+$T = T^*$.
+
+\emph{Values at $T^*$.}  At $T = T^*$, $t_1 = T^*$ and
+$\dot\phi = -\tfrac{a}{6}\,t\,(t - T^*)^2$: the arrival is
+tangential.  Integrating gives the closed form
+\cref{eq:descent-arc} (check: $\phi(0)=\Delta$, and expanding
+$\Delta(1 - t/T^*)^3(1 + 3t/T^*)$ reproduces the quartic with
+$\phi^{(4)} = -24\Delta\cdot 3/T^{*4} = -72\Delta/T^{*4} = -a$ by
+$T^{*4} = 144\Delta r/\alpha$ and $a = \alpha/2r$~$\checkmark$).
+The peak rate: $\tfrac{\dd}{\dd t}[t(t-T^*)^2] = (t-T^*)(3t-T^*)$
+vanishes at $t = T^*/3$, where
+$\dot\phi = -\tfrac{a}{6}\cdot\tfrac{T^*}{3}\cdot
+\tfrac{4T^{*2}}{9} = -\tfrac{2aT^{*3}}{81}$; substituting $a$ and
+$T^*$ gives $\gamma_{\mathrm{pk}}$ of \cref{eq:descent-numbers}.
+The cost: substituting $T^*$ into \cref{eq:descent-cost-T} gives
+$C^* = \tfrac{16\sqrt3}{15}\Delta^{5/4}\alpha^{3/4}r^{1/4}$, of
+which the latency part is $\tfrac{4\sqrt3}{5}(\cdot)$ and the
+roughness part $\tfrac{4\sqrt3}{15}(\cdot)$: ratio $3{:}1$.
+\end{proof}
+
+\begin{remark}[Saturated descents]\label{rem:descent-saturated}
+For $\Delta > \Delta_{\mathrm{sat}}$ the arc's peak rate would exceed
+the clamp.  The constrained-optimal profile then cruises at
+$u_{\max}$ with entry and exit segments; we do not derive the exact
+constrained path (a bang--singular problem) and instead use: cruise at
+$u_{\max}$, enter and exit along the unconstrained arcs of effective
+size $\Delta_{\mathrm{sat}}$.  Its cost is
+$\alpha\Delta^2/(2u_{\max})\,(1 + o(1))$ with the corner cost bounded
+by $2\,C^*(\Delta_{\mathrm{sat}})$ --- an explicitly declared
+approximation, conservative in the loss.
+\end{remark}
+
+\begin{proposition}[Ascent is always at the actuator bound]
+\label{prop:ascent}
+Suppose the belief raises the argmin by $\Delta$ (the current level
+sits $\Delta$ too low), and call the deficit \emph{material} when its
+integrated excess risk at any sub-saturated ascent exceeds the corner
+cost $2\,C^*(\Delta_{\mathrm{sat}})$.  During the ascent the system
+runs excess risk
+$\tfrac{c}{N}\sum_i\bigl[R_i(\mu_i(t)) - R_i(\mu_i^*)\bigr] \ge 0$,
+which decreases in the ascent rate for every $t$.  Under the loss, the
+warp term charges the ascent nothing while the rate is held constant
+($\ddot\ell = 0$); it charges only the entry and exit of the glide, a
+bounded one-time roughness cost that does not grow with $\Delta$.
+Hence, for a material deficit, the optimal ascent runs at
+$\gamma = u_{\max}$ until the level is restored, up to the bounded
+corner cost.  For small deficits near the optimum --- where the risk
+gradient is near zero --- the soft mirror of the descent arc
+(\cref{prop:descent} with the roles of the endpoint costs exchanged)
+is the better move; saturating the clamp is only warranted when the
+risk at stake dominates the corners.  The full ascent takes $\Delta/u_{\max}$ --- $2$\,s per
+$10$\,ms of level --- and this delay is irreducible: no admissible
+policy closes a level deficit faster.  Consequently the level layer
+must be \emph{predictive} where possible: a regime change detected
+early (a leading indicator of rising $\lambda_i$ or $\sigma_i$) buys
+margin at the only speed the actuator allows.
+\end{proposition}
+
+\begin{proof}
+Risk excess decreases pointwise in the rate because a faster ascent
+reaches every intermediate level sooner and $R_i$ is nonincreasing in
+the level.  The corner cost is bounded exactly as in
+\cref{rem:descent-saturated}: entry and exit along unconstrained arcs
+cost at most $2\,C^*(\Delta_{\mathrm{sat}})$, independent of
+$\Delta$.  The time bound is the actuator constraint
+$|\dot\ell| = |\bar u - \text{drift}| \le u_{\max} + O(10^{-4})$ from
+\cref{prop:latency-dynamics}.
+\end{proof}
+
+\begin{remark}[What asymmetry is and is not derived]
+\label{rem:asymmetry}
+Three asymmetries between raising and lowering the level follow from
+the loss; one popular claim does not, and we state both sides.
+
+\emph{Derived.}  (1) \emph{Stakes}: above the optimum the objective's
+slope is $\alpha - \tfrac{c}{N}\sum_i g_i$, which is zero at the
+optimum and \emph{bounded by} $\alpha$, approaching $\alpha$ only well
+above it; below the optimum the slope reaches the occupation-density
+scale, which can exceed $\alpha$ by orders of magnitude.  Sitting high
+is cheap; sitting low is not.
+(2) \emph{Rates}: an ascent with a material deficit always saturates
+the clamp (\cref{prop:ascent}); a descent follows the unconstrained
+arc of \cref{prop:descent} whenever its peak rate
+$\tfrac{8\sqrt3}{27}\Delta^{3/4}(\alpha/r)^{1/4}$ is below the clamp
+--- and this is slower for cheaper latency, $T^* \propto
+\alpha^{-1/4}$.  The rate asymmetry is real but conditional: it comes
+from the latency--roughness tradeoff, not from any penalty on steady
+glides, and for large $\Delta$ both directions saturate.
+(3) \emph{Decisions under uncertainty} (S7): delaying a descent by
+one second costs at most $\alpha\Delta$; delaying an ascent costs the
+integrated excess risk, which can be far larger.  With a noisy
+argmin estimate the optimal trigger is therefore asymmetric: raise on
+weak evidence, lower only on statistically confident evidence.
+
+\emph{Not derived.}  The loss contains no penalty on a steady glide
+and no rate limit other than the clamp; any policy that descends
+slower than \cref{prop:descent} prescribes is conservatism imported
+from outside this loss, not a consequence of it.
+\end{remark}
+
+\subsection{What remains of the general problem}\label{sec:residual}
+
+Three couplings survive the decomposition, each with a bounded loss:
+in-event control (S3's defect --- grows with warp authority);
+estimation--control coupling (S7's defect --- shrinks with data); and
+the distributed-information gap: the theorem's fast layer needs only
+the broadcast level, which tolerates the message delay because the
+level is slow (S6), but a formally optimal distributed policy for the
+transient case (one receiver disturbed, the fleet informed late) is
+not derived here.  Team-decision problems of this kind have no general
+closed form (imported: the counterexample literature on distributed
+linear-quadratic control); the timescale argument bounds what the gap
+can cost, and \cref{sec:limits} records it as open.
+
+%% =============================================================================
+\section{The Resulting Controller}\label{sec:controller}
+
+\Cref{thm:structure} licenses a controller with four layers.  Nothing in
+the fast layer is new relative to the deployed system; the level layer
+and its broadcast are the new mechanism.
+
+\subsection{Layer 1: estimators (the belief state)}
+\label{sec:layer-estimators}
+
+Per receiver, maintained by the telemetry already in production:
+\begin{itemize}
+  \item Baseline $\hat B_i$: controller-matched exponential mean of the
+    delay level.  Its time constant matches the fast loop so that
+    ``deviation'' means exactly the part of the delay the loop does not
+    absorb.
+  \item Deviation scale $\hat\sigma_i$ and the deviation histogram:
+    estimates the bulk exceedance term of \cref{eq:risk-evaluation};
+    frozen during detected episodes so the bulk estimate is not
+    contaminated by the tail it gates.
+  \item Episode meter: rate $\hat\lambda_i$, height histogram
+    $\hat F_i$, gap histogram $\hat G_i$, per-episode recovery
+    $\hat\rho$.  Every episode's height is measured whether or not it
+    underruns, so the risk curve is identified at all levels without
+    deliberately lowering the margin (S7).
+  \item Drain validator: windowed margin minimum --- the model-free
+    check of the composed $\hat R_i$ (monitor of S2, S5).
+\end{itemize}
+
+\subsection{Layer 2: the level program}\label{sec:layer-level}
+
+At a slow cadence (seconds), the sender-side computes:
+\begin{enumerate}
+  \item Compose $\hat R_i(\mu)$ from \cref{eq:risk-evaluation} using
+    layer-1 estimates; overlay the raw deviation-histogram exceedance
+    where it has support (S2 monitor).
+  \item Solve \cref{eq:foc} for $\ell^*$ by bracketing (S8): find the
+    level where the fleet-mean occupation density crosses $\alpha/c$.
+  \item Rate-limit the output: descend along the quartic arc of
+    \cref{prop:descent} (duration $2\sqrt3\,(r\Delta/\alpha)^{1/4}$,
+    peak rate capped at $u_{\max}$ per
+    \cref{rem:descent-saturated}); ascend at $u_{\max}$
+    (\cref{prop:ascent}), triggered eagerly on regime-change
+    detection (S1 monitor); gate descents on estimation confidence
+    (S7, \cref{rem:asymmetry}).
+\end{enumerate}
+The single number $\ell^*(t)$, plus per-receiver baseline offsets where
+backends differ, is broadcast to receivers.  This is the only new
+protocol surface the theory requires.
+
+\subsection{Layer 3: fast loops (unchanged)}\label{sec:layer-fast}
+
+Each receiver tracks the broadcast level with the law of
+\cref{prop:riccati} plus integral action \cref{eq:pid}:
+\[
+  v = \kappa^2 e + K_0 \xi - \sqrt2\,\kappa\, u,
+  \qquad \kappa = (q/r)^{1/4},\ \zeta = 1/\sqrt2,
+\]
+with anti-windup at the warp clamp.  This is the deployed second-order
+controller; \cref{rem:deployed} maps the constants.  By
+\cref{thm:structure}(i) it is the optimum for its layer --- no redesign
+is licensed by the joint problem.
+
+\subsection{Layer 4: event hygiene}\label{sec:layer-hygiene}
+
+During detected episodes: freeze the bulk estimators (layer 1), do not
+attempt heroic warp responses (S3: the authority is not there), record
+the episode's height, gap, and recovery for the risk curve.  After the
+episode: let the redelivery burst restore the margin where the
+mechanism provides it; where recovery is warp-limited, the elevated
+compound risk during $\rho$ is already priced by
+\cref{eq:risk-evaluation}.
+
+\subsection{Self-monitoring}\label{sec:self-monitoring}
+
+Each simplification carries a live validity ratio
+(\cref{tab:register}).  The controller can therefore report not only
+its decisions but the current size of the modeling error behind them.
+Two monitors deserve emphasis: the S3 ratio
+$u_{\max}\mu\,g(\mu)/R(\mu)$, because the entire decomposition stands
+on it, and the drain validator, because it checks the composed risk
+curve against reality without using the model.
+
+%% =============================================================================
+\section{Register of Simplifications}\label{sec:register}
+
+\begin{table}[h!]
+\centering
+\caption{All simplifications, their defects, and their monitors.
+Reference numbers use $u_{\max}=5\times10^{-3}$, margins
+$5$--$100$\,ms, $\sigma_i$ up to $1$\,ms wired, heights up to $1$\,s.}
+\label{tab:register}
+\small
+\begin{tabular}{@{}p{0.34\textwidth}p{0.34\textwidth}p{0.24\textwidth}@{}}
+\toprule
+Simplification & Defect (definition and size) & Monitor \\
+\midrule
+S1 stationary ergodic regime
+& loss during regime adaptation: switch rate $\times$ adaptation time
+  $\times$ excess loss
+& short- vs long-window estimator disagreement \\
+\addlinespace
+S2 additive risk evaluation
+& threshold smearing $O(\sigma_i/\text{height spread})$; duty cycle
+  $O(\lambda\E H)$; zero-drain ramp (burst drain time)
+& composed $\hat R$ vs raw deviation histogram \\
+\addlinespace
+S3 fast layer cannot move the indicator
+& absolute $\le \alpha\,u_{\max}\mu$ ($\le u_{\max}$ of the latency
+  term); relative to the risk term: $u_{\max}\mu/x_0$, up to
+  $\sim\!5\%$ for the bulk part
+& ratio $u_{\max}\mu\,g(\mu)/R(\mu)$; anchor $\alpha u_{\max}\mu$ \\
+\addlinespace
+S4 frozen margin during episode
+& subsumed in S3
+& same \\
+\addlinespace
+S5 one-step compounding
+& chain terms $O((\lambda^{\mathrm{loc}}\rho)^2)$; gap--height
+  covariance
+& episodes within $\rho$ of predecessor; drain validator \\
+\addlinespace
+S6 two-timescale separation
+& glide-concurrent episodes: margin error up to $\gamma H \le 5$\,ms
+& episodes stamped with glide rate \\
+\addlinespace
+S7 certainty equivalence
+& $\tfrac12 J''(\mu^*)\Var[\hat\mu^*]$; shrinks as $1/n$ with event
+  count, inflated by clustering
+& confidence band on $\hat\mu^*$ \\
+\addlinespace
+S8 smooth, convex risk curve
+& subgradient bracket at atoms; compounding can break convexity in
+  the clustered regime --- program falls back to a 1-D scan, losing
+  only the first-order characterization
+& $\hat g$ near operating point; second difference of scanned
+  $\hat J$ \\
+\addlinespace
+S9 component independence (2nd-order accounting)
+& dropped cross-covariances; affects evaluations, not gains, not
+  $\hat R$
+& baseline-drift vs event cross-correlation \\
+\addlinespace
+S10 full-information law on the raw measurement
+& backend-dependent: measurement-noise passthrough
+  $\int|\kappa^2/\mathcal{D}|^2 S_n$ (latency meas.); forfeited
+  nonlinear gain vs pause leakage (margin meas.)
+& innovation histogram and spectrum; $S_n$ per host \\
+\addlinespace
+S11 zero tilts
+& forfeited loss $\sim \alpha^2/4q$; tilt scale $\alpha/2q$
+  (microseconds)
+& spread of $c\,g_i(\mu_i)$ vs $\alpha$ \\
+\addlinespace
+S12 white-noise surrogate in the fast-loop design
+& evaluation error
+  $\int|H|^2(S_{\mathrm{true}}-\sigma_w^2)\,\dd\omega/2\pi$; the DC
+  gain defect is repaired by integral action
+& innovation-spectrum flatness within $\kappa$ \\
+\addlinespace
+S13 common-mode loop response priced separately
+& omitted mean-warp roughness: the per-receiver roughness integral
+  fed the common spectrum; drift-rate part $\le 10^{-16}r$
+& cross-receiver coherence of loop innovations; fleet-average
+  warp-rate spectrum vs commanded $\ddot\ell$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%% =============================================================================
+\section{Limits of the Result}\label{sec:limits}
+
+Stated as openly as the simplifications.
+
+\begin{enumerate}[label=(L\arabic*)]
+  \item \textbf{Warp authority.}  The decomposition stands on S3.  If
+    $u_{\max}$ were raised by an order of magnitude or more, in-event
+    control would become worthwhile, the indicator would couple to the
+    fast layer, and the correct formulation is a free-boundary dynamic
+    program that this document does not solve.  The S3 monitor
+    quantifies the approach to that regime.
+  \item \textbf{Risk aversion.}  The loss charges mean silence time.
+    A listener may care more about the worst minute than the average
+    second.  A variance-sensitive or quantile objective re-imports the
+    temporal law (clustering) into the \emph{objective} --- see
+    \cref{rem:division} --- and the level program stops being a
+    one-dimensional convex program in a single scalar.
+  \item \textbf{Session supervision.}  Aborts and restarts
+    (\cref{rem:no-restart}) are outside the loss.  In particular,
+    implementations in which playout stalls instead of inserting
+    silence violate \cref{conv:silence}: a stall converts an episode
+    into a schedule slip whose recovery is warp-limited
+    (\cref{as:recovery}(b)) and whose transient can trip supervision
+    thresholds.  The convention--implementation gap is a real
+    difference, not a modeling detail, and must be closed on the
+    implementation side or modeled explicitly.
+  \item \textbf{Distributed transients.}  The optimal reaction of the
+    undisturbed majority to one disturbed receiver, under message
+    delay, is not derived (\cref{sec:residual}).  The forfeited value
+    is bounded by the disturbance rate times the reconvergence
+    transient.
+  \item \textbf{Lost content.}  Episodes whose content is lost rather
+    than delivered late cause silence that no margin prevents; that
+    channel belongs to forward error correction, not to latency
+    control, and is additive to the loss studied here.
+  \item \textbf{Adversarial or trending regimes.}  S1 covers slow
+    regime switching with re-estimation.  Systematically trending
+    networks (a slow decay toward failure) are tracked by the belief
+    but never anticipated beyond the leading indicators of
+    \cref{prop:ascent}.
+\end{enumerate}
+
+%% =============================================================================
+\appendix
+
+\section{Imported Results}\label{sec:app-imported}
+
+\subsection{Campbell--Mecke formula}\label{sec:app-campbell}
+For a stationary marked point process on $\R$ with intensity $\lambda$
+and Palm mark distribution $F$, and any nonnegative measurable function
+$f$ of the mark,
+\[
+  \E\Bigl[\sum_{k:\,T_k\in[0,T]} f(H_k)\Bigr] \;=\; \lambda\,T
+  \int f\,\dd F .
+\]
+Reference: Daley and Vere-Jones, \emph{An Introduction to the Theory of
+Point Processes}, Vol.~II, Ch.~13 (Palm theory); the ergodic form used
+in \cref{prop:campbell} is the corresponding ratio limit theorem.  Note
+what is \emph{not} required: no Poisson assumption, no independence
+between points --- stationarity suffices, which is why clustering does
+not move the mean in \cref{eq:campbell}.
+
+\subsection{Rice's formula}\label{sec:app-rice}
+For a stationary, almost surely continuously differentiable Gaussian
+process $X$ with $\Var[X] = \sigma_0^2$ and $\Var[\dot X] = \sigma_1^2$,
+the mean rate of upcrossings of level $z$ is
+\[
+  N^+(z) \;=\; \frac{\sigma_1}{2\pi\,\sigma_0}\,
+  \exp\!\Bigl(-\frac{z^2}{2\sigma_0^2}\Bigr).
+\]
+Reference: Rice (1944); Leadbetter, Lindgren, Rootz\'en,
+\emph{Extremes and Related Properties of Random Sequences and
+Processes}, Ch.~7.  The same reference (Ch.~7, sojourn results) covers
+the ergodic occupation--crossing ratio used alongside it: for a
+stationary process with finitely many level crossings per unit time,
+the mean duration of a visit above $z$ equals the stationary
+exceedance probability divided by the upcrossing rate.  The sojourn
+computation of \cref{prop:sojourn} combines exactly these two
+imports.
+
+\subsection{Gaussian tail independence}\label{sec:app-tail-independence}
+\begin{lemma}\label{lem:tail-independence}
+Let $(Z_1, Z_2)$ be bivariate standard normal with correlation
+$\varsigma < 1$.  Then
+$\lim_{z\to\infty} \Prob(Z_2 > z \mid Z_1 > z) = 0$.
+\end{lemma}
+\begin{proof}
+For $\varsigma \le 0$, Slepian's comparison inequality (imported;
+Slepian 1962) gives
+$\Prob(Z_1 > z,\, Z_2 > z) \le \Prob(Z_1>z)\,\Prob(Z_2>z)$, so the
+conditional probability is at most the unconditional one,
+$\bar\Phi(z) \to 0$; assume therefore $0 < \varsigma < 1$.
+Condition on $Z_1 = x$:
+$Z_2 \sim \mathcal N(\varsigma x,\, 1-\varsigma^2)$, so
+$\Prob(Z_2 > z \mid Z_1 = x)
+= \bar\Phi\bigl((z-\varsigma x)/\sqrt{1-\varsigma^2}\bigr)$.
+Split the conditioning event at $x = z(1+\epsilon)$ for a fixed
+$\epsilon > 0$.  For $x \le z(1+\epsilon)$:
+$(z - \varsigma x)/\sqrt{1-\varsigma^2}
+\ge z\,(1 - \varsigma(1+\epsilon))/\sqrt{1-\varsigma^2} \to \infty$
+when $\epsilon < (1-\varsigma)/\varsigma$, so the conditional
+probability tends
+to $0$ uniformly on this range.  For the range $x > z(1+\epsilon)$,
+its share of the conditioning mass is
+$\bar\Phi(z(1+\epsilon))/\bar\Phi(z) \to 0$ by the Mills ratio
+$\bar\Phi(t) = \varphi(t)/t\,(1+O(t^{-2}))$, since
+$\varphi(z(1+\epsilon))/\varphi(z) = e^{-z^2(2\epsilon+\epsilon^2)/2}
+\to 0$.  Both contributions vanish.
+\end{proof}
+Reference: Sibuya (1960).  This is the mechanism behind
+\cref{prop:sojourn}: a Gaussian-copula process cannot hold an extreme
+level; a pause can and does.
+
+\subsection{Other imports}\label{sec:app-other}
+The verification theorem for average-cost linear-quadratic control
+(\cref{prop:riccati}): Fleming and Soner, \emph{Controlled Markov
+Processes and Viscosity Solutions}, or any standard treatment of ergodic
+LQG.  The spectral representation of stationary processes
+(\cref{prop:psd}): Wiener--Khinchin/Bochner, standard.  The
+distributed-control counterexamples referenced in \cref{sec:residual}:
+Witsenhausen (1968).
+
+\section{Notation}\label{sec:notation}
+
+\begin{table}[h!]
+\centering
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+Symbol & Meaning & Units & Defined \\
+\midrule
+$s$ & stream position & s (audio) & \cref{def:stream} \\
+$\tau(s)$ & emission time of $s$ & s & \cref{def:stream} \\
+$a_i(s)$ & arrival time at receiver $i$ & s & \cref{def:arrival} \\
+$D_i(s)$ & delivery delay & s & \cref{def:arrival} \\
+$p_i(s),\ s_i(t)$ & playout schedule and its inverse & s &
+  \cref{def:schedule} \\
+$u_i,\ u_{\max}$ & warp; warp clamp ($5\times10^{-3}$) & --- &
+  \cref{def:schedule} \\
+$v_i = \dot u_i$ & warp rate (control input) & $\mathrm{s}^{-1}$ &
+  \cref{eq:lqr-setup} \\
+$L_i,\ \Lbar,\ \Ltil{i}$ & latency; fleet mean; deviation & s &
+  \cref{def:latency,def:coordinates} \\
+$w_i$ & clock drift disturbance & --- & \cref{prop:latency-dynamics} \\
+$m_i$ & margin & s & \cref{def:margin} \\
+$B_i,\ \varepsilon_i,\ P_i$ & baseline, diffusion, pauses & s &
+  \cref{as:decomposition} \\
+$\sigma_i$ & diffusion scale & s & \cref{as:diffusion} \\
+$(T_{i,k}, H_{i,k})$ & episode start, height & s & \cref{as:pause} \\
+$\lambda_i,\ F_i,\ G_i$ & episode rate; height law; gap law &
+  $\mathrm{s}^{-1}$, ---, --- & \cref{as:pause} \\
+$\rho_{i,k},\ \chi_{i,k}$ & recovery time; consumed margin & s &
+  \cref{def:recovery,eq:depression} \\
+$x_i$ & deviation $\varepsilon_i + P_i$ & s & \cref{eq:margin-decomp} \\
+$\alpha, q, c, r$ & loss weights &
+  see \cref{rem:units} & \cref{def:loss} \\
+$\kappa = (q/r)^{1/4}$ & fast-loop bandwidth & $\mathrm{s}^{-1}$ &
+  \cref{prop:riccati} \\
+$\ell,\ \ell^*$ & latency level; its optimum & s &
+  \cref{sec:level-program} \\
+$\mu_i$ & margin level (backend-conditional) & s &
+  \cref{eq:margin-level} \\
+$R_i(\mu),\ g_i(\mu)$ & risk curve; occupation density & ---,
+  $\mathrm{s}^{-1}$ & \cref{eq:R-def,def:occupation} \\
+$\gamma$ & level glide rate & --- & \cref{sec:glide} \\
+$\mathcal{D}(s)$ (Laplace) & $s^2+\sqrt2\kappa s+\kappa^2$ & --- &
+  \cref{prop:riccati} \\
+$\sigma_w^2$ & white-noise intensity (wander $+$ measurement) &
+  $\mathrm{s}^2/\mathrm{s}$ & \cref{sec:lqr} \\
+$\Lambda(t,\omega)$ & pointwise loss rate & $\mathsf{u}/\mathrm{s}$ &
+  \cref{eq:pointwise-loss} \\
+$e, u, v$ & fast-loop error, warp, input (one coordinate) &
+  s, ---, $\mathrm{s}^{-1}$ & \cref{eq:lqr-setup} \\
+$\xi,\ K_0,\ T_I$ & integral state, gain, settling time &
+  $\mathrm{s}^2$, $\mathrm{s}^{-3}$, s & \cref{eq:pid} \\
+$\delta(g)$ & residual margin depression at gap $g$ & s &
+  \cref{eq:depression} \\
+$\Pi$ & centering matrix $I - \mathbf{1}\mathbf{1}^\top/N$ & --- &
+  \cref{prop:modes} \\
+$\bar\beta$ & baseline slope bound & --- & \cref{as:baseline} \\
+$x_0, C$ & diffusion tail scale and constant & s, --- &
+  \cref{as:diffusion} \\
+$\Delta,\ \Delta_{\mathrm{sat}}$ & level change; saturation
+  threshold & s & \cref{prop:descent} \\
+$T^*,\ \gamma_{\mathrm{pk}},\ C^*$ & descent duration, peak rate,
+  cost & s, ---, $\mathsf{u}$ & \cref{prop:descent} \\
+$J,\ J_{\mathrm{diff}},\ J_{\mathrm{mean}}$ & loss and its
+  decomposition parts & $\mathsf{u}/\mathrm{s}$ &
+  \cref{def:loss,thm:structure} \\
+$\tau_{\hat B}$ & baseline filter time constant & s &
+  \cref{sec:indicator-exact} \\
+$n_i,\ N_i$ & measurement error (time domain, transform) & s &
+  \cref{def:meas-e2e,conv:transforms} \\
+$\tilde D$ & transform of the deviation $x_i$ & s &
+  \cref{conv:transforms} \\
+$\hat\theta$ & belief state (estimator outputs) & --- &
+  \cref{def:belief} \\
+$e_i^{\mathrm{loop}}$ & fast-loop tracking error & s &
+  \cref{eq:margin-decomp} \\
+$b_i$ & baseline offsets in the level objective & s &
+  \cref{prop:risk-shape} \\
+$\lambda_i^{\mathrm{loc}}$ & local (in-cluster) episode rate &
+  $\mathrm{s}^{-1}$ & \cref{simp:compound} \\
+$\bar\Phi,\ \varphi$ & standard normal tail, density & --- & standard \\
+$\varrho$ & average-cost constant & $\mathsf{u}/\mathrm{s}$ &
+  \cref{prop:riccati} \\
+$\varsigma$ & correlation (tail-independence lemma) & --- &
+  \cref{lem:tail-independence} \\
+$\Delta_{\mathrm{S}}(\pi)$ & evaluation error of the decomposition &
+  $\mathsf{u}/\mathrm{s}$ & \cref{thm:structure} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}
