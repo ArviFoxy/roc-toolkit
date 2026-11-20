@@ -9,6 +9,10 @@
 #include "prometheus.h"
 
 #ifdef ROC_TARGET_PROMETHEUS
+#include "roc_metrics/exported_histograms.h"
+
+#include <limits>
+#include <prometheus/collectable.h>
 #include <prometheus/exposer.h>
 #include <prometheus/registry.h>
 #endif // ROC_TARGET_PROMETHEUS
@@ -73,6 +77,69 @@ std::string scope_metric_name(const MetricsScope& scope, const char* suffix) {
     return name;
 }
 
+namespace {
+
+// Serves the histograms created by exported_timing_histogram(). Series of
+// the same name become one family, as the text format requires.
+class AtomicHistogramCollector : public prometheus::Collectable {
+public:
+    std::vector<prometheus::MetricFamily> Collect() const override {
+        std::vector<prometheus::MetricFamily> families;
+
+        const std::vector<ExportedHistogram> exported = exported_histograms();
+
+        for (size_t n = 0; n < exported.size(); n++) {
+            const ExportedHistogram& src = exported[n];
+
+            prometheus::MetricFamily* family = NULL;
+            for (size_t f = 0; f < families.size(); f++) {
+                if (families[f].name == src.name) {
+                    family = &families[f];
+                }
+            }
+            if (!family) {
+                families.push_back(prometheus::MetricFamily());
+                family = &families.back();
+                family->name = src.name;
+                family->help = src.help;
+                family->type = prometheus::MetricType::Histogram;
+            }
+
+            prometheus::ClientMetric metric;
+            for (std::map<std::string, std::string>::const_iterator it =
+                     src.labels.begin();
+                 it != src.labels.end(); ++it) {
+                prometheus::ClientMetric::Label label;
+                label.name = it->first;
+                label.value = it->second;
+                metric.label.push_back(label);
+            }
+
+            const AtomicHistogram& hist = *src.histogram;
+            uint64_t cumulative = 0;
+            for (size_t i = 0; i <= hist.num_bounds(); i++) {
+                cumulative += hist.bucket_count(i);
+                prometheus::ClientMetric::Bucket bucket;
+                bucket.cumulative_count = cumulative;
+                bucket.upper_bound = i < hist.num_bounds()
+                    ? (double)hist.bound(i) / 1e9
+                    : std::numeric_limits<double>::infinity();
+                metric.histogram.bucket.push_back(bucket);
+            }
+            // The count is what the buckets add up to, so it equals the
+            // last bucket even while observations arrive.
+            metric.histogram.sample_count = cumulative;
+            metric.histogram.sample_sum = (double)hist.sum() / 1e9;
+
+            family->metric.push_back(metric);
+        }
+
+        return families;
+    }
+};
+
+} // namespace
+
 class PrometheusExporter::Impl {
 public:
     Impl(const PrometheusConfig& config) {
@@ -89,6 +156,9 @@ public:
 
             // Register the global registry to the exposer
             exposer_->RegisterCollectable(prometheus_registry());
+
+            atomic_histograms_ = std::make_shared<AtomicHistogramCollector>();
+            exposer_->RegisterCollectable(atomic_histograms_);
         }
     }
 
@@ -100,6 +170,9 @@ public:
     }
 
 private:
+    // Declared before the exposer so that it outlives it: the exposer holds
+    // only a weak reference.
+    std::shared_ptr<AtomicHistogramCollector> atomic_histograms_;
     std::unique_ptr<prometheus::Exposer> exposer_;
 };
 
