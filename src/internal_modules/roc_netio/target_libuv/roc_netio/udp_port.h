@@ -20,6 +20,7 @@
 #include "roc_core/list_node.h"
 #include "roc_core/mpsc_queue.h"
 #include "roc_core/rate_limiter.h"
+#include "roc_metrics/atomic_histogram.h"
 #include "roc_netio/basic_port.h"
 #include "roc_netio/iclose_handler.h"
 #include "roc_packet/iwriter.h"
@@ -160,6 +161,8 @@ private:
     core::AtomicInt<int32_t> sent_packets_;
     core::AtomicInt<int32_t> sent_packets_blk_;
     core::AtomicInt<int32_t> received_packets_;
+
+    metrics::AtomicHistogram& sent_packet_age_hist_;
 };
 
 } // namespace netio

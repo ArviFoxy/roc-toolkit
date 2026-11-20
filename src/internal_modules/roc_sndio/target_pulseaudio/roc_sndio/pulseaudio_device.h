@@ -21,6 +21,7 @@
 #include "roc_core/rate_limiter.h"
 #include "roc_core/stddefs.h"
 #include "roc_core/time.h"
+#include "roc_metrics/atomic_histogram.h"
 #include "roc_packet/units.h"
 #include "roc_sndio/io_config.h"
 #include "roc_sndio/isink.h"
@@ -155,6 +156,9 @@ private:
     ssize_t read_stream_(uint8_t* data, size_t size);
     ssize_t wait_stream_();
 
+    static void stream_underflow_cb_(pa_stream* stream, void* userdata);
+    static void stream_overflow_cb_(pa_stream* stream, void* userdata);
+
     bool get_latency_(core::nanoseconds_t& latency) const;
     void report_latency_();
 
@@ -200,10 +204,28 @@ private:
 
     status::StatusCode init_status_;
 
+    // Timing of the hand-off between the sound server and this device. The
+    // two timestamps are read and written only with the mainloop lock held:
+    // by the stream callbacks, which libpulse runs under that lock, and by
+    // wait_stream_(), whose callers hold it.
+    //
+    // When the sound server last signalled that data can be read (source)
+    // or is wanted (sink); zero before the first signal of a stream.
+    core::nanoseconds_t last_request_ns_;
+    // When the oldest signal arrived that the thread in wait_stream_() has
+    // not woken up for yet; zero when there is none.
+    core::nanoseconds_t pending_request_ns_;
+
+    metrics::AtomicHistogram* request_interval_hist_;
+    metrics::AtomicHistogram* request_size_hist_;
+    metrics::AtomicHistogram* service_delay_hist_;
+
 #ifdef ROC_TARGET_PROMETHEUS
     prometheus::Gauge* io_latency_gauge_;
     prometheus::Gauge* io_target_latency_gauge_;
     prometheus::Counter* io_stream_restarts_counter_;
+    prometheus::Counter* io_underflows_counter_;
+    prometheus::Counter* io_overflows_counter_;
 #endif // ROC_TARGET_PROMETHEUS
 };
 

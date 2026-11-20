@@ -159,7 +159,12 @@ PulseaudioDevice::PulseaudioDevice(audio::FrameFactory& frame_factory,
     , timer_(NULL)
     , timer_deadline_ns_(0)
     , rate_limiter_(ReportInterval, 1)
-    , init_status_(status::NoStatus) {
+    , init_status_(status::NoStatus)
+    , last_request_ns_(0)
+    , pending_request_ns_(0)
+    , request_interval_hist_(NULL)
+    , request_size_hist_(NULL)
+    , service_delay_hist_(NULL) {
     if (io_config.sample_spec.has_format()
         && io_config.sample_spec.format() != audio::Format_Pcm) {
         roc_log(LogError,
@@ -203,6 +208,47 @@ PulseaudioDevice::PulseaudioDevice(audio::FrameFactory& frame_factory,
 
     if (device && strcmp(device, "default") != 0) {
         device_ = device;
+    }
+
+    // Created before the mainloop starts, because the stream callbacks that
+    // use them run as soon as the stream is connected.
+    {
+        std::map<std::string, std::string> labels;
+        labels["device"] = device_type_ == DeviceType_Sink ? "sink" : "source";
+
+        request_interval_hist_ = &metrics::exported_timing_histogram(
+            "roc_io_request_interval_seconds",
+            "Time between two signals from the sound server that data can be read"
+            " (source) or is wanted (sink)",
+            labels);
+
+        request_size_hist_ = &metrics::exported_timing_histogram(
+            "roc_io_request_size_seconds",
+            "Duration of the audio that can be read (source) or is wanted (sink)"
+            " at such a signal",
+            labels);
+
+        service_delay_hist_ = &metrics::exported_timing_histogram(
+            "roc_io_service_delay_seconds",
+            "Time from such a signal until the thread that was waiting for it"
+            " runs again",
+            labels);
+
+#ifdef ROC_TARGET_PROMETHEUS
+        io_underflows_counter_ =
+            &prometheus::BuildCounter()
+                 .Name("roc_io_underflows_total")
+                 .Help("Times the sound server found the playback buffer empty")
+                 .Register(*metrics::prometheus_registry())
+                 .Add(labels);
+
+        io_overflows_counter_ =
+            &prometheus::BuildCounter()
+                 .Name("roc_io_overflows_total")
+                 .Help("Times the sound server reported a buffer overflow")
+                 .Register(*metrics::prometheus_registry())
+                 .Add(labels);
+#endif // ROC_TARGET_PROMETHEUS
     }
 
     if ((init_status_ = start_mainloop_()) != status::StatusOK) {
@@ -848,6 +894,13 @@ bool PulseaudioDevice::open_stream_() {
         | PA_STREAM_INTERPOLATE_TIMING);
 
     pa_stream_set_state_callback(stream_, stream_state_cb_, this);
+    pa_stream_set_underflow_callback(stream_, stream_underflow_cb_, this);
+    pa_stream_set_overflow_callback(stream_, stream_overflow_cb_, this);
+
+    // A new stream: the time since the previous stream's last signal is not
+    // an interval of this one.
+    last_request_ns_ = 0;
+    pending_request_ns_ = 0;
 
     switch (device_type_) {
     case DeviceType_Sink: {
@@ -986,6 +1039,7 @@ ssize_t PulseaudioDevice::read_stream_(uint8_t* data, size_t size) {
 
 ssize_t PulseaudioDevice::wait_stream_() {
     bool timer_expired = false;
+    bool waited = false;
 
     for (;;) {
         const size_t avail_size = device_type_ == DeviceType_Sink
@@ -1023,12 +1077,23 @@ ssize_t PulseaudioDevice::wait_stream_() {
         }
 
         if (avail_size != 0) {
+            // Only a thread that was asleep says something about how long
+            // waking up takes; one that found data at once did not wait.
+            if (waited && pending_request_ns_ != 0) {
+                service_delay_hist_->observe(core::timestamp(core::ClockMonotonic)
+                                             - pending_request_ns_);
+            }
+            pending_request_ns_ = 0;
             return (ssize_t)avail_size;
         }
+
+        // Nothing is available, so no earlier signal is still unanswered.
+        pending_request_ns_ = 0;
 
         start_timer_(timeout_ns_);
 
         pa_threaded_mainloop_wait(mainloop_);
+        waited = true;
 
         timer_expired = stop_timer_();
     }
@@ -1075,9 +1140,43 @@ void PulseaudioDevice::stream_request_cb_(pa_stream*, size_t length, void* userd
     roc_log(LogTrace, "pulseaudio %s: stream request callback",
             device_type_to_str(self.device_type_));
 
+    const core::nanoseconds_t now = core::timestamp(core::ClockMonotonic);
+
+    if (self.last_request_ns_ != 0) {
+        self.request_interval_hist_->observe(now - self.last_request_ns_);
+    }
+    self.last_request_ns_ = now;
+
+    self.request_size_hist_->observe(
+        (core::nanoseconds_t)pa_bytes_to_usec(length, &self.stream_spec_)
+        * core::Microsecond);
+
     if (length != 0) {
+        if (self.pending_request_ns_ == 0) {
+            self.pending_request_ns_ = now;
+        }
         pa_threaded_mainloop_signal(self.mainloop_, 0);
     }
+}
+
+void PulseaudioDevice::stream_underflow_cb_(pa_stream*, void* userdata) {
+    PulseaudioDevice& self = *(PulseaudioDevice*)userdata;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    self.io_underflows_counter_->Increment();
+#else
+    (void)self;
+#endif // ROC_TARGET_PROMETHEUS
+}
+
+void PulseaudioDevice::stream_overflow_cb_(pa_stream*, void* userdata) {
+    PulseaudioDevice& self = *(PulseaudioDevice*)userdata;
+
+#ifdef ROC_TARGET_PROMETHEUS
+    self.io_overflows_counter_->Increment();
+#else
+    (void)self;
+#endif // ROC_TARGET_PROMETHEUS
 }
 
 bool PulseaudioDevice::get_latency_(core::nanoseconds_t& result) const {

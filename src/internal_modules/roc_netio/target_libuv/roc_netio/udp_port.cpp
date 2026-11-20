@@ -43,7 +43,12 @@ UdpPort::UdpPort(const UdpConfig& config,
     , fd_()
     , packet_factory_(packet_factory)
     , inbound_writer_(NULL)
-    , rate_limiter_(PacketLogInterval, 1) {
+    , rate_limiter_(PacketLogInterval, 1)
+    , sent_packet_age_hist_(metrics::exported_timing_histogram(
+          "roc_net_sent_packet_age_seconds",
+          "Time from the capture of an audio packet's first sample until the packet"
+          " is handed to the network",
+          std::map<std::string, std::string>())) {
     BasicPort::update_descriptor();
 }
 
@@ -431,6 +436,16 @@ status::StatusCode UdpPort::write(const packet::PacketPtr& pp) {
 
     if (want_close_) {
         roc_panic("udp port: %s: attempt to use closed sender", descriptor());
+    }
+
+    // How old the audio is when it leaves. A sender that runs on time sends
+    // every packet at the same age; one that was held up sends them older.
+    // Repair and control packets carry no capture time and are skipped.
+    if (const packet::RTP* rtp = pp->rtp()) {
+        if (pp->has_flags(packet::Packet::FlagAudio) && rtp->capture_timestamp > 0) {
+            sent_packet_age_hist_.observe(core::timestamp(core::ClockUnix)
+                                          - rtp->capture_timestamp);
+        }
     }
 
     write_(pp);
